@@ -18,9 +18,11 @@ import importlib
 import logging
 import threading
 import time
+from contextlib import nullcontext
 from typing import Any, Protocol, runtime_checkable
 
-from kazma_core.spaces.scope import space_named_or_bound
+from kazma_core.spaces.row_work import door_hides, install_statements, row_statements
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record, spaces_enforced
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,28 @@ _REMOTE_VECTOR_LOCK = threading.Lock()
 #: removed underneath (the 2026-08-14 shared-database incident) is recreated.
 _PGVECTOR_TABLES_READY: set[tuple[str, str]] = set()
 _PGVECTOR_INDEX_WARNED: set[tuple[str, str]] = set()
+
+#: What a vector delete found (S4-01 H5, 0b review M1).
+_VECTOR_GONE = "gone"
+_VECTOR_KEPT = "kept under another space"
+_VECTOR_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
+#: The (id, why) a "not gone" was said for in this process: once each (0b
+#: review L1); a new reason for the same id is said again (delta review L-d).
+_VECTOR_KEPT_SAID: set[tuple[str, str]] = set()
+
+
+def _say_vector_kept(item_id: str, outcome: str) -> None:
+    """WARNING the first time an id is not gone for this reason, DEBUG after:
+    the forget journal retries it every pass."""
+    key = (item_id, outcome)
+    first = key not in _VECTOR_KEPT_SAID
+    if first:
+        if len(_VECTOR_KEPT_SAID) >= 10_000:
+            _VECTOR_KEPT_SAID.clear()
+        _VECTOR_KEPT_SAID.add(key)
+    logger.log(logging.WARNING if first else logging.DEBUG,
+               "[pgvector] the vector of %s is not known to be gone (%s); the forget journal retries it",
+               item_id, outcome)
 
 #: Read-only: the extension, whether the table exists or may be created,
 #: and the existing table's vector size (``atttypmod`` is the dimension for
@@ -182,6 +206,7 @@ __all__ = [
     "LocalSqliteVectorBackend",
     "get_backends_cfg",
     "get_vector_backend",
+    "pgvector_table",
     "vector_capability",
     "save_backends_cfg",
     "mask_backends_cfg",
@@ -675,11 +700,27 @@ class PgvectorBackend:
         self._dsn = dsn or ""
         # Auto-selected from the DSN rather than chosen (see vector_auto).
         self._auto = auto
-        self._table = "".join(c for c in (collection or "kazma_memory_vectors") if c.isalnum() or c == "_") or "kazma_memory_vectors"
+        self._table = _pgvector_table_name(collection)
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
+        self._kazmas_database: bool | None = None
 
     def _connect(self) -> Any:
+        if self._kazmas_database is None:
+            from kazma_core.db.availability import is_kazma_database
+
+            self._kazmas_database = is_kazma_database(self._dsn)
+        from kazma_core.memory.state_backend import _armed_door
+
+        held = _armed_door(self._kazmas_database)
+        if held is not None:
+            return held
+        if self._kazmas_database:
+            # Kazma's own database: which door it goes through is counted
+            # (Spaces S4-01 step 1, report mode; nothing is refused).
+            from kazma_core.db import space_doors
+
+            space_doors.checkout("pgvector")
         try:
             import psycopg
 
@@ -712,14 +753,17 @@ class PgvectorBackend:
             return hit[1]
         state, note = "unreachable", ""
         try:
-            conn = self._connect()
-            try:
-                cur = conn.cursor()
-                cur.execute(_PGVECTOR_STATE_SQL, (self._table, self._table))
-                installed, installable, may_create, table_dim, table_exists = cur.fetchone()
-                cur.close()
-            finally:
-                conn.close()
+            # The catalog, no row of any space (S4-01 review 41: unbound, it
+            # read as "unreachable" for every space).
+            with install_statements("a ping: whether this Postgres can hold vectors"):
+                conn = self._connect()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(_PGVECTOR_STATE_SQL, (self._table, self._table))
+                    installed, installable, may_create, table_dim, table_exists = cur.fetchone()
+                    cur.close()
+                finally:
+                    conn.close()
             if not installed and not installable:
                 state = "missing"
             elif table_exists and table_dim not in (None, -1) and int(table_dim) != self._dim:
@@ -754,8 +798,11 @@ class PgvectorBackend:
         """Forget that the table is ready: the next call re-creates what is gone."""
         _PGVECTOR_TABLES_READY.discard((self._dsn, self._table))
 
-    def _ensure_table(self, conn: Any) -> None:
-        """Extension, table and index — checked once per process per table.
+    def _ensure_table(self) -> None:
+        """Extension, table and index — checked once per process per table,
+        on a connection of their own (S4-01 review 23: on the caller's, up to
+        three commits came before the caller's statement, which then ran in a
+        transaction of its own, no space's).
 
         Each statement commits or rolls back on its own. In one transaction a
         refused ``CREATE EXTENSION`` (the role may not) or ``CREATE INDEX``
@@ -765,6 +812,14 @@ class PgvectorBackend:
         key = (self._dsn, self._table)
         if key in _PGVECTOR_TABLES_READY:
             return
+        with install_statements("the vector table, made once for every space"):
+            conn = self._connect()
+            try:
+                self._make_table(conn, key)
+            finally:
+                conn.close()
+
+    def _make_table(self, conn: Any, key: tuple[str, str]) -> None:
         from kazma_core.db.pg_schema import ensure_schema
 
         errors = _pg_driver_errors()
@@ -784,6 +839,7 @@ class PgvectorBackend:
                         "pgvector", self._dsn, "not_permitted", "CREATE EXTENSION was refused"
                     )
                     raise
+            # Named: the second lock keys pgvector's rule by its table (S4-01 M9).
             ensure_schema(cur, [
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._table} (
@@ -794,7 +850,7 @@ class PgvectorBackend:
                   meta JSONB DEFAULT '{{}}'::jsonb
                 )
                 """
-            ])
+            ], vector_table=self._table)
             conn.commit()
             try:
                 ensure_schema(cur, [
@@ -831,9 +887,9 @@ class PgvectorBackend:
         if not query_vec or not self._dsn or not self.available:
             return []
         try:
+            self._ensure_table()
             conn = self._connect()
             try:
-                self._ensure_table(conn)
                 cur = conn.cursor()
                 emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
                 kind_sql = ""
@@ -899,9 +955,9 @@ class PgvectorBackend:
         if not query_vec or not wanted or not self._dsn or not self.available:
             return {}
         try:
+            self._ensure_table()
             conn = self._connect()
             try:
-                self._ensure_table(conn)
                 cur = conn.cursor()
                 emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
                 kind_sql = ""
@@ -941,46 +997,62 @@ class PgvectorBackend:
         if not item_id or not vec or not self._dsn or not self.available:
             return False
         try:
-            from kazma_core.db.pg_helpers import json_dumps as _pg_json
-
-            conn = self._connect()
-            try:
-                self._ensure_table(conn)
-                cur = conn.cursor()
-                emb = "[" + ",".join(str(float(x)) for x in vec) + "]"
-                tier = (meta or {}).get("tier") or "episodic"
-                cur.execute(
-                    f"""
-                    INSERT INTO {self._table} (id, tenant_id, tier, embedding, meta)
-                    VALUES (%s, %s, %s, %s::vector, %s::jsonb)
-                    ON CONFLICT (id) DO UPDATE SET
-                      tenant_id = EXCLUDED.tenant_id,
-                      tier = EXCLUDED.tier,
-                      embedding = EXCLUDED.embedding,
-                      meta = EXCLUDED.meta
-                    """,
-                    (
-                        item_id,
-                        tenant_id,
-                        tier,
-                        emb,
-                        _pg_json(meta or {}),  # NUL-free (pg_helpers.strip_nul)
-                    ),
-                )
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            self._ensure_table()
+            # The vector of a row of *tenant_id*, in that space where Kazma
+            # writes it itself (S4-01 review 20: the turns' vectors, the text
+            # fill and the repair wrote them with nothing bound).
+            with row_statements(tenant_id):
+                return self._write_vector(item_id, vec, tenant_id, meta)
         except Exception:
             self._table_failed()
             logger.debug("[pgvector] upsert failed", exc_info=True)
             return False
 
+    def _write_vector(self, item_id: str, vec: list[float], tenant_id: str, meta: dict[str, Any] | None) -> bool:
+        from kazma_core.db.pg_helpers import json_dumps as _pg_json
+
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            emb = "[" + ",".join(str(float(x)) for x in vec) + "]"
+            tier = (meta or {}).get("tier") or "episodic"
+            cur.execute(
+                f"""
+                INSERT INTO {self._table} (id, tenant_id, tier, embedding, meta)
+                VALUES (%s, %s, %s, %s::vector, %s::jsonb)
+                ON CONFLICT (id) DO UPDATE SET
+                  tenant_id = EXCLUDED.tenant_id,
+                  tier = EXCLUDED.tier,
+                  embedding = EXCLUDED.embedding,
+                  meta = EXCLUDED.meta
+                """,
+                (
+                    item_id,
+                    tenant_id,
+                    tier,
+                    emb,
+                    _pg_json(meta or {}),  # NUL-free (pg_helpers.strip_nul)
+                ),
+            )
+            conn.commit()
+            cur.close()
+            return True
+        finally:
+            conn.close()
+
     def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
-        del tenant_id
+        """Delete the vector of *item_id*, of *tenant_id* (its row's own space:
+        its door, and once Spaces is enforced named in the statement, an
+        empty space the owner's; with Spaces off by id, as before: 0b review
+        L1). True when it is gone: deleted now, or none of that id is left.
+        Not gone -- False and a WARNING once per id, so the forget journal
+        retries it -- when a vector of that id is kept under another space,
+        or the door is a request's of another space, whose "nothing there"
+        says nothing once the lock is armed (0b review M1). S4-01 H5: the
+        tenant was dropped and "erased" answered whatever the statement found."""
         if not item_id or not self._dsn:
             return False
+        named = space_of_record(tenant_id) if tenant_id else ""
         state = self.probe()
         if state in _NO_VECTOR_TABLE_STATES:
             # No table can hold the vector, so it is gone: no statement is sent
@@ -991,24 +1063,44 @@ class PgvectorBackend:
         if state not in _USABLE_REMOTE_STATES and state != "dimension_mismatch":
             return False  # unreachable: the forget journal retries it
         try:
-            conn = self._connect()
-            try:
-                if state != "dimension_mismatch":
-                    # The table may not exist yet on a server where the
-                    # extension is installed but nothing has written. A table
-                    # of another size exists: the row is deleted from it as is.
-                    self._ensure_table(conn)
-                cur = conn.cursor()
-                cur.execute(f"DELETE FROM {self._table} WHERE id = %s", (item_id,))
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            if state != "dimension_mismatch":
+                # The table may not exist yet on a server where the
+                # extension is installed but nothing has written. A table
+                # of another size exists: the row is deleted from it as is.
+                self._ensure_table()
+            with row_statements(named) if named else nullcontext():
+                outcome = self._delete_vector(str(item_id), named if spaces_enforced() else "")
         except Exception:
             self._table_failed()
             logger.debug("[pgvector] delete failed", exc_info=True)
             return False
+        if outcome == _VECTOR_GONE:
+            return True
+        _say_vector_kept(str(item_id), outcome)
+        return False
+
+    def _delete_vector(self, item_id: str, space: str) -> str:
+        """Delete it: :data:`_VECTOR_GONE`, or why it is not known to be gone."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if space:
+                cur.execute(f"DELETE FROM {self._table} WHERE id = %s AND COALESCE(NULLIF(tenant_id, ''), "
+                            "'default') = %s RETURNING id", (item_id, space))
+            else:
+                cur.execute(f"DELETE FROM {self._table} WHERE id = %s RETURNING id", (item_id,))
+            outcome = _VECTOR_GONE
+            if not cur.fetchall():
+                if space and door_hides(space):
+                    outcome = _VECTOR_UNSEEN
+                else:
+                    cur.execute(f"SELECT 1 FROM {self._table} WHERE id = %s", (item_id,))
+                    outcome = _VECTOR_KEPT if cur.fetchone() is not None else _VECTOR_GONE
+            conn.commit()
+            cur.close()
+            return outcome
+        finally:
+            conn.close()
 
 
 class HybridVectorBackend:
@@ -1102,6 +1194,25 @@ class HybridVectorBackend:
             # the local store is the source of truth for recall.
             logger.debug("[hybrid] remote delete failed", exc_info=True)
         return bool(a or b)
+
+
+def _pgvector_table_name(collection: str | None) -> str:
+    """The table pgvector's vectors live in: the collection's name, letters,
+    digits and ``_`` only."""
+    default = "kazma_memory_vectors"
+    # Lower case, as Postgres folds the unquoted name it is made with (step 2
+    # review L1: the rules looked it up as written and found nothing).
+    return ("".join(c for c in (collection or default) if c.isalnum() or c == "_") or default).lower()
+
+
+def pgvector_table(cfg: dict[str, Any]) -> str | None:
+    """The table memory's vectors are kept in when they are on pgvector, under
+    the name the settings give it, else None. The second lock keys pgvector's
+    rule by it (``db/row_security``, Spaces S4-01 review M9)."""
+    vec = cfg.get("vector") or {}
+    if str(vec.get("provider") or "").lower() != "pgvector" or not str(vec.get("url") or "").strip():
+        return None
+    return _pgvector_table_name(str(vec.get("collection") or "kazma_memory"))
 
 
 def _embedding_dimension(vec: dict[str, Any]) -> int:

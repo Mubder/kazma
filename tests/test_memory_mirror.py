@@ -59,7 +59,7 @@ class _RecordingBackend:
             for bid, r in self.rows.items()
         }
 
-    def delete_belief(self, row_id: str) -> bool:
+    def delete_belief(self, row_id: str, *, tenant_id: str | None = None) -> bool:
         self.deleted.append(str(row_id))
         self.rows.pop(str(row_id), None)
         return True

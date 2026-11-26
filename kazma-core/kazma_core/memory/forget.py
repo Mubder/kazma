@@ -42,6 +42,7 @@ from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
 
 from kazma_core.memory.tenant_view import ledger_reach, narrowed_to, sees_every_tenant
+from kazma_core.spaces.row_work import install_statements
 from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 logger = logging.getLogger(__name__)
@@ -2380,9 +2381,15 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     return {"memories": forgotten, "facts": facts + days, "summaries": len(summaries)}
 
 
+@install_statements("forget convergence: every space's pending forgets; each row in its own space")
 def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     """The maintenance pass "forget convergence" (Memory audits M08/M10): the
-    journal's pending entries, the ledger over stored rows, remote deletes."""
+    journal's pending entries, the ledger over stored rows, remote deletes.
+
+    The install's work, whoever runs it (the sweep, a chat move that stays,
+    a memory restore): every space's pending forgets; the copies and vectors
+    it removes are each removed in their row's own space (``row_statements``,
+    S4-01 review 21)."""
     from kazma_core.memory import forget_journal
 
     own = conn is None

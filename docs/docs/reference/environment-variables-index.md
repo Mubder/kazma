@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**294** variables are read by the product code; **294** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**295** variables are read by the product code; **295** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -261,6 +261,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_SILENCE_WINDOW` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_SILERO_VAD` | `""` | `kazma_core.voice.mode` | yes |
 | `KAZMA_SKILLS_HOME` | (none) | `kazma_core.agent_skills.discovery` | yes |
+| `KAZMA_SPACE_DOOR_REPORT` | `"1"` | `kazma_core.db.space_doors` | yes |
 | `KAZMA_STRICT_TOOLS` | (none) | `kazma_core.agent.tool_schema` | yes |
 | `KAZMA_SUMMARIES_MAX_ENTRIES` | `"500"` | `kazma_core.summarizer` | yes |
 | `KAZMA_SWARM_MAX_ACTIVE` | (none) | `kazma_core.swarm.engine` | yes |

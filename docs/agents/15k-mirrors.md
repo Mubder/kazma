@@ -5,6 +5,63 @@ working-turn promotion never told it), 17 facts that never reached it, and 53
 rows only the mirror held -- test data written before the database shield and
 memories removed here since -- which recall's top-up could bring back into
 an answer ("User prefers dark mode").
+- **Memory's copies in Postgres say whose rows they are** (S4-01 step 0b,
+  2026-11-26, §70 (2)). A mirror write, a mirror delete and a vector write or
+  delete run in their row's own space where Kazma does the work itself (a
+  sweep, the forget convergence; `row_work.row_statements`), and in the bound
+  space (or the declared one) where a request or a turn does; a row of
+  another space there keeps that door and is said as `cross`, a finding of
+  its own in step 1's report (0b review M1, L3). The mirror's pushes are
+  grouped by space, one transaction each. **A delete says whether the row is
+  gone** (`delete_belief(id, tenant_id=)`, pgvector's `delete`): it runs in
+  the row's space; once Spaces is enforced it names the tenant
+  (`COALESCE(NULLIF(tenant_id, ''), 'default')`, decision M6), and with
+  Spaces off it is by id, as before (review L1). Gone is deleted now, or no
+  row of that id left. Not gone -- False, and a WARNING once per id, DEBUG
+  after -- is a row of that id kept under another space, or a door of
+  another space (`row_work.door_hides`: once armed its "nothing there" says
+  nothing). Then pgvector's forget journal keeps the vector queued. The
+  mirror's own callers (`macro_sleep`, graph-clear) do not retry; the outbox
+  does, in the sync's install door: `macro_sleep` deletes the fact locally,
+  so the `beliefs_mirror_ad` trigger queues a delete by id; graph-clear
+  invalidates it, so `beliefs_mirror_au` queues the row and the outbox pushes
+  it as a dead copy, which the mirror's reads skip (H5: "deleted" was
+  answered whatever the statement did, pgvector dropped its tenant, and a
+  forgotten fact could stay for good). Callers that know the fact's space pass it
+  (`unmirror_belief_to_state(id, tenant)`). The schema is made on a
+  connection of its own, as the install's (`_ensure()`, `_ensure_table()`):
+  on the caller's, its commits put the caller's statement in a second
+  transaction. The probes, the sync, the comparison, the drift summary, the
+  forget convergence and the passes that read every space's chats
+  (`run_rehydrate_pass`, `run_turn_reconcile_pass`, `run_text_fill_pass`: the
+  sweeps and the memory restore, a request, call them) are the install's
+  (`install_statements`). `fetch_*` take `strict` like `search_*`, and a space
+  refusal raises from all four and from `search_state_*` whatever *strict*
+  says (never "nothing found"). Recall reads the mirror so too: on the
+  Postgres-primary path every read is strict (a failed fetch is a failed
+  recall, said); the top-up of a thin local result fails the recall on a
+  refusal, and when the mirror is away (does not answer its ping, or is down
+  since start: a configured mirror's null backend, pinged again once per
+  ping window, `state_backend._state_backend_down`; it was one new backend
+  and ping per thin recall, 5.1 s each: `tests/test_mirror_down_since_start.py`)
+  keeps this install's
+  answer and says so in its own field, `RecallResult.mirror_unread`, never
+  `degraded` (0b delta review L-a, §44; recall-strict review M1, L1). A top-up
+  works on copies, so one that fails half way keeps none of its rows (L2).
+  The memory tool and the Memory page's probe and search say it (EN and AR,
+  beside the hits or "no hits"; "searched in full" only when meaning search
+  did not fall short too); the per-turn note and the quality page do not:
+  this install's memories were searched, and the outage is said where it
+  is. The TUI's memory panel and `GET /api/memory/graph/search` read
+  `search_with_status`, whose two values carry `degraded` only: they do not
+  say it yet. Gate: every reader of `degraded` and
+  of `mirror_unread` is declared, no writer puts the mirror into `degraded`,
+  and every Memory page banner site shows it, each with a planted control
+  (`tests/test_recall_mirror_reads.py`). Once the second lock is armed
+  (S4-01 step 3) the mirror's and pgvector's connections to Kazma's own
+  database are checkouts of the shared pool's door
+  (`state_backend._armed_door`): a space's statements run as `kazma_space`. Gate: `tests/test_memory_rows_in_their_space.py`
+  (each fails on the code before; a real Postgres keeps another space's fact).
 - **Every tier or text change reaches the mirror.** `remirror_episodes` is the
   one call after a local change (macro_sleep's moves, the working-turn
   promotion, forget, retire). Every `UPDATE episodes SET tier/text` in product

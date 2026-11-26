@@ -18,13 +18,19 @@ forms:
 * :func:`statements_of` -- only statements that name the row's space. A
   variable the database door alone reads: who is acting does not change, and
   nothing is read to enter it.
+* :func:`row_statements` -- a row Kazma keeps for itself (a mirror's copy, a
+  vector) is written in its own space where Kazma does the work itself, and
+  in the bound (or declared) space where a request or a turn does; a row of
+  another space there is said as ``cross``.
 * :func:`install_statements` -- the install's own statements: about every
   space, or about none. Each use is declared, with its reason, in
   ``tests/test_row_work_gates.py``.
 
-**Nothing decides by it yet**: the database door is step 1 (report mode),
-and the tests' stand-in for it is ``tests/_space_door.py``. A step that adds
-the door changes what asks :meth:`Door.now`, and no caller here.
+**Nothing decides by it yet.** Step 1 (report mode) asks :meth:`Door.now` at
+every checkout of Kazma's own database and records the answer
+(``db.space_doors``), with nothing refused; the tests' stand-in that asks at
+a store's own methods is ``tests/_space_door.py``. A step that arms the lock
+changes what the answer decides, and no caller here.
 
 With Spaces off :func:`work_of` binds no scope and no tenant and reads
 nothing, so an install runs exactly as before.
@@ -44,7 +50,7 @@ import functools
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.spaces.scope import (
@@ -62,10 +68,12 @@ from kazma_core.spaces.scope import (
 __all__ = [
     "Door",
     "SpaceErasing",
+    "door_hides",
     "install_loops",
     "install_statements",
     "resolve_act_of",
     "resolve_work_of",
+    "row_statements",
     "statements_of",
     "work_of",
     "work_of_async",
@@ -79,24 +87,34 @@ class Door:
     """Through which door a database statement goes.
 
     ``space`` is the space it is for; ``""`` with a ``reason`` is the
-    install's, and then the reason says why.
+    install's, and then the reason says why. ``how`` says what made it the
+    door: ``scope`` (the bound scope), ``row`` (:func:`statements_of`),
+    ``statements`` (:func:`install_statements`), ``work``
+    (``scope.install_work``), or ``cross``: a space's door kept for a row of
+    another space (:func:`row_statements`; once armed the row is hidden from
+    it, so the report counts it as a finding). Two doors to the same space
+    are equal however they were said.
     """
 
     space: str = ""
     reason: str = ""
+    how: str = field(default="", compare=False)
 
     @staticmethod
     def now() -> Door | None:
         """The door a statement goes through now: what was last said under
         what is bound now, else the bound scope's space, else the install's
-        inside ``scope.install_work``; None when nothing says it. No I/O."""
+        inside ``scope.install_work``; None when nothing says it. No I/O.
+
+        The database's door asks it at every checkout (``db.space_doors``:
+        report mode, S4-01 step 1)."""
         scope, work = current_scope(), install_work_reason()
         said = _said.get()
         if said is not None and said.scope is scope and said.work == work:
             return said.door
         if scope is not None:
-            return Door(space=scope.space_id)
-        return Door(reason=work) if work else None
+            return Door(space=scope.space_id, how="scope")
+        return Door(reason=work, how="work") if work else None
 
 
 @dataclass(frozen=True)
@@ -123,11 +141,51 @@ def statements_of(space: object) -> Iterator[None]:
     For the database alone. The bound scope, the asker and the tenant stay as
     they are, and nothing is read.
     """
-    token = _say(Door(space=space_of_record(space)))
+    token = _say(Door(space=space_of_record(space), how="row"))
     try:
         yield
     finally:
         _said.reset(token)
+
+
+@contextmanager
+def row_statements(space: object) -> Iterator[None]:
+    """The block's statements write or remove a row Kazma keeps for itself (a
+    memory's copy in the Postgres mirror, its vector) of *space*: they are
+    *space*'s where Kazma does the work itself -- nothing is bound, or the
+    install's door is said around it (a sweep, the forget convergence).
+
+    Where a space's door is said already -- the bound scope (a request, a
+    turn) or a declared :func:`statements_of` -- that door stays: a person's
+    own rows are written in their space, and a write into another space is
+    said where it starts (declared), never made by the store that writes it
+    (H6, review L3). A space's door that is not the row's is said as
+    ``cross`` (the same space, so nothing moves): once the lock is armed the
+    row is hidden from it, and step 1's report counts it as a finding of its
+    own (0b review M1). For the database alone, like :func:`statements_of`.
+    """
+    door = Door.now()
+    if door is None or not door.space:
+        with statements_of(space):
+            yield
+        return
+    if door.space == space_of_record(space) or door.how == "cross":
+        yield
+        return
+    token = _say(Door(space=door.space, how="cross"))
+    try:
+        yield
+    finally:
+        _said.reset(token)
+
+
+def door_hides(space: object) -> bool:
+    """Whether the statements now go through a space's door that is not
+    *space*'s own (``cross``: a request bound to another space). Once the lock
+    is armed such a door cannot see the row, so its "nothing there" says
+    nothing about the row (0b review M1). No I/O."""
+    door = Door.now()
+    return door is not None and bool(door.space) and door.space != space_of_record(space)
 
 
 @contextmanager
@@ -143,7 +201,7 @@ def install_statements(reason: str) -> Iterator[None]:
     """
     if not (reason or "").strip():
         raise ValueError("install statements must say what they are")
-    token = _say(Door(reason=reason.strip()))
+    token = _say(Door(reason=reason.strip(), how="statements"))
     try:
         yield
     finally:

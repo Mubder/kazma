@@ -493,6 +493,11 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         "Kazma's tables this install has found in its Postgres", "machine",
         reason="it describes this install's own Postgres: the boot check tells a "
                "dropped table from one a newer build adds by it"),
+    "space_doors.json": DataDirEntry(
+        "which door each checkout of Kazma's own Postgres went through, by caller "
+        "(db/space_doors.py, Spaces S4-01 report mode)", "machine",
+        reason="it counts what this install's code did against its own database; "
+               "another install starts its own count"),
     "kazma.log": DataDirEntry(
         "a log file", "machine", reason="logs stay with the machine that wrote them"),
     "restart.log": DataDirEntry(
@@ -908,6 +913,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "install_id": _install("the install's identity"),
     "outage_pages.json": _install("the install's own outage pages"),
     "pg_tables_seen.json": _install("the install's own Postgres tables"),
+    "space_doors.json": _install("function names and counts of the install's own code: no space's content"),
     "kazma.log": _install("the install's log: ids, never a member's words"),
     "restart.log": _install("the log of a restart"),
     "update-state.json": _install("the state of the install's update"),

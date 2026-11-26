@@ -138,6 +138,12 @@ def test_the_whole_x_api_card(server) -> None:
             _open_x(ar, h.base, "إكس")
             assert ar.evaluate("document.documentElement.dir") == "rtl"
             assert ar.locator("#xr-api-title").inner_text() == "واجهة X كاملة"
+            # The sign-in line comes with the status read, after the title: wait
+            # for it as the English page does (CI read the card before it came,
+            # 2026-11-26).
+            ar.wait_for_function(
+                "(document.querySelector('#xr-api-section') || {}).innerText.includes('@kazmaai')",
+                timeout=20000)
             assert "مسجّل الدخول بحساب X باسم" in ar.locator("#xr-api-section").inner_text()
             _shot(ar, "x-api-ar")
         finally:

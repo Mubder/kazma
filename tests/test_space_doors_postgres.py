@@ -290,3 +290,80 @@ def test_retention_and_a_moved_chats_copy_say_whose_they_are(pool: Any, tmp_path
         assert said.count(b) >= 2 and set(said) <= {a, b}, "the copy's row, in and out again"
     finally:
         pool.execute("DELETE FROM kazma_chat_sessions WHERE tenant_id IN (%s, %s)", (a, b))
+
+
+# ── report mode on the real pools (S4-01 step 1) ─────────────────────────
+
+
+@pytest.fixture
+def counted(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    from kazma_core.db import space_doors
+
+    monkeypatch.delenv("KAZMA_SPACE_DOOR_REPORT", raising=False)
+    space_doors.reset()
+    yield space_doors
+    space_doors.reset()
+
+
+def _doors(counted: Any, pool_name: str) -> list[tuple[str, str]]:
+    return sorted((e["door"], e["how"]) for e in counted.entries() if e["pool"] == pool_name)
+
+
+def test_every_real_checkout_is_counted_by_its_door(pool: Any, counted: Any) -> None:
+    from kazma_core.spaces.row_work import install_statements, statements_of
+
+    assert pool.execute_one("SELECT 1 AS one") == {"one": 1}
+    with bind_scope("family", "layla"):
+        pool.execute_one("SELECT 1 AS one")
+    with statements_of("family"):
+        pool.execute_one("SELECT 1 AS one")
+    with install_statements("a ping of the install"):
+        pool.execute_one("SELECT 1 AS one")
+    assert _doors(counted, "shared") == [("install", "statements"), ("none", "nothing"), ("space", "row"),
+                                         ("space", "scope")]
+    assert sum(e["count"] for e in counted.entries()) == 4
+
+
+def test_the_checkpointers_checkouts_are_counted(pool: Any, counted: Any) -> None:
+    import asyncio
+    import selectors
+    import sys
+
+    from kazma_core.checkpoints_pg import close_postgres_checkpointer, open_postgres_checkpointer
+    from psycopg_pool import AsyncConnectionPool
+
+    async def scenario() -> None:
+        saver = await open_postgres_checkpointer(os.environ["KAZMA_DATABASE_URL"], max_size=2)
+        try:
+            assert isinstance(saver.conn, AsyncConnectionPool), "LangGraph's saver and the direct users take it"
+            with bind_scope("family", "layla"):
+                config = {"configurable": {"thread_id": "s401-none", "checkpoint_ns": ""}}
+                assert await saver.aget_tuple(config) is None
+        finally:
+            await close_postgres_checkpointer(saver)
+
+    factory = None
+    if sys.platform == "win32":  # psycopg's async pool cannot run on the Proactor loop
+        factory = lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())  # noqa: E731
+    with asyncio.Runner(loop_factory=factory) as runner:
+        runner.run(scenario())
+    assert ("install", "statements") in _doors(counted, "checkpoints"), "its tables, made for every space"
+    assert ("space", "scope") in _doors(counted, "checkpoints")
+
+
+def test_the_mirror_on_kazmas_own_database_is_counted(counted: Any) -> None:
+    dsn = os.environ.get("KAZMA_DATABASE_URL") or ""
+    if not dsn or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
+        pytest.skip("needs a throwaway Postgres (scripts/postgres_suite.py)")
+    pytest.importorskip("psycopg_pool")
+    from kazma_core.memory.state_backend import PostgresStateBackend
+
+    backend = PostgresStateBackend(dsn)
+    try:
+        with bind_scope("family", "layla"):
+            assert backend.available  # a ping: the install's (0b, review 10)
+            assert backend.count_beliefs(tenant_id="family") >= 0  # the request's own read
+    finally:
+        backend.close()
+    assert _doors(counted, "memory mirror") == [("install", "statements"), ("install", "statements"),
+                                                ("space", "scope")], "the ping, the tables, the read"

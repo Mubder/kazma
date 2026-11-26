@@ -12,8 +12,11 @@ for the life of the process.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from kazma_core.spaces.row_work import install_statements
@@ -26,6 +29,36 @@ __all__ = ["close_postgres_checkpointer", "open_postgres_checkpointer"]
 def _conninfo(dsn: str) -> str:
     # libpq takes "postgresql://"; some operators write the short scheme.
     return "postgresql://" + dsn[len("postgres://"):] if dsn.startswith("postgres://") else dsn
+
+
+#: The counted pool class, by the psycopg pool class it is made from.
+_REPORTED: dict[type, type] = {}
+
+
+def _reported_pool_class() -> type:
+    """psycopg's ``AsyncConnectionPool`` whose every checkout is counted by
+    the door it goes through (``db.space_doors``, Spaces S4-01 step 1: report
+    mode, nothing refused). LangGraph's saver and the code that takes
+    ``saver.conn`` itself (the gateway's thread listing, the approvals'
+    listing, retention) all check out through ``connection()``. Made on
+    first use, once for each pool class (psycopg_pool is an extra)."""
+    from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+    from kazma_core.db import space_doors
+
+    made = _REPORTED.get(AsyncConnectionPool)
+    if made is not None:
+        return made
+
+    class ReportedCheckpointPool(AsyncConnectionPool):  # type: ignore[misc,type-arg,valid-type]
+        @asynccontextmanager
+        async def connection(self, timeout: float | None = None) -> AsyncIterator[Any]:
+            space_doors.checkout("checkpoints")
+            async with super().connection(timeout=timeout) as conn:
+                yield conn
+
+    _REPORTED[AsyncConnectionPool] = ReportedCheckpointPool
+    return ReportedCheckpointPool
 
 
 async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
@@ -49,7 +82,7 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     from kazma_core.db.postgres_pool import pool_connection_kwargs
 
     conninfo = _conninfo(dsn)
-    pool = AsyncConnectionPool(
+    pool = _reported_pool_class()(
         conninfo=conninfo,
         min_size=1,
         max_size=max_size,
@@ -70,6 +103,7 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
         saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
         with install_statements("the checkpoint tables, made for every space"):
             await saver.setup()
+        await _rules_after_setup(conninfo)
         ready = True
         availability.note_success("checkpoints", since=began)
     finally:
@@ -81,6 +115,25 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
                 availability.note_failure("checkpoints", failure)
             await pool.close()  # a failed setup must not leave its pool open
     return saver
+
+
+async def _rules_after_setup(conninfo: str) -> None:
+    """The second lock's rules on tables ``setup()`` just made (Spaces S4-01
+    review H3): LangGraph makes them outside :func:`pg_schema.ensure_schema`.
+    Nothing until the rules are in place in this process. A failure is said
+    and the checkpointer still opens: the space role is refused those tables
+    until the next start puts their rules in place."""
+    from kazma_core.db import row_security
+
+    if not row_security.in_place():
+        return
+    import psycopg
+
+    try:
+        await asyncio.to_thread(row_security.after_checkpointer_setup, conninfo)
+    except psycopg.Error as exc:
+        logger.warning("[checkpoints] the checkpoint tables' rules were not put in place (%s); the next start "
+                       "tries again", type(exc).__name__)
 
 
 async def close_postgres_checkpointer(saver: Any) -> bool:

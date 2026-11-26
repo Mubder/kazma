@@ -55,6 +55,7 @@ from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
 from kazma_core.memory.limits import LEGACY_BRIDGE_CUT, LEGACY_SUMMARY_CUT, LEGACY_TEXT_CUT
+from kazma_core.spaces.row_work import install_statements
 from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
@@ -713,6 +714,7 @@ def erased_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return out
 
 
+@install_statements("memory recovery reads every space's chats and checkpoints for erased turns")
 def run_rehydrate_pass(*, time_budget_s: float = 90.0) -> dict[str, Any]:
     """One recovery pass over the primary memory database (15-minute cadence).
 

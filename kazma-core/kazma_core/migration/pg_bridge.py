@@ -362,7 +362,21 @@ def restore_database(
         proc.returncode,
         warning_count,
     )
+    _close_kazma_functions(dsn, progress)
     return warning_count
+
+
+def _close_kazma_functions(dsn: str, progress=None) -> None:
+    """PUBLIC may run none of Kazma's functions after the restore. A whole
+    dump (the migration bundle's) restored with ``--clean --no-privileges``
+    makes them again with PUBLIC's default (Spaces S4-01 step 2 delta review
+    N1). Said, never fatal: the rows are restored."""
+    from kazma_core.db.pg_backup import revoke_public_execute
+
+    problem = revoke_public_execute(dsn)
+    if problem and progress:
+        progress(f"PUBLIC may still run Kazma's functions ({problem}): "
+                 "python scripts/row_security.py apply takes it away")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

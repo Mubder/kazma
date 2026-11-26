@@ -19,6 +19,7 @@ This gate reads ``spaces.row_work``'s forms from the product's source:
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,11 @@ INSTALL: dict[str, str] = {
         "lists every space's newest checkpoints at a start; each turn goes on as its own",
     "kazma-core/kazma_core/checkpoints_pg.py::open_postgres_checkpointer":
         "the checkpoint tables are made once, for every space",
+    "kazma-core/kazma_core/config_store.py::ConfigStore._pg_access":
+        "the settings table: one key space and one cache for the install, outside every space's lock "
+        "(S4-01 decision 4)",
+    "kazma-core/kazma_core/db/postgres_pool.py::_ensure_core_schema":
+        "the shared tables are made once, for every space",
     "kazma-core/kazma_core/db/pg_backup.py::verify_required_pg_tables":
         "which tables the database has, no row of any space",
     "kazma-core/kazma_core/documents/audit.py::DocumentAuditStore._ensure_pg_guard":
@@ -72,6 +78,38 @@ INSTALL: dict[str, str] = {
         "what any space refers to decides what may go",
     "kazma-core/kazma_core/memory/health.py::build_memory_health":
         "a ping only: the probes round it read the owner's memory as before",
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.available":
+        "a ping: whether the memory mirror answers, no row of any space",
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._ensure":
+        "the mirror's tables are made once, for every space",
+    "kazma-core/kazma_core/memory/state_backend.py::sync_state_mirror":
+        "the whole mirror compared with the local store; each push in its row's own space",
+    "kazma-core/kazma_core/memory/state_backend.py::reconcile_state_beliefs":
+        "the mirror's facts of every space compared with the local store's",
+    "kazma-core/kazma_core/memory/state_backend.py::mirror_drift_summary":
+        "how far the whole mirror is from the local store, for memory health",
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.probe":
+        "a ping: the catalog says whether this Postgres can hold vectors",
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend._ensure_table":
+        "the vector table is made once, for every space",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.record_worker_metric":
+        "the workers' metrics table has no space column: the install's (S4-01 step 2's rule)",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.get_worker_metrics":
+        "the workers' metrics table has no space column: the install's (S4-01 step 2's rule)",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.get_all_worker_metrics":
+        "the workers' metrics table has no space column: the install's (S4-01 step 2's rule)",
+    "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary":
+        "every space's chats into the one process-wide cache, keyed by space; each is then served to its own "
+        "space (design section 5)",
+    "kazma-core/kazma_core/memory/forget.py::converge":
+        "every space's pending forgets; each row it removes in its own space",
+    "kazma-core/kazma_core/memory/rehydrate.py::run_rehydrate_pass":
+        "lists every space's chats and checkpoints for erased turns; each restored row is its own",
+    "kazma-core/kazma_core/memory/turn_reconcile.py::run_turn_reconcile_pass":
+        "lists every space's chats changed since its one cursor (the sweep, the memory restore); "
+        "each turn is written as its own",
+    "kazma-core/kazma_core/memory/text_fill.py::run_text_fill_pass":
+        "reads every space's chats that still hold a cut turn whole; each row is its own",
     "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read":
         "the supervisor's list of every space's jobs, with nothing bound only",
     "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
@@ -175,6 +213,21 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
     "kazma-ui/kazma_ui/health.py::_check_memory_recall": (
         "statements: the owner's space, the canary's",
         ("statements_of(OWNER_SPACE_ID)",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_episode_rows": (
+        "statements: each pushed memory's own tenant, where Kazma pushes it itself",
+        ("row_statements(space)",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_belief": (
+        "statements: the pushed fact's own tenant, where Kazma pushes it itself",
+        ("row_statements(space_of_record(row.get('tenant_id')))",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.delete_belief": (
+        "statements: the removed fact's own tenant, which its caller names",
+        ("row_statements(named)",)),
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.upsert": (
+        "statements: the vector's own row's tenant, where Kazma writes it itself",
+        ("row_statements(tenant_id)",)),
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.delete": (
+        "statements: the forgotten row's own tenant, which the forget names",
+        ("row_statements(named)",)),
 }
 
 #: Who asks for the account a space's own work acts for: ``file::function`` ->
@@ -198,12 +251,15 @@ ACTS_FOR_A_SPACE: dict[str, str] = {
 
 #: The forms, by the name they are called by.
 INSTALL_FORMS = {"install_statements", "install_loops"}
+#: A row Kazma keeps for itself: its own space where Kazma does the work, the
+#: bound one where a request does (``row_work.row_statements``).
+OWN_ROW_FORMS = {"row_statements"}
 #: What answers something to enter: a call inside the ``with``, or kept for one.
 RESOLVERS = {"resolve_work_of", "resolve_act_of", "work_of_async"}
 #: The forms that may act for a space's own account.
 FALLS_BACK = {"work_of", "resolve_work_of", "work_of_async"}
-ROW_FORMS_DECLARED = FALLS_BACK | {"statements_of", "resolve_act_of"}
-FORMS = INSTALL_FORMS | {"statements_of", "work_of"}
+ROW_FORMS_DECLARED = FALLS_BACK | OWN_ROW_FORMS | {"statements_of", "resolve_act_of"}
+FORMS = INSTALL_FORMS | OWN_ROW_FORMS | {"statements_of", "work_of"}
 
 
 @dataclass(frozen=True)
@@ -402,6 +458,102 @@ def test_every_form_that_names_a_space_is_declared_with_where_it_comes_from() ->
     assert all(r.startswith(kinds) and len(r.split()) >= 5 for r, _written in ROWS.values())
     assert _written_problems(used, ROWS) == []
     assert _reason_problems(used, ROWS) == []
+
+
+# ── a delete that trusts "nothing there" asks whose door it is (0b M1) ──
+
+_DELETE = re.compile(r"\bDELETE\s+FROM\b", re.I)
+_EXISTS = re.compile(r"\bSELECT\s+1\s+FROM\b", re.I)
+
+
+def _texts(node: ast.AST) -> str:
+    """Every string a function holds, f-strings' fixed parts included."""
+    return " ".join(n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+
+
+def _functions(tree: ast.Module) -> dict[str, ast.AST]:
+    found: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    found[f"{node.name}.{item.name}"] = item
+    return found
+
+
+def trusting_deletes(source: str, roots: set[str]) -> dict[str, bool]:
+    """The functions *roots* run in this file (each, and the functions of its
+    class or module it calls) that send a ``DELETE`` and then ask whether a
+    row of that id is left: their name -> whether they ask ``door_hides``
+    first. Once the lock is armed, a door of another space sees neither the
+    row nor its absence, so its "nothing there" is no "gone" (0b review M1)."""
+    functions = _functions(ast.parse(source))
+    reached: set[str] = set()
+    for root in roots:
+        node = functions.get(root)
+        if node is None:
+            continue
+        reached.add(root)
+        cls = root.rpartition(".")[0]
+        for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
+            fn = call.func
+            if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name) and fn.value.id == "self" and cls:
+                reached.add(f"{cls}.{fn.attr}")
+            elif isinstance(fn, ast.Name):
+                reached.add(fn.id)
+    out: dict[str, bool] = {}
+    for name in sorted(reached & set(functions)):
+        text = _texts(functions[name])
+        if _DELETE.search(text) and _EXISTS.search(text):
+            out[name] = any(isinstance(n, ast.Call) and _name(n.func) == "door_hides"
+                            for n in ast.walk(functions[name]))
+    return out
+
+
+def _rows_by_file() -> dict[str, set[str]]:
+    by_file: dict[str, set[str]] = {}
+    for key in ROWS:
+        rel, _, where = key.partition("::")
+        by_file.setdefault(rel, set()).add(where)
+    return by_file
+
+
+def test_a_delete_that_trusts_nothing_there_asks_whose_door_it_is() -> None:
+    found = {f"{rel}::{name}": asks for rel, roots in _rows_by_file().items()
+             for name, asks in trusting_deletes((REPO / rel).read_text(encoding="utf-8"), roots).items()}
+    assert {"kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._delete_fact",
+            "kazma-core/kazma_core/memory/backends.py::PgvectorBackend._delete_vector"} <= set(found), found
+    assert [name for name, asks in found.items() if not asks] == [], (
+        "a delete in a declared row's space that trusts an existence SELECT asks row_work.door_hides first")
+
+
+_PLANTED_DELETE = """
+class Store:
+    def remove(self, row_id, tenant_id):
+        with row_statements(tenant_id):
+            return self._gone(row_id, tenant_id)
+
+    def _gone(self, row_id, space):
+        cur.execute(f"DELETE FROM {self.table} WHERE id = %s RETURNING id", (row_id,))
+        if not cur.fetchall():
+            {ask}cur.execute("SELECT 1 FROM t WHERE id = %s", (row_id,))
+            return cur.fetchone() is None
+        return True
+"""
+
+
+@pytest.mark.parametrize(("ask", "asks"), [("", False), ("door_hides(space)\n            ", True)])
+def test_a_planted_delete_that_trusts_nothing_there_is_found(ask: str, asks: bool) -> None:
+    assert trusting_deletes(_PLANTED_DELETE.replace("{ask}", ask), {"Store.remove"}) == {"Store._gone": asks}
+
+
+def test_the_real_deletes_without_their_question_are_found() -> None:
+    """The negative control on the product's own source."""
+    rel = "kazma-core/kazma_core/memory/backends.py"
+    source = (REPO / rel).read_text(encoding="utf-8").replace("door_hides(", "door_kept_quiet(")
+    assert trusting_deletes(source, _rows_by_file()[rel])["PgvectorBackend._delete_vector"] is False
 
 
 @pytest.mark.parametrize(("form", "reason"), [

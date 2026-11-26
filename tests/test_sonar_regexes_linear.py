@@ -45,6 +45,8 @@ from kazma_gateway.adapters import telegram as telegram_adapter
 from kazma_gateway.adapters import voice_helpers, whatsapp_format
 from kazma_gateway.agent_handler import swarm_dispatch
 
+from tests._growth import grows_faster_than_linear
+
 RNG = random.Random(20261116)
 
 # ── the old patterns, as they were ────────────────────────────────────────
@@ -215,17 +217,9 @@ def _same(old, new, op: str, inputs) -> None:
 def _grows_faster_than_linear(fn, make, small: int, factor: int = 4) -> bool:
     """True when ``factor`` times the input takes more than 1.5 x ``factor`` times as long.
 
-    The majority of three measurements (two that agree end it): one noisy
-    measurement on a busy machine must decide neither way (2026-11-21)."""
-    fn(make(small))
-
-    def once() -> bool:
-        t1 = min(_timed(fn, make(small)) for _ in range(3))
-        t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
-        return t2 > 1.5 * factor * t1
-
-    first, second = once(), once()
-    return first if first == second else once()
+    Measured by ``tests/_growth.py`` (in turns, the majority of three), so a
+    busy machine decides neither way."""
+    return grows_faster_than_linear(fn, make, small, factor)
 
 
 SPACE = " \t\n"
@@ -940,9 +934,12 @@ def test_no_then_reads_a_run_of_marks_after_the_mark_once():
             # Inside the own-text cap (6,000): the tail that fails late is read
             # (the third review, C: past the cap it was cut off, and proved nothing).
             text = head + unit * ((5980 - len(head)) // len(unit)) + "x.y"
-            assert _timed(no_then, text, "Omar") < 0.2, (head, unit)
+            # Bounds with room for a loaded CI runner (the 0.2 s first set read
+            # 0.201 s on a busy Linux run, 2026-11-27): the quadratic pattern took
+            # 28-56 s here, so 0.5 s and 1 s still tell the two apart thirtyfold.
+            assert _timed(no_then, text, "Omar") < 0.5, (head, unit)
             # And the pattern itself, past the cap, on the folded text.
-            assert _timed(_NO_THEN.match, head.lower() + unit * 24000 + "x.y") < 0.2, (head, unit)
+            assert _timed(_NO_THEN.match, head.lower() + unit * 24000 + "x.y") < 1.0, (head, unit)
     for text in ("no, omar", "no - omar", "nope omar!", "لا، عمر", "no,- omar", "no, -omar", "no.  omar",
                  "لا يا كازما، عمر", "no, omar, i told you"):
         new, old = _NO_THEN.match(text), STEP4_NO_THEN.match(text)

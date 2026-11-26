@@ -1453,6 +1453,15 @@ def _settle_file_moves() -> None:
     sweep()
 
 
+def _keep_space_door_report() -> None:
+    # Spaces S4-01 step 1: which door each checkout of Kazma's own Postgres
+    # went through, counted in memory, is added to the report in the data
+    # folder (at most 15 minutes of it is lost to a kill).
+    from kazma_core.db import space_doors
+
+    space_doors.flush()
+
+
 def _provider_health() -> None:
     # Providers stage 4: once an hour every switched-on chat provider is
     # asked for its model list (no tokens); unreachable twice is said, a
@@ -1536,6 +1545,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("erased space keys", _destroy_erased_space_keys),
     ("chat moves", _settle_chat_moves),
     ("file moves", _settle_file_moves),
+    ("space door report", _keep_space_door_report),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory vector codes", _fill_vector_codes),

@@ -109,7 +109,10 @@ mirror and pgvector table, and the document jobs, catalog and intake stores.
 Gate: `tests/test_pg_schema_setup.py` (no `ADD COLUMN IF NOT EXISTS` sent
 outside it, the old shapes as control; on real Postgres each store's setup
 completes under a held dump lock and an open writer, and fresh starts at the
-same moment both succeed -- the direct statements wait and collide).
+same moment both succeed -- the direct statements wait and collide). A table
+`ensure_schema` makes gets its second-lock rule in the same transaction
+(`db/row_security.apply_made_tables`, Spaces S4-01 H3), only once the rules
+are in place in this process and in a database that holds them (§70 (1)).
 
 **F. Universal backup — "never left anything behind"**
 (`kazma_core/backup/universal.py`). One unified backup that backs up
@@ -202,9 +205,22 @@ container dies with Docker Desktop, which starts only when someone signs in
 (live 2026-11-04: eleven hours). `kazma setup postgres` installs Postgres 16
 with the OS's package manager (winget, Homebrew, apt, dnf; WSL as its distro)
 as a service that starts at boot and restarts on failure, `listen_addresses =
-'localhost'`, creates `kazma` and the `kazma_app` role (`kazma_app_role.sql`),
+'localhost'`, creates `kazma` and the `kazma_app` role (`kazma_app_role.sql`,
+which also makes `kazma_space`, the second lock's role: §70 (1)),
 turns on WAL archiving, writes `KAZMA_DATABASE_URL` into `.env` (never
 printed, restricted) and records it in `<data dir>/setup_record.json`.
+**A client library Windows refuses gives way to Postgres's own** (live
+2026-11-26 11:30 UTC: an Application Control policy began refusing
+psycopg_binary's `pq` module; the next reload loaded no libpq and Kazma
+started read-only with the database up): `kazma_core`'s import runs
+`libpq_reach.reach_libpq()` before anything imports psycopg (no Kazma module
+imports it at its top). When Windows refuses the bundled library by policy
+(WinError 5, 1260, 4551), the newest installed PostgreSQL's `bin` (its signed
+`libpq.dll`) goes at the end of the process's PATH and psycopg's pure-Python
+wrapper uses it; said once at WARNING. An allowed bundle, or a libpq already
+on PATH, changes nothing. Gate: `tests/test_libpq_reach.py` (an allowed
+library as the control, and no top-level psycopg import).
+
 **Kazma's own driver first** (the drill VM, 2026-11-06: the address went into
 an environment without psycopg, and the server waited ten minutes on a
 database that was fine): when `postgres_pool.driver_missing()` says so, the

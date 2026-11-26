@@ -10,6 +10,141 @@
   and 58 % with the conversations alone, the same in two runs; no question was
   lost. The benchmarks page now says what Kazma's memory held for each number.
 
+## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
+
+- **A Word file's font table is read in linear time**: the pattern that takes
+  out a font's old embeds read to the end of the text from every
+  `<w:embed…` when no `>` followed, so a crafted file's time grew with the
+  square of its size. It now stops at the next tag, and removes exactly what
+  it did from well-formed XML.
+- **The regex sweep's verdicts no longer depend on the machine**: the secret
+  scanner's pattern is linear (every repeat bounded) but heavy, and its
+  inputs ran out the sweep's clock on CI's slower runners; it is declared
+  with the measurement. A planted slow pattern that runs out the clock now
+  counts as caught.
+
+## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
+
+- Kazma's connection to its own Postgres can now hold each space to its own
+  rows: once the second lock is armed, a space's statements run as a role
+  that sees that space's rows only, Kazma's own as before, and a statement
+  that says neither is refused before it is sent. Nothing arms it yet: with
+  Spaces on or off, Kazma works exactly as before.
+- Tried armed: documents (upload, processing, recovery, moving, leaving a
+  space, clean-up), the swarm's tasks, chats and the memory copies each read
+  and write their own space only.
+- A document upload refused by the database says so, instead of "capacity
+  unavailable; retry shortly".
+
+## Memory search says when the Postgres copy could not be read (2026-11-26)
+
+- Where Postgres holds memory, a memory found by meaning that could then not
+  be read is a failed memory search, said as one, never left out of the
+  answer in silence.
+- Where this install's own memories answer and the Postgres copy only adds
+  memories other installs wrote: when that copy is away, the answer keeps
+  this install's memories and says the others were not read; when the
+  database refuses (Spaces), the search fails and says so. Neither reads as
+  "nothing more found".
+- Saying it is kept to the searches someone asks for: the memory tool and
+  the Memory page say, calmly and in both languages, that memories from
+  other Kazma installs could not be read just now. It is never called
+  "keyword matches only", the note to the model on each turn leaves it out,
+  and it pages nobody: the outage is said where it happens (and by the
+  database's own alert when the copy is in Kazma's own database).
+- A Postgres copy that is down when Kazma starts no longer slows every
+  memory search by seconds: Kazma asks it again once a minute, not on each
+  search.
+## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
+
+- **Postgres's own client library stands in**: from 11:30 UTC Windows'
+  Application Control refused the client library psycopg bundles. The next
+  reload could not load any, and Kazma started read-only with the database
+  running. When Windows refuses the bundled library, Kazma now gives
+  psycopg the signed `libpq.dll` of the installed PostgreSQL instead, and
+  says so once in the log. Where the bundled library is allowed, nothing
+  changes.
+- **The durable swarm starts on Windows again**: Temporal imports Kazma's core
+  once more inside its workflow sandbox, which refuses file access, and the
+  library check above looked for files there, so no Temporal worker could
+  start on Windows. The check now stays out of the sandbox, where no
+  database is opened.
+
+## A docker program Windows refuses is passed over (2026-11-26)
+
+- **Kazma uses the next docker CLI when Windows refuses its own**: from
+  10:56 UTC Windows refused to start the `docker.exe` Kazma's engine
+  installed ("An Application Control policy has blocked this file"). Kazma
+  chose it because the file was there, so every docker call failed: code
+  execution waited for an engine that was running, and the guard restarted
+  Docker in it again and again. Each docker CLI is now started once before
+  it is chosen. One Windows refuses by policy is said once in the log and
+  passed over for Docker's own CLI, and tried again every five minutes, so
+  allowing it again needs no restart.
+- **The pre-push check does the same**: `scripts/prepush.py` takes the first
+  docker CLI that starts for its Linux part, and runs bandit as
+  `python -m bandit`, since the same policy refused uv's freshly made
+  `bandit.exe` now and then.
+
+## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
+
+- Every table Kazma keeps on Postgres now has a rule for Spaces' second lock:
+  a space's table gets a policy that lets a connection in one space see and
+  change that space's rows only, whatever its query says; Kazma's own tables
+  (settings, schema versions) are kept from spaces entirely. Nothing uses the
+  lock yet: Kazma signs in as the tables' owner, as before, and with Spaces
+  off nothing it sends changes.
+- `deploy/postgres/kazma_app_role.sql` (run by `kazma setup postgres`, the
+  upgrade to a new PostgreSQL and the move into the service) also makes the
+  role a space's connection will run as, `kazma_space`: it cannot sign in,
+  owns nothing, and may use a space's table only where its policy is on.
+  `deploy/postgres/kazma_space_role_remove.sql` takes it all out again.
+- `kazma doctor` and `kazma spaces migrate --check` say whether the role is
+  there and every table holds its rule; `python scripts/row_security.py`
+  checks, lists rows whose space is unknown, proves the lock holds, and puts
+  the rules in place by hand.
+- Every restore also makes the function the policies call, with Spaces on or
+  off; dumps, restores, the upgrade's copy and the weekly restore rehearsal
+  work with the rules in place, and name no role. Only the role may run that
+  function, so a reader the owner set up to run none is not refused after a
+  restore.
+- The rules go in place, and say so truly, on an install that signs in as the
+  superuser too (Docker Compose) and on PostgreSQL 16's own role grants;
+  what the login may not do itself is said, not raised. Listing and proving
+  work on a database the rules never reached, the script takes another
+  database's address only from an environment variable (never its command
+  line), and `kazma doctor` gives the second lock one line.
+
+## A busy test machine cannot hide a slow pattern (2026-11-26)
+
+- **The regex tests time both inputs in turns**: the tests that prove an old
+  pattern slows down faster than its input (and a new one does not) now ask
+  one shared measure, `tests/_growth.py`. It times the small and the large
+  input in turns, three of each, so a burst of load on a CI runner can no
+  longer cover every small call. CI read the old `dd` pattern, sixteen times
+  slower on four times the input, as linear. A gate keeps every such helper
+  on the one measure.
+
+## Memory's copies in Postgres keep to their spaces (2026-11-26)
+
+- When Kazma removes a forgotten fact or memory from its Postgres copies, it
+  does so in the space the memory belongs to, and calls it gone only when it
+  is: a copy kept under another space is said in the log once and never
+  recorded as deleted. A vector is tried again by the forget journal; a
+  fact's copy is removed, or kept marked as no longer true, by the mirror's
+  queue of changes. With Spaces off
+  the copy is removed by its id, as before. The vector index had dropped
+  which space a vector belonged to when deleting it.
+- Memory's work over every space's chats (recovery, catching up on chats,
+  filling in cut text, the mirror's sync, finishing forgets) says that it
+  reads every space -- also when a memory restore runs it -- and writes each
+  memory in its own space.
+- The tables of the memory mirror and of the vector index are made on a
+  connection of their own, so the first write after a start is never in a
+  separate transaction.
+- With Spaces on, a memory read that the database refuses is an error, never
+  "no memories found". With Spaces off nothing changes.
+
 ## Memory: "What is it that I do for a living?" finds your job (2026-11-26)
 
 - Asking "What is it that I do for a living?" or "ما الذي أعمله لكسب عيشي؟"
@@ -82,6 +217,26 @@
   its own model only.
 - A provider whose name has a space ("Qwen 1") can be changed from the page:
   every such change was refused as coming from another site.
+
+## Spaces: whose each database statement is, counted (2026-11-26)
+
+- Kazma now counts, for each statement it sends to its own Postgres, whose
+  statement it is: a space's, Kazma's own (with the reason it gives), or
+  nobody's. Nothing is refused and Kazma does nothing differently: this is
+  the record that must show every part of Kazma saying whose its statements
+  are before the database's own lock between spaces is ever turned on.
+- The count is kept in `space_doors.json` in Kazma's data folder, added to
+  every 15 minutes and when Kazma stops, by part of Kazma and with how many
+  times. `python scripts/space_doors_report.py` prints it (`--since` a time
+  leaves out what came before, such as a part fixed since). A part found
+  saying nothing is logged once, at INFO. A report file that is not one is
+  said and started again.
+- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs about 5
+  microseconds a statement to Kazma's own stores and about 20 in the chat
+  history's (LangGraph's) calls, measured; a statement takes about a
+  millisecond.
+- The settings are counted as Kazma's own: they stay outside any space's
+  lock.
 
 ## A page closed while sending is not a server error (2026-11-25)
 

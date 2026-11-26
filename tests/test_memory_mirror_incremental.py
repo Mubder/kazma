@@ -64,7 +64,7 @@ class _Mirror:
         self.beliefs[str(row["id"])] = {k: row.get(k) for k in ("object", "valid_until", "invalidated_at")}
         return True
 
-    def delete_belief(self, row_id: str) -> bool:
+    def delete_belief(self, row_id: str, *, tenant_id: str | None = None) -> bool:
         self.writes += 1
         self.beliefs.pop(row_id, None)
         return True
