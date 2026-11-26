@@ -255,23 +255,31 @@
     Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't see Ali alone,
     I met Omar too", "لم ألتق بعلي وحده" closed Ali when the model named him
     replaced and no day was given.
-    - "Only" right after a negation ("not only", "مو بس"), or an "only" or
-      "alone" word right after the denied value's own words within the
-      denial's reach ("didn't see Ali alone", "مو علي بس", "ليس علي فقط",
-      "بعلي وحده"), adds rather than denies. A bare "no" before "just" still
-      puts right ("No, just Omar"), and actually / correct / instead / rather
-      / بل / الصحيح never add (`_NEVER_ADDING`). An "only" word after the
-      value adds only when what follows goes on with "but" (`_BUT`) or says
-      "too" (`_goes_on_adding`: too, also, as well, plus, أيضا, كمان, كذلك,
-      برضه, and "بعد" ending its words; never "again", "another", "مرة
-      ثانية"). A word after "only" in its clause: that clause alone is read
-      ("not Ali only but Omar", "Not Ali only Omar too", "مو علي بس عمر بعد");
-      "only" ending its clause: the next clause alone ("It wasn't Ali only,
-      Omar too", "مو علي بس، قابلت عمر بعد"). Else the denial stands ("Not
-      Ali just Omar", "مو علي بس، عمر", "I didn't see Ali just now, it was
-      Omar", and "Not Ali just Omar, I saw him again today", "مو علي بس عمر،
-      وكمان رحنا السوق": step 4's delta review N1 and third review B, D, each
-      a test). Each clause's words are read once (`_clause_words`): linear.
+    - **A denial denies, as before step 4, except in a few narrow shapes
+      that clearly add** (step 4's fourth review: five rounds that read "too"
+      more widely each turned some correction into an addition; base's
+      denial is the default, and in doubt the denial stands):
+      - a denial, then "only": "not only Ali", "مو بس علي", "ليس فقط علي";
+      - "alone" ending its clause right after the denied value: "I didn't
+        see Ali alone,", "ما قابلت علي بروحه،", "لم ألتق بعلي وحده،";
+      - "only" right after the value, then "but": "not Ali only but Omar",
+        "مو علي بس بل عمر";
+      - "only", the new value alone (a word or two, no "and"/"و" between),
+        then "too" ending the clause (`_TOO_END`: too, also, as well, أيضا,
+        كمان, كذلك, برضه, بعد): "Not Ali only Omar too", "مو علي بس عمر بعد";
+      - "only" ending its clause, and the next clause opens with "but" or
+        "also" (`_ADDING_OPENERS`) or ends with "too": "It wasn't Ali only,
+        Omar too", "مو علي بس، وكمان عمر", "لم ألتق بعلي فقط، بل بعمر".
+      Every other shape denies: "Not Ali just Omar", "مو علي بس، عمر", "Not
+      Ali just Omar, I saw him again today", "Not Ali just Omar who was too
+      tired", "Not Ali only Omar plus his wife", "مو علي بس عمر واخوه بعد".
+      "Again", "another" and "مرة ثانية" never add. A bare "no" before "just"
+      puts right ("No, just Omar"); actually / correct / instead / rather /
+      بل / الصحيح never add (`_NEVER_ADDING`). Each clause's words are read
+      once (`_clause_words`), and a value runs at most its own words and two
+      more (`_value_end`: a held "مو" or "Not Me" repeated took 0.9 s).
+      Measured against base on the reviewers' cases (`cases.py`, `cases2.py`):
+      no case worse than base.
     - **Step 4's review (H1, M4):** step 4 read "alone" anywhere after a
       denial, and an unpunctuated message lost its denial: "No I didn't meet
       Ali I was home alone", "مو علي قابلت عمر بروحه", "لم ألتق بعلي بل
@@ -279,8 +287,8 @@
       Thursday" kept the wrong day as `day_sure` (11 of 13 measured). "Alone"
       said of someone else, or of the user, adds nothing now; an answer's
       "no" / "لا" never attaches it ("لا رحت النادي بروحي"), and "وحده
-      ثانيه" is another one (`_ANOTHER`). Arabic's usual order ("مو علي بس،
-      قابلت عمر بعد", "It wasn't Ali only") adds, as "not only" does.
+      ثانيه" is another one (it does not end its clause). Arabic's usual order
+      adds where one of the shapes above holds ("مو علي بس، قابلت عمر بعد").
     - "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
       خطأ") puts nothing right (`_NOTHING_WRONG`). Never a bare "لا": "لا
       غلط، عمر" is the commonest Gulf correction (the review's H2); "خطأ" puts

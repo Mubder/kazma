@@ -130,6 +130,13 @@ PUT_RIGHT = [
     (EN, "Not Ali just Omar, I saw him again today"), (EN, "Not Ali just Omar again"),
     (GULF, "مو علي بس عمر، وكمان رحنا السوق"), (GULF, "مو علي بس عمر، وبعدين رحنا المطعم مره ثانيه"),
     (MSA, "ليس علي فقط عمر، ثم ذهبنا إلى المطعم مرة أخرى"),
+    # A "too" in the clause not right after the new value adds nothing (step 4's
+    # fourth review: each kept Ali at a9cb57a51; base denied them all).
+    (EN, "Not Ali just Omar who was too tired to stay"), (EN, "Not Ali only Omar plus his wife"),
+    (EN, "Not Ali just Omar and he was also late"), (EN, "Not Ali just Omar as well as Sara"),
+    (EN, "Not Ali just Omar but Sara too"), (EN, "I didn't meet Ali just Omar and his brother too"),
+    (GULF, "مو علي بس عمر وجاب ولده بعد"), (GULF, "مو علي بس عمر واخوه بعد"), (GULF, "مو علي بس عمر وكان متأخر كمان"),
+    (MSA, "لم ألتق بعلي فقط بعمر وكان متعبا أيضا"), (MSA, "ليس علي فقط عمر وأخوه كذلك"),
 ]
 
 
@@ -241,37 +248,43 @@ def test_every_denial_before_every_only_word_adds():
     assert not event_text._adds_rather_than_denies("Not Ali, Omar")
 
 
-def test_every_only_or_alone_word_adds_right_after_the_denied_value_and_nowhere_else():
-    """The value-attached rule (step 4's review, H1 and M4), for every denial,
-    every word, both languages: right after the value it adds; after another
-    name or word ("Not Ali, I met Omar alone"), or after an answer's "no"
-    ("No I went to the gym alone"), the denial stands."""
+def test_a_denial_adds_only_in_its_narrow_shapes():
+    """Step 4's fourth review: base's denial is the rule, and a denial adds
+    only in the narrow shapes ``event_text`` names, for every denial, every
+    "only", "alone" and "too" word of the product's own sets; each shape's
+    near miss denies."""
+    adds, denies = event_text._adds_rather_than_denies, []
     for denial in _denials():
-        for word in event_text._ONLY | event_text._ALONE:
-            if denial not in event_text._ANSWER_NO:
-                # "Only" goes on with "but" or "too", in the clause or after it.
-                assert event_text._adds_rather_than_denies(f"{denial} Ali {word} but Omar", "Ali"), (denial, word)
-                assert event_text._adds_rather_than_denies(f"{denial} Ali {word}, Omar too", "Ali"), (denial, word)
-            assert not event_text._adds_rather_than_denies(f"{denial} Ali met Omar {word}", "Ali"), (denial, word)
-            assert not event_text._adds_rather_than_denies(f"{denial} Ali {word} but Omar", "Sara"), (denial, word)
-        for word in event_text._ALONE:
-            if denial not in event_text._ANSWER_NO:
-                assert event_text._adds_rather_than_denies(f"{denial} Ali {word} Omar", "Ali"), (denial, word)
-        # Before another word "only" is that word's: "Not Ali just Omar", "مو
-        # علي بس عمر", "مو علي بس، عمر" put right (step 4's delta review, N1).
-        for word in event_text._ONLY:
-            # As the product reads it, the comma included (the third review, F).
-            for text in (f"{denial} Ali {word} Omar", f"{denial} Ali {word}, Omar", f"{denial} Ali {word}",
-                         f"{denial} Ali {word} Omar, I saw him again"):
-                assert not event_text._adds_rather_than_denies(text, "Ali"), (text,)
+        if denial in event_text._ANSWER_NO:
+            continue
+        for only in event_text._ONLY:
+            shapes = [f"{denial} Ali {only} but Omar", f"{denial} Ali {only}, but Omar", f"{denial} Ali {only}, Omar too",
+                      f"{denial} Ali {only}, also Omar", f"{denial} Ali {only} Omar as well"]
+            shapes += [f"{denial} Ali {only} Omar {too}" for too in event_text._TOO_END]
+            if denial not in event_text._BARE_NO:
+                shapes.append(f"{denial} {only} Ali, Omar")
+            for text in shapes:
+                assert adds(text, "Ali"), text
+            denies += [f"{denial} Ali {only} Omar", f"{denial} Ali {only}, Omar", f"{denial} Ali {only}",
+                       f"{denial} Ali {only} Omar, I saw him again", f"{denial} Ali {only} Omar again",
+                       f"{denial} Ali {only} Omar and Sara too", f"{denial} Ali {only} Omar who was too tired",
+                       f"{denial} Ali {only} Omar plus his wife", f"{denial} Ali {only} Omar as well as Sara",
+                       f"{denial} Ali {only} Omar but Sara too", f"{denial} Ali {only} Omar, Sara too",
+                       f"{denial} Ali met Omar {only}", f"{denial} Ali {only} but Omar|Sara"]
+        for alone in event_text._ALONE:
+            assert adds(f"{denial} Ali {alone}, Omar", "Ali"), (denial, alone)
+            assert adds(f"{denial} Ali {alone}", "Ali"), (denial, alone)
+            denies += [f"{denial} Ali {alone} Omar", f"{denial} Ali met Omar {alone}"]
+    for text in denies:
+        value = "Sara" if text.endswith("|Sara") else "Ali"
+        assert not adds(text.split("|")[0], value), text
     for no in event_text._ANSWER_NO:
         for word in event_text._ALONE:
-            assert not event_text._adds_rather_than_denies(f"{no} went gym {word}", "gym"), (no, word)
+            assert not adds(f"{no} went gym {word}", "gym"), (no, word)
     for word in event_text._NEVER_ADDING:
-        assert not event_text._adds_rather_than_denies(f"{word} just Omar", "Ali"), word
+        assert not adds(f"{word} just Omar", "Ali"), word
     # "وحده ثانيه": another one, not alone.
-    for other in event_text._ANOTHER:
-        assert not event_text._adds_rather_than_denies(f"مو علي وحده {other} اسمها عمر", "علي"), other
+    assert not adds("مو علي وحده ثانيه اسمها عمر", "علي")
 
 
 def test_control_the_rule_before_the_review_turns_denials_into_additions(monkeypatch):
