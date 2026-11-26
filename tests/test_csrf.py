@@ -133,3 +133,50 @@ async def test_originless_client_bypasses():
     req = _make_request()
     resp = await mw(req, _call_next)
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/providers/Qwen 1/toggle", "/api/providers/قوين/keys", "/api/providers/a?b/keys"])
+async def test_a_path_with_a_space_is_same_origin(path):
+    """A provider named "Qwen 1": every browser write to its routes was
+    refused, its decoded path read as no origin at all (2026-11-25)."""
+    from kazma_ui.same_origin import _allowed_origins
+
+    mw = create_csrf_middleware()
+    served = {"origin": "http://127.0.0.1:9090", "host": "127.0.0.1:9090", "referer": "http://127.0.0.1:9090/settings"}
+    req = _make_request(path=path, headers=served)
+    assert (await mw(req, _call_next)).status_code == 200
+    assert "http://127.0.0.1:9090" in _allowed_origins(_make_request(path=path))
+    bad = _make_request(path=path, headers={"origin": "http://evil.example", "host": "127.0.0.1:9090"})
+    assert (await mw(bad, _call_next)).status_code == 403
+
+
+def _origins_from_a_path(source: str) -> list[str]:
+    """The calls of ``normalize_origin`` given a request's whole URL, in any
+    spelling but a name it was put in first (not read)."""
+    import ast
+
+    return [ast.unparse(node) for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "normalize_origin"
+            and any(isinstance(part, ast.Attribute) and part.attr in ("url", "path", "raw_path")
+                    and not (isinstance(parent, ast.Attribute) and parent.attr in ("scheme", "netloc", "hostname", "port"))
+                    for arg in [*node.args, *(k.value for k in node.keywords)]
+                    for parent in [None, *ast.walk(arg)]
+                    for part in (ast.iter_child_nodes(parent) if parent is not None else [arg]))]
+
+
+def test_no_origin_is_read_from_a_decoded_path():
+    """The class: an origin is read from ``base_url``, never ``request.url``."""
+    from pathlib import Path
+
+    import kazma_ui
+
+    root = Path(kazma_ui.__file__).parent
+    found = {p.name: _origins_from_a_path(p.read_text(encoding="utf-8")) for p in root.rglob("*.py")}
+    assert {k: v for k, v in found.items() if v} == {}
+    for planted in ("normalize_origin(str(request.url), allow_path=True)", "normalize_origin(f'{req.url}')",
+                    "normalize_origin(request.url)", "browser_origins.normalize_origin(value=str(request.url))",
+                    "normalize_origin('http://h' + request.url.path)"):
+        assert _origins_from_a_path(planted), planted
+    assert not _origins_from_a_path("normalize_origin(str(request.base_url), allow_path=True)")
+    assert not _origins_from_a_path("normalize_origin(f'{request.url.scheme}://{request.url.netloc}')")

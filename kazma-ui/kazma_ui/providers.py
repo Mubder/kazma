@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.env_files import env_credential
 from kazma_core.model_registry import get_model_registry
-from kazma_core.provider_check import MOVED_KEY_MESSAGE, STORED_SECRET_FIELDS, address_moved
+from kazma_core.provider_check import MOVED_KEY_MESSAGE, STORED_SECRET_FIELDS, address_moved, exact_row
 from kazma_core.security.provider_mask import mask_provider_entry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
@@ -33,6 +33,7 @@ from kazma_ui.models import (
     ProviderToggleRequest,
     ProviderUpdateRequest,
 )
+from kazma_ui.no_echo_route import NoEchoRoute
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
@@ -124,31 +125,49 @@ def _can_be_called(registry: Any, name: str) -> bool:
     message and that Kazma might fall back to (providers stage 1)."""
     from kazma_core.provider_check import credentials_problem
 
-    entry = registry.get_provider(name) or {"name": name}
+    entry = exact_row(registry, name) or {"name": name}
     return credentials_problem(registry, entry) is None
 
 
 def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> list[str]:
     """The other providers at *base_url* (normalized): a second row for one
-    service (Z.AI and zai on the live install) -- said, not refused, since a
-    second account of a vendor is saved this way until providers have
-    several keys."""
-    from kazma_core.url_utils import normalize_provider_url
-
-    def address(url: str) -> str:
-        try:
-            return normalize_provider_url(url).rstrip("/").lower()
-        except ValueError:  # a port out of range: compared as typed
-            return url.strip().rstrip("/").lower()
+    service (Z.AI and zai on the live install) -- said, not refused: the
+    guided setup offers to add the key to the first row, and the page to tidy
+    the ones already there (kazma_core.provider_setup)."""
+    from kazma_core.provider_setup import address_of
 
     if not base_url:
         return []
-    here = address(base_url)
+    here = address_of(base_url)
     return sorted(
         str(p.get("name") or "") for p in providers
         if str(p.get("name") or "") != name and p.get("base_url")
-        and address(str(p["base_url"])) == here
+        and address_of(str(p["base_url"])) == here
     )
+
+
+def _holds_key(registry: Any, row: dict[str, Any]) -> bool:
+    """Whether *row* has a key of its own stored, readable now or not (a
+    placeholder a local server was given is none)."""
+    from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
+
+    return key_is_usable(coerce_api_key(row.get("api_key"))) or registry.stored_key_is_undecryptable(
+        str(row.get("name") or ""))
+
+
+def _name_taken(registry: Any, name: str) -> bool:
+    """Whether a provider that is set up has *name* (any case), or answers to
+    it since a merge: a setup never writes over it. A catalog row nobody set
+    up is filled in."""
+    wanted = name.strip().lower()
+    for row in registry.list_providers():
+        if wanted in (str(a).strip().lower() for a in row.get("aliases") or []):
+            return True
+        if str(row.get("name") or "").strip().lower() == wanted and (
+            row.get("enabled") or any(row.get(field) for field in STORED_SECRET_FIELDS)
+        ):
+            return True
+    return False
 
 
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
@@ -184,6 +203,18 @@ def _provider_fields(data: dict[str, Any], existing: dict[str, Any]) -> dict[str
         raise HTTPException(status_code=400, detail=f"preset: no such preset {preset!r}")
     data["preset"] = preset
     return data
+
+
+def _refuse_bad_fields(data: dict[str, Any], existing: dict[str, Any]) -> None:
+    """Raise 400 for a provider type's own field that is malformed (Azure's
+    version, Bedrock's region, Vertex's project, the address). A value the
+    stored row has already is never judged (kazma_core.provider_setup)."""
+    from kazma_core.provider_setup import field_problems
+
+    entry = {**data, "preset": data.get("preset") or existing.get("preset") or ""}
+    bad = [p for p in field_problems(entry, existing) if p["code"] == "malformed"]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"{bad[0]['field']}: not a value this provider takes")
 
 
 def _restore_url(field: str, posted: Any, stored: Any) -> Any:
@@ -385,7 +416,13 @@ async def _adapter_from_saved_settings(platform: str) -> None:
 
 def create_providers_router(config_store: ConfigStore) -> APIRouter:
     """Create the unified providers & connectors router."""
-    router = APIRouter(tags=["providers"])
+    # A refused body is never answered back: it holds a key (NoEchoRoute).
+    router = APIRouter(tags=["providers"], route_class=NoEchoRoute)
+    # Before this router's /api/providers/{name}/...: the guided setup and the
+    # tidying of rows that repeat each other.
+    from kazma_ui.provider_setup_api import add_provider_setup_routes
+
+    add_provider_setup_routes(router)
 
     # ── LLM Providers ──────────────────────────────────────────────────
 
@@ -480,14 +517,22 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         registry = get_model_registry()
         data = req.model_dump()
         data["api_key"] = _sanitize_api_key(str(data.get("api_key") or ""))
+        if data.pop("create", False) and _name_taken(registry, data["name"]):
+            raise HTTPException(status_code=409, detail={
+                "code": "name_taken", "message": "There is already a provider with this name.", "field": "name"})
 
-        existing = registry.get_provider(data["name"]) or {}
+        # The row this save writes, by its exact name: a fuzzy match made a new
+        # keyless ``router`` beside a keyed ``openrouter`` "move" that key.
+        existing = exact_row(registry, data["name"]) or {}
+        _refuse_bad_fields(data, existing)
         data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
         # A stored secret is kept only for the address it was saved with: a
         # key posted masked beside another address is refused, and no stored
         # header or extra key is carried to it (2026-11-15).
         if address_moved(str(data.get("base_url") or ""), existing):
-            if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
+            # Posted empty it was kept all the same (a save never blanks a
+            # stored key), and went to the new address (2026-11-26).
+            if (not data.get("api_key") or _is_masked_placeholder(data["api_key"])) and _holds_key(registry, existing):
                 raise HTTPException(status_code=400, detail=f"api_key: {MOVED_KEY_MESSAGE}")
             existing = {k: v for k, v in existing.items() if k not in STORED_SECRET_FIELDS}
         if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
@@ -572,6 +617,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         }
         if check["ok"]:
             out["chat_ms"] = out["latency_ms"] = int(check.get("ms") or 0)
+            for said in ("answer", "price", "cost_usd", "thinking"):
+                out[said] = check.get(said)
         else:
             out["error_code"] = check.get("error_code")
             out["error"] = check.get("error")

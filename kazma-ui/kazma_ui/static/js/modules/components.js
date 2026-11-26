@@ -385,7 +385,7 @@ export function kazmaApp() {
                 if (Alpine.store('search').open) {
                     Alpine.store('search').close();
                 } else if (Alpine.store('modal').open) {
-                    Alpine.store('modal').close();
+                    Alpine.store('modal').dismiss();
                 }
             }
 

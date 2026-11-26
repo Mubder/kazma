@@ -148,7 +148,9 @@
   </div>
 
   <!-- ── Create Workspace Modal ── -->
-  <div x-show="showCreateModal" class="modal-overlay" x-transition x-cloak @click.self="showCreateModal = false">
+  <div x-show="showCreateModal" class="modal-overlay" x-transition x-cloak data-dialog-guard x-effect="showCreateModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showCreateModal = false)"
+             @keydown.escape.window="showCreateModal && KazmaDialogGuard.escape($event, $el, () => showCreateModal = false)">
     <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-create-title">
       <div class="modal-header">
         <h2 id="ws-create-title" class="ws-modal-title"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h2>
@@ -207,7 +209,9 @@
   </div>
 
   <!-- ── GitHub Repo Picker Modal ── -->
-  <div x-show="showRepoPicker" class="modal-overlay" x-transition x-cloak @click.self="showRepoPicker = false">
+  <div x-show="showRepoPicker" class="modal-overlay" x-transition x-cloak data-dialog-guard x-effect="showRepoPicker && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showRepoPicker = false)"
+             @keydown.escape.window="showRepoPicker && KazmaDialogGuard.escape($event, $el, () => showRepoPicker = false)">
     <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-repo-title">
       <div class="modal-header">
         <h2 id="ws-repo-title" class="ws-modal-title"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.repo_picker_title') }}</h2>

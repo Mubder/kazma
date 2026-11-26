@@ -47,7 +47,8 @@ __all__ = [
 ]
 
 #: The setting holding the owner's prices: ``{"provider:model" or "model":
-#: {"input": usd_per_1m, "output": usd_per_1m}}``.
+#: {"input": usd_per_1m, "output": usd_per_1m, "cached_input": usd_per_1m}}``
+#: (``cached_input`` is optional).
 OWNER_PRICES_KEY = "models.prices"
 
 #: The highest price per million tokens a setting may hold (a typo guard:
@@ -62,6 +63,9 @@ class Price:
     input_per_1m: float
     output_per_1m: float
     source: str  # "owner" | "local" | "table"
+    #: Input served from the provider's cache, or None: not known, and billed
+    #: at a tenth of the input price (``llm_provider.cost_from_usage``).
+    cached_input_per_1m: float | None = None
 
 
 def _number(value: Any) -> float | None:
@@ -89,7 +93,13 @@ def parse_owner_prices(raw: Any) -> dict[str, Price]:
         inp, outp = _number(entry.get("input")), _number(entry.get("output"))
         if inp is None or outp is None:
             continue
-        out[key] = Price(inp, outp, "owner")
+        # An empty cached price is none; one that is not a price in range
+        # leaves the whole entry out (the route refuses it by name).
+        typed = entry.get("cached_input")
+        cached = _number(typed)
+        if cached is None and typed not in (None, ""):
+            continue
+        out[key] = Price(inp, outp, "owner", cached)
     return out
 
 
@@ -130,7 +140,8 @@ def price_for(
     outp = getattr(details, "output_per_1m", None)
     if inp is not None and outp is not None:
         source = (getattr(details, "sources", {}) or {}).get("input_per_1m") or "catalog"
-        return Price(float(inp), float(outp), str(source))
+        cached = getattr(details, "cached_input_per_1m", None)
+        return Price(float(inp), float(outp), str(source), None if cached is None else float(cached))
     return None
 
 

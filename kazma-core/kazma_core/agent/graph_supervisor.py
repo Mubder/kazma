@@ -1956,10 +1956,16 @@ async def supervisor_node(
         # fail identically on every model). Per-model cooldown prevents
         # hammering a provider that just failed.
         async def _try_failover_models(last_exc: Exception) -> Any:
+            from kazma_core.agent.content_refusal import (
+                already_told, is_content_refused, other_vendor, person_text, refusal_line,
+            )
+
             is_transient = isinstance(last_exc, retryable_exc) or bool(
                 getattr(last_exc, "transient", False)
             )
-            if not is_transient:
+            # One vendor's content filter: another vendor's backup may answer.
+            refused = is_content_refused(last_exc)
+            if not is_transient and not refused:
                 return None
             try:
                 from kazma_core.agent.nonstop import get_nonstop_config
@@ -1993,10 +1999,13 @@ async def supervisor_node(
                     if client is None:
                         client = registry.get_client(fb_model)
                         _failover_clients[fb_model] = client
+                    if refused and not other_vendor(turn_llm, client):
+                        continue  # the same filter would refuse it again
                     logger.warning(
-                        "[Failover] Primary model '%s' failed transiently — "
+                        "[Failover] Primary model '%s' %s — "
                         "trying failover model '%s'",
                         routed_model,
+                        "was refused by its provider's content filter" if refused else "failed transiently",
                         fb_model,
                     )
                     response = await invoke_llm_chat(
@@ -2016,6 +2025,12 @@ async def supervisor_node(
                     )
                     _served_by.append(fb_model)
                     _served_clients.append(client)
+                    if refused:
+                        # Said in the answer, not an alert: nothing is broken.
+                        if response.content and not response.tool_calls and not already_told(messages):
+                            line = refusal_line(person_text(messages), _primary_model_name(), fb_model)
+                            response.content = f"{line}\n\n{response.content}"
+                        return response
                     from kazma_core.observability.model_fallback import report_failover
 
                     report_failover(
@@ -2024,7 +2039,10 @@ async def supervisor_node(
                     )
                     return response
                 except Exception as fb_exc:
-                    _failover_cooldowns[fb_model] = now + ns.failover.cooldown_seconds
+                    if refused:
+                        last_exc.backup_tried = True
+                    if not is_content_refused(fb_exc):  # refusing one message is not being down
+                        _failover_cooldowns[fb_model] = now + ns.failover.cooldown_seconds
                     logger.warning(
                         "[Failover] model '%s' also failed: %s (cooldown %.0fs)",
                         fb_model,
@@ -2065,6 +2083,7 @@ async def supervisor_node(
                                exc_info=True)
     except Exception as exc:
         logger.error("[Supervisor] LLM call failed after retries: %s", exc)
+        from kazma_core.agent.content_refusal import person_text
         from kazma_core.retry import friendly_llm_error
 
         # Per-call ledger (observability §A): durable record of the failure.
@@ -2096,6 +2115,7 @@ async def supervisor_node(
                 or getattr(getattr(llm, "config", None), "base_url", "")
                 or ""
             ),
+            user_text=person_text(messages),
         )
         # Surface an HONEST failure rather than disguising it as a normal
         # assistant reply. ``turn_failed`` tells respond_node to skip

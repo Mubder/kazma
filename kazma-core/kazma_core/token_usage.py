@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, NamedTuple
 
-__all__ = ["token_counts"]
+__all__ = ["cache_write_tokens", "token_counts"]
 
 
 class _TokenCounts(NamedTuple):
@@ -44,7 +44,9 @@ def token_counts(usage: Any) -> _TokenCounts:
       ``output_tokens``, ``input_tokens_details.cached_tokens``;
     * Anthropic (Kazma's client): ``input_tokens`` is the prompt AFTER the
       cache, ``cache_read_input_tokens`` (and ``cache_creation_input_tokens``)
-      beside it, so the prompt is their sum.
+      beside it, so the prompt is their sum;
+    * an OpenAI-shaped answer naming ``cache_read_input_tokens`` too (a proxy
+      in front of Anthropic): its ``prompt_tokens`` includes them.
 
     The cached share is never more than the prompt.
     """
@@ -52,15 +54,30 @@ def token_counts(usage: Any) -> _TokenCounts:
         return _TokenCounts(0, 0, 0)
     completion = _count(usage.get("completion_tokens")) or _count(usage.get("output_tokens"))
     details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
-    cached = _count(details.get("cached_tokens")) if isinstance(details, Mapping) else 0
-    if "prompt_tokens" in usage:
+    cached = 0
+    if isinstance(details, Mapping):
+        cached = _count(details.get("cached_tokens")) or _count(details.get("cache_read_input_tokens"))
+    if usage.get("prompt_tokens") is not None:
         prompt = _count(usage.get("prompt_tokens"))
-        cached = cached or _count(usage.get("prompt_cache_hit_tokens")) or _count(usage.get("cached_tokens"))
+        cached = (cached or _count(usage.get("prompt_cache_hit_tokens")) or _count(usage.get("cached_tokens"))
+                  or _count(usage.get("cache_read_input_tokens")))
     elif "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage:
         read = _count(usage.get("cache_read_input_tokens"))
-        prompt = (_count(usage.get("input_tokens")) + read
-                  + _count(usage.get("cache_creation_input_tokens")))
+        prompt = _count(usage.get("input_tokens")) + read + cache_write_tokens(usage)
         cached = cached or read
     else:
         prompt = _count(usage.get("input_tokens"))
     return _TokenCounts(prompt, completion, min(cached, prompt))
+
+
+def cache_write_tokens(usage: Any) -> int:
+    """The prompt tokens a call wrote to the provider's cache, billed over the
+    input price: among the prompt's details (Model Studio's explicit cache)
+    or beside ``input_tokens`` (Anthropic, Bedrock). Never raises."""
+    if not isinstance(usage, Mapping):
+        return 0
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+    written = _count(details.get("cache_creation_input_tokens")) if isinstance(details, Mapping) else 0
+    if written or usage.get("prompt_tokens") is not None:
+        return written
+    return _count(usage.get("cache_creation_input_tokens"))

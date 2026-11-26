@@ -93,9 +93,48 @@ Azure") keeps the type it was made from, and speaks that type's format.
 A provider you delete stays deleted, one Kazma lists by itself included:
 it is not listed or added back at the next start until you add it again.
 
+### Adding one, step by step
+
+**Add provider** asks one thing at a time:
+
+1. **Provider**: search the list (cloud APIs, model hosts, cloud platforms,
+   servers on your network), or paste a key and Kazma says whose it looks
+   like. The key is recognised in your browser; it is sent nowhere for that.
+2. **Address**: the provider's own regions and endpoints (Qwen's Singapore,
+   US, Beijing, Hong Kong and per-workspace addresses, OpenAI's data regions,
+   an Azure resource, a Bedrock region, a Vertex AI project and region...),
+   and a custom address last. A value that is missing or malformed is said
+   before anything is sent.
+3. **Key**: with a link to the page where the provider makes one. The key is
+   kept in Kazma's vault when you save, and sent to that provider alone:
+   choosing another provider, or another host, clears it.
+4. **Check**: Kazma lists the models, then sends one test message when you
+   press **Send one test message** (never your chat), and shows the answer and
+   the price it knows. A model that was still thinking when the short test
+   ended works, and the page says so.
+5. **Use it**: which models the pickers show, the default model, and a backup
+   model from another vendor.
+
+Nothing you typed is lost: a click outside or Escape asks first, and a
+half-done setup is there when you come back. A key is never written to the
+browser's storage (nor one pasted in a wrong box), so after a reload it has to
+be pasted again. A name another provider has is refused.
+
+A provider that is already there at that address takes the key as one more
+key instead of a second row (**Make a separate row** is still offered). Rows
+that already repeat each other, and rows that are off with no key, are listed
+by **rows to tidy** above the list: merging moves every key and model to the
+row that stays, and a chat, a backup, a saved profile or X naming a merged row
+still finds it -- with the key of the row that stays first, so another account
+may pay from then on (the dialog says so). A row that is off and holds a key
+is not ticked. A row stays, with the reason, when a person's model list names
+it, a member may hold a key of their own for it, it lives on a key from the
+environment, its saved key cannot be read, or it has its own headers or
+sign-in.
+
 ### Headers, and an address as typed
 
-Under **Advanced** in the dialog:
+Under **Advanced** in the setup's key step, and in **Edit**:
 
 - **Headers** are sent with every request to the provider: a gateway's own
   sign-in, an organisation id, OpenRouter's app name. Their values are kept
@@ -137,7 +176,7 @@ anywhere in its path (DeepInfra's `/v1/openai`, Z.AI's `/api/paas/v4`);
 
 **Test Connection** sends the model one short message through the same client
 chat uses for the provider (Anthropic's own messages API for Anthropic,
-Bedrock's for Bedrock, and so on). In the Add / Edit dialog it checks the
+Bedrock's for Bedrock, and so on). In the setup and in **Edit** it checks the
 values as typed, without saving them; **Save** opens once the test answered,
 and a failed test offers **Save anyway** behind a confirmation. A failure says
 what failed (the key was refused, no such model, rate limited, unreachable,
@@ -145,12 +184,18 @@ an empty answer) and the HTTP status, never the provider's reply text. A
 cloud provider with no key is saved switched off, and cannot be switched on
 until it has one. Two providers at one address are named on the list.
 
+A dialog you typed into (this one, a connector, a profile, an MCP server, a
+scheduled task, a workspace) asks before a click outside it or Escape drops
+what you typed.
+
 ### Prices
 
 A call's cost is the model's own price, or it is shown as **unknown**:
 
 1. your price for the model (**Settings → Providers & Connectors → Models →
-   Model prices**, in US dollars per million tokens). That card also lists the
+   Model prices**, in US dollars per million tokens: input, output and, if you
+   like, cached input -- the tokens the provider served from its cache, which
+   cost a tenth of the input price when you set none). That card also lists the
    models used in the last 30 days that a working provider serves with no
    known price;
 2. free, for a server on this computer or your network;
@@ -301,6 +346,26 @@ does not answer twice in a row is shown as Unreachable, and when it is the
 provider in use you are told once, and again when it answers. A key the
 provider refused gives way to its next key, if it has one. Providers with no
 model list (Azure, Bedrock, Vertex) are not checked this way.
+
+**A refusal by a provider's content filter** (Qwen's `data_inspection_failed`,
+Azure's and OpenAI's content policy, DeepSeek's "Content Exists Risk",
+Anthropic's and Bedrock's) is asked once and goes to the first backup model of
+another vendor (another region of the same vendor is not one); the answer
+begins with a line saying so. With no such backup, the reply says which filter
+refused it and what can be done. The last summary of a turn that ended with no
+answer text is asked of the turn's own model only.
+
+**A model's thinking text is kept out of its answer** when the provider sends
+it in a field of its own, as parts of a list, or in `<think>` tags of the
+shapes models write: an opening tag alone on its line at the start, or a lone
+closing tag alone on its line or at a sentence's end. An answer that names
+the tag mid-sentence or in code is left whole, and so is
+`<think>...</think>` on one line with the answer. An answer that itself
+writes the tag in one of the cut shapes (an opening tag alone on the first
+line, a closing tag alone on a line or right after a full stop) cannot be
+told from thinking and is cut there. A model that thinks with no opening tag
+shows its thinking while it streams, until its closing tag; the saved answer
+does not hold it.
 
 **The backup model** (Settings → System → Non-stop → failover) must be one a
 provider can answer for: switched on, with a key or on your network, listing

@@ -220,6 +220,8 @@ def providers_of(account: str, registry: Any) -> list[dict[str, Any]]:
     ``own`` (a key of theirs is kept), never the key. Raises
     ``IdentityUnavailable`` and :class:`OwnKeyUnreadable`. Blocking."""
     from kazma_core.models.options import model_options
+    from kazma_core.provider_endpoints import key_page_for
+    from kazma_core.providers import PROVIDER_PRESETS
     from kazma_core.spaces.person_models import offered
 
     listed = offered(model_options(registry, details=False), person=account)
@@ -230,10 +232,17 @@ def providers_of(account: str, registry: Any) -> list[dict[str, Any]]:
         if not name or name in seen:
             continue
         seen.add(name)
-        if not _takes_own_key(registry.get_provider(name)):
+        row = registry.get_provider(name)
+        if not _takes_own_key(row):
             continue
+        # The same steps as the install's own setup: where a key is made, and
+        # which provider its shape must be of.
+        preset = str((row or {}).get("preset") or "").strip().lower() or name.lower()
+        known = PROVIDER_PRESETS.get(preset) or {}
         out.append({"provider": name, "label": str(option.get("provider_label") or name),
                     "model": str(option.get("model") or ""),
+                    "preset": preset if known else "",
+                    "key_page": key_page_for(preset, str((row or {}).get("base_url") or ""), known),
                     "own": bool(_read_key(account, name))})
     return sorted(out, key=lambda p: p["label"].lower())
 

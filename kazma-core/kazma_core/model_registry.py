@@ -179,6 +179,8 @@ class DiscoveryResult:
     detail: str = ""
     cached: list[str] = field(default_factory=list)
     source: str = "provider"
+    #: What the list said about each model, by id (``model_details.from_listing``).
+    details: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def failed(cls, error: str, detail: str, *, cached: list[str] | None = None) -> DiscoveryResult:
@@ -244,6 +246,44 @@ class ModelRegistry:
     def _config_changed(self) -> None:
         with self._lock:
             self._generation += 1
+
+    @property
+    def config_store(self) -> Any:
+        """The settings store this registry reads and writes."""
+        return self._config_store
+
+    def forget_client(self, name: str) -> None:
+        """Drop the cached client of the provider *name* (its row changed)."""
+        self._clients.pop((name or "").strip(), None)
+
+    def resolve_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Stored provider *rows* with their vault references read now (a
+        reference that does not open is empty), normalized. Blocking."""
+        resolve = getattr(self._config_store, "_resolve_vault_value", None)
+        out = []
+        for row in rows:
+            held = resolve("providers.list", row, migrate=False) if callable(resolve) else row
+            out.append(self._normalize_provider_entry(held if isinstance(held, dict) else row))
+        return out
+
+    def update_provider_rows(self, updater: Any, *, removed_presets: Any = ()) -> None:
+        """Change the stored provider list in one read-modify-write
+        (``atomic_update``): *updater* takes the rows as stored -- vault
+        references unresolved -- and returns them. The catalog names in
+        *removed_presets* are then remembered as deleted. Blocking."""
+        from kazma_core.model_registry_store import REMOVED_PRESETS_KEY
+
+        try:
+            self._config_store.atomic_update("providers.list", updater, category="providers")
+            gone = {str(n) for n in removed_presets}
+            if gone:
+                self._config_store.atomic_update(
+                    REMOVED_PRESETS_KEY,
+                    lambda held: sorted({str(n) for n in (held if isinstance(held, list) else [])} | gone),
+                    category="providers",
+                )
+        finally:
+            self._config_changed()
 
     def prices_changed(self) -> None:
         """The owner's model prices changed: every client is built again with
@@ -846,6 +886,7 @@ class ModelRegistry:
         if price is not None:
             fields["input_cost_per_1m"] = price.input_per_1m
             fields["output_cost_per_1m"] = price.output_per_1m
+            fields["cached_input_cost_per_1m"] = price.cached_input_per_1m
         return LLMConfig.from_dict(fields)
 
     def _active_model_if_owned_by(self, provider_name: str) -> str:
@@ -925,8 +966,14 @@ class ModelRegistry:
 
         if ":" not in str(ref or ""):
             return "", str(ref or "").strip()
-        names = [str(r.get("name") or "") for r in (rows if rows is not None else self.list_providers())]
-        return split_ref(ref, names)
+        listed = rows if rows is not None else self.list_providers()
+        named, model = split_ref(ref, [str(r.get("name") or "") for r in listed])
+        if not named:
+            # A row merged into another answers to the name it had.
+            aliases = {str(a): str(r.get("name") or "") for r in listed for a in r.get("aliases") or []}
+            named, model = split_ref(ref, aliases)
+            named = aliases.get(named, "")
+        return named, model
 
     # ── Model discovery ────────────────────────────────────────────
 
@@ -979,7 +1026,9 @@ class ModelRegistry:
         if not base_url:
             # Google Vertex AI has no static /models endpoint — models are
             # hardcoded because the base URL is computed per project/location.
-            if clean_name == "google":
+            preset_name = str(provider_entry.get("preset") or "").strip().lower() or clean_name.lower()
+            own_preset = PROVIDER_PRESETS.get(preset_name) or {}
+            if preset_name == "google":
                 if api_key:
                     try:
                         async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
@@ -1010,7 +1059,7 @@ class ModelRegistry:
                                         await asyncio.to_thread(
                                             self._prune_stale_selected_models, clean_name, found
                                         )
-                                    return DiscoveryResult(True, list(found))
+                                    return DiscoveryResult(True, list(found), details=google_details)
                             problem = f"Google answered HTTP {resp.status_code}."
                     except Exception as exc:
                         logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
@@ -1026,6 +1075,8 @@ class ModelRegistry:
                 from kazma_core.providers import GEMINI_MODELS
                 keep(list(GEMINI_MODELS))
                 return DiscoveryResult(True, list(GEMINI_MODELS), source="built_in")
+            if own_preset and not own_preset.get("models_endpoint"):
+                return self._typed_models(provider_entry)  # Bedrock: no address, no list
             logger.warning("discover_models: no base_url for %r", clean_name)
             return failed("no_base_url", "The provider has no base URL.")
 
@@ -1037,9 +1088,7 @@ class ModelRegistry:
         if preset and not models_path:
             # Azure deployments and Bedrock model ids are the owner's own
             # list: there is no endpoint that lists them for a key.
-            own = self._normalize_models(provider_entry.get("models", []))
-            return DiscoveryResult(True, own, source="manual") if own else failed(
-                "no_models_endpoint", "This provider has no model list: type its models.")
+            return self._typed_models(provider_entry)
 
         # Build the full URL — base_url + models_path.
         # Most OpenAI-compatible APIs expect {base_url}/models where base_url
@@ -1128,7 +1177,7 @@ class ModelRegistry:
                 await self._save_reported_details(clean_name)
             if candidate is None:
                 await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
-            return DiscoveryResult(True, list(model_ids))
+            return DiscoveryResult(True, list(model_ids), details=listed_details)
 
         except ValueError as exc:  # a body that is not JSON
             logger.error("discover_models failed for %r: %s", clean_name, type(exc).__name__)
@@ -1136,6 +1185,16 @@ class ModelRegistry:
         except Exception as exc:  # no answer: network, TLS, a client that failed
             logger.error("discover_models failed for %r: %s", clean_name, exc)
             return failed("unreachable", f"The provider could not be reached ({type(exc).__name__}).")
+
+    def _typed_models(self, entry: dict[str, Any]) -> DiscoveryResult:
+        """The models typed for a provider that lists none (Azure's
+        deployments, Bedrock's ids)."""
+        own = self._normalize_models(entry.get("models", []))
+        if own:
+            return DiscoveryResult(True, own, source="manual")
+        return DiscoveryResult.failed(
+            "no_models_endpoint", "This provider has no model list: type its models.",
+            cached=list(self._discovered_models.get(str(entry.get("name") or ""), [])))
 
     async def _save_reported_details(self, provider_name: str) -> None:
         """Keep what the provider's list said about its models (providers
@@ -1491,7 +1550,8 @@ class ModelRegistry:
         """Return provider entry by name (fuzzy, case-insensitive matching).
 
         Resolution order:
-            1. Exact case-insensitive match on ``name``
+            1. Exact case-insensitive match on ``name``, then on an ``aliases``
+               entry (a row merged into this one: provider_setup.tidy)
             2. Exact case-insensitive match on ``display_name``
             3. Substring match: ``name`` contains the query (e.g.
                ``"Xiaomi MiMo"`` matches query ``"xiaomi"``)
@@ -1507,6 +1567,9 @@ class ModelRegistry:
         for provider in self.list_providers():
             p_name = str(provider.get("name", "")).strip().lower()
             if p_name == clean_name:
+                return dict(provider)
+        for provider in self.list_providers():
+            if clean_name in (str(a).strip().lower() for a in provider.get("aliases") or []):
                 return dict(provider)
         # Pass 2: exact match on display_name
         for provider in self.list_providers():
@@ -1527,6 +1590,13 @@ class ModelRegistry:
             return dict(matches[0])
         return None
 
+    def provider_row(self, name: str) -> dict[str, Any] | None:
+        """The row named exactly *name* (``provider_check.exact_row``): the
+        one :meth:`upsert_provider` writes."""
+        from kazma_core.provider_check import exact_row
+
+        return exact_row(self, name)
+
     def upsert_provider(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert or update a provider entry.
 
@@ -1546,7 +1616,7 @@ class ModelRegistry:
         if incoming_key and ("****" in incoming_key or incoming_key == "***"):
             from kazma_core.provider_check import address_moved
 
-            existing_provider = self.get_provider(name)
+            existing_provider = self.provider_row(name)
             # Kept only for the address it was saved with (2026-11-15): a
             # masked key beside another address is cleared, never moved.
             if (
@@ -1558,8 +1628,22 @@ class ModelRegistry:
                 data["api_key"] = ""  # Clear the masked placeholder
 
         providers = self.list_providers()
+        cleared: set[str] = set()
         for provider in providers:
             if provider.get("name") == name:
+                from kazma_core.provider_check import STORED_SECRET_FIELDS, address_moved
+
+                if address_moved(str(data.get("base_url") or ""), provider):
+                    if not data.get("api_key"):
+                        cleared.add(name)
+                    # A secret goes to the address it was saved with alone: an
+                    # extra key the caller did not name was sent to the new
+                    # one, and so was the key itself (the review of
+                    # d3ae5b2c8, N3: the route refused it, this writer kept it).
+                    for secret in STORED_SECRET_FIELDS:
+                        if not data.get(secret):
+                            provider.pop(secret, None)
+                            data.pop(secret, None)
                 for key, value in data.items():
                     if key == "models":
                         provider["models"] = self._normalize_models(value)
@@ -1571,7 +1655,7 @@ class ModelRegistry:
                         provider[key] = value
                 if not provider.get("display_name"):
                     provider["display_name"] = name
-                self._save_providers(providers)
+                self._save_providers(providers, cleared=cleared)
                 # Invalidate cached client for this provider
                 self._clients.pop(name, None)
                 try:
@@ -1884,10 +1968,13 @@ class ModelRegistry:
         set_as_typed_urls(r.get("base_url") for r in rows if r.get("url_as_typed"))
         return rows
 
-    def _save_providers(self, providers: list[dict[str, Any]], *, removed: frozenset[str] | set[str] | None = None) -> None:
+    def _save_providers(
+        self, providers: list[dict[str, Any]], *, removed: frozenset[str] | set[str] | None = None,
+        cleared: frozenset[str] | set[str] = frozenset(),
+    ) -> None:
         from kazma_core.model_registry_store import save_providers
 
-        save_providers(self._config_store, providers, removed=removed)
+        save_providers(self._config_store, providers, removed=removed, cleared=cleared)
         self._config_changed()
 
     def _removed_presets(self) -> frozenset[str]:

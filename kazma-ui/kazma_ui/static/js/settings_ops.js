@@ -372,12 +372,27 @@
             const data = await this._fetch('/api/account/model-keys?_=' + Date.now());
             if (data && data.ok && Array.isArray(data.providers)) {
                 this.ownKeys = data.providers.slice();
+                this.ownKeyShapes = Array.isArray(data.key_shapes) ? data.key_shapes : [];
                 this.ownKeysFailed = false;
             } else {
                 this.ownKeys = [];
                 this.ownKeysFailed = true;
             }
             this.ownKeysLoaded = true;
+        },
+
+        /* The providers a typed key looks like, when its own is not one of
+         * them; "" when it fits or says nothing. Matched here: sent nowhere. */
+        ownKeyMismatch(p) {
+            const key = String(this.ownKeyDraft[p.provider] || '').trim();
+            if (key.length < 8 || /\s/.test(key) || !p.preset) return '';
+            const shape = this.ownKeyShapes.find((s) => new RegExp(s.pattern).test(key));
+            if (!shape || shape.providers.some((q) => q.id === p.preset)) return '';
+            return shape.providers.map((q) => q.name).join(', ');
+        },
+
+        ownKeyHost(p) {
+            try { return new URL(p.key_page).host; } catch (e) { return ''; }
         },
 
         ownKeyState(p) {
@@ -416,6 +431,7 @@
                 try { data = await resp.json(); } catch (e) { data = {}; }
                 if (resp.ok && data.ok) {
                     this.ownKeyDraft = Object.assign({}, this.ownKeyDraft, { [p.provider]: '' });
+                    this.ownKeyAnswer = Object.assign({}, this.ownKeyAnswer, { [p.provider]: String(data.answer || '') });
                     showToast(_t('settings.own_keys_saved', 'Your own key is kept. Your calls to {provider} use it now.', { provider: p.label }), 'success');
                     await this.loadOwnKeys();
                 } else {

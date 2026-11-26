@@ -108,8 +108,10 @@
                     <section class="pc-panel" aria-label="{{ t('settings.llm_providers') }}">
                         <div class="pc-phead">
                             <span class="pc-ptitle" x-text="'{{ t('settings.configured') }} · ' + hubProviders.length"></span>
-                            <button class="btn btn-primary btn-sm" id="provider-add" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
+                            <button class="btn btn-primary btn-sm" id="provider-add" @click="openProviderSetup()">+ {{ t('settings.add_provider') }}</button>
                         </div>
+                        <button type="button" class="pc-fold pc-tidy" id="provider-tidy-open" x-show="tidyCount() > 0" x-cloak
+                                @click="tidy.open = true" x-text="tidyLabel()"></button>
 
                         <div x-show="hubProvidersLoaded && hubProviders.length === 0" class="empty-state" x-cloak>
                             {{ t('settings.no_providers') }}
@@ -528,6 +530,7 @@
                             <div class="mc-price-head" x-show="modelPrices.length" x-cloak>
                                 <span>{{ t('settings.model_prices_model') }}</span>
                                 <span>{{ t('settings.model_prices_input') }}</span>
+                                <span>{{ t('settings.model_prices_cached') }}</span>
                                 <span>{{ t('settings.model_prices_output') }}</span>
                                 <span></span>
                             </div>
@@ -537,6 +540,8 @@
                                            aria-label="{{ t('settings.model_prices_model') }}">
                                     <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.input"
                                            aria-label="{{ t('settings.model_prices_input') }}">
+                                    <input class="form-input model-price-cached" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.cached"
+                                           aria-label="{{ t('settings.model_prices_cached') }}" placeholder="{{ t('settings.model_prices_cached_ph') }}">
                                     <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.output"
                                            aria-label="{{ t('settings.model_prices_output') }}">
                                     <button type="button" class="btn btn-ghost btn-sm" @click="removeModelPrice(i)"
@@ -1029,19 +1034,15 @@
              MODALS
              ═══════════════════════════════════════════════════════════ -->
 
-        <!-- Provider Add/Edit Modal -->
-        <div x-show="hubProviderModal" x-cloak class="modal-overlay" @click.self="hubProviderModal = false">
+        {% include "components/provider_setup.html" %}
+
+        <!-- Provider edit modal: every field of a saved provider. A new one is
+             set up in the guided setup above. -->
+        <div x-show="hubProviderModal" x-cloak class="modal-overlay" data-dialog-guard x-effect="hubProviderModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => hubProviderModal = false)"
+             @keydown.escape.window="hubProviderModal && KazmaDialogGuard.escape($event, $el, () => hubProviderModal = false)">
             <div class="modal">
-                <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
-                <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;" x-cloak>
-                    <label for="f-provider-preset">{{ t('settings.choose_preset') }}</label>
-                    <select id="f-provider-preset" class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
-                        <option value="">{{ t('settings.choose_preset_placeholder') }}</option>
-                        <template x-for="preset in providerPresets" :key="preset.key">
-                            <option :value="preset.key" x-text="preset.key === 'custom' ? t('settings.hub.custom_endpoint') : preset.name" translate="no"></option>
-                        </template>
-                    </select>
-                </div>
+                <h2>{{ t('settings.edit_provider') }}</h2>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="provider-name">{{ t('settings.name_id') }}</label>
@@ -1214,7 +1215,9 @@
         </div>
 
         <!-- Connector Add/Edit Modal -->
-        <div x-show="hubConnectorModal" x-cloak class="modal-overlay" @click.self="hubConnectorModal = false">
+        <div x-show="hubConnectorModal" x-cloak class="modal-overlay" data-dialog-guard x-effect="hubConnectorModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => hubConnectorModal = false)"
+             @keydown.escape.window="hubConnectorModal && KazmaDialogGuard.escape($event, $el, () => hubConnectorModal = false)">
             <div class="modal">
                 <h2 x-text="hubEditingConnector.name ? '{{ t('settings.edit_connector') }}' : '{{ t('settings.add_connector') }}'"></h2>
                 <div class="form-group">
@@ -1319,7 +1322,9 @@
         </div>
 
         <!-- Saved Profile Modal -->
-        <div x-show="hubProfileModal" x-cloak class="modal-overlay" @click.self="hubProfileModal = false">
+        <div x-show="hubProfileModal" x-cloak class="modal-overlay" data-dialog-guard x-effect="hubProfileModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => hubProfileModal = false)"
+             @keydown.escape.window="hubProfileModal && KazmaDialogGuard.escape($event, $el, () => hubProfileModal = false)">
             <div class="modal">
                 <h2 x-text="hubEditingProfile._existing ? '{{ t('settings.edit_profile') }}' : '{{ t('settings.save_profile') }}'"></h2>
                 <div class="form-group">
@@ -2153,7 +2158,9 @@
         </div>
 
         <!-- Add MCP Server Modal -->
-        <div x-show="showMcpModal" class="modal-overlay" @click.self="showMcpModal = false" x-cloak>
+        <div x-show="showMcpModal" class="modal-overlay" data-dialog-guard x-effect="showMcpModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showMcpModal = false)"
+             @keydown.escape.window="showMcpModal && KazmaDialogGuard.escape($event, $el, () => showMcpModal = false)" x-cloak>
             <div class="modal">
                 <h2>{{ t('settings.add_server') }}</h2>
                 <div class="form-group">
@@ -2497,7 +2504,10 @@
               <template x-for="p in ownKeys" :key="p.provider">
                 <div class="account-list-row own-key-row" :data-provider="p.provider">
                   <span class="account-list-name"><span translate="no" x-text="p.label"></span> <span class="badge" :class="p.own ? 'badge-success' : 'badge-neutral'" x-text="ownKeyState(p)"></span></span>
-                  <span><input type="password" class="form-input" autocomplete="off" x-model="ownKeyDraft[p.provider]" aria-label="{{ t('settings.own_keys_input') }}" placeholder="{{ t('settings.own_keys_input') }}"></span>
+                  <span><input type="password" class="form-input" autocomplete="off" x-model="ownKeyDraft[p.provider]" aria-label="{{ t('settings.own_keys_input') }}" placeholder="{{ t('settings.own_keys_input') }}">
+                    <a class="ps-key-link own-key-link" x-show="ownKeyHost(p)" x-cloak :href="p.key_page" target="_blank" rel="noopener noreferrer"><span>{{ t('settings.setup.get_key') }}</span> <bdi dir="ltr" translate="no" x-text="ownKeyHost(p)"></bdi></a>
+                    <span class="text-warning own-key-mismatch" x-show="ownKeyMismatch(p)" x-cloak><span>{{ t('settings.setup.looks_like') }}</span> <bdi translate="no" x-text="ownKeyMismatch(p)"></bdi></span>
+                    <span class="setting-desc own-key-answer" x-show="p.own && ownKeyAnswer[p.provider]" x-cloak><span>{{ t('settings.setup.it_answered') }}</span> <bdi translate="no" dir="auto" x-text="ownKeyAnswer[p.provider]"></bdi></span></span>
                   <span class="account-list-actions">
                     <button type="button" class="btn btn-primary btn-sm" @click="saveOwnKey(p)" :disabled="!!ownKeyBusy[p.provider]">{{ t('settings.own_keys_use') }}</button>
                     <button type="button" class="btn btn-secondary btn-sm" x-show="p.own" x-cloak @click="removeOwnKey(p)">{{ t('settings.own_keys_remove') }}</button>
@@ -5949,6 +5959,7 @@
 <script src="/static/js/models.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_core.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_hub.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_provider_setup.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_agent.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_integrations.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_ops.js?v={{ js_version() }}"></script>

@@ -36,6 +36,7 @@ __all__ = [
     "CandidateRefused",
     "candidate_entry",
     "check_model",
+    "known_price",
     "list_models",
 ]
 
@@ -51,6 +52,9 @@ LOCAL_NAMES = _local_names()
 
 #: How long one check may wait for the model's answer.
 CHECK_TIMEOUT_S = 60.0
+
+#: How much of the model's answer the page shows.
+ANSWER_MAX = 400
 
 #: The one message a check sends.
 CHECK_PROMPT = "Reply with the word OK."
@@ -77,7 +81,7 @@ def _masked(key: str) -> bool:
 #: (providers stage 2: the dialog's Azure, Bedrock, Google and header fields).
 TYPED_FIELDS: tuple[str, ...] = (
     "preset", "url_as_typed", "secret_headers", "api_version", "region", "aws_access_key_id",
-    "aws_secret_access_key", "aws_session_token", "google_mode", "project_id", "location",
+    "aws_secret_access_key", "aws_session_token", "google_mode", "project_id", "location", "kind",
 )
 
 #: Typed fields that hold a secret: masked or empty means the stored one.
@@ -87,6 +91,17 @@ _SECRET_FIELDS = ("aws_secret_access_key", "aws_session_token")
 STORED_SECRET_FIELDS = (
     "api_key", "api_keys", "secret_headers", "aws_access_key_id", *_SECRET_FIELDS,
 )
+
+
+def exact_row(registry: Any, name: str) -> dict[str, Any] | None:
+    """The row named exactly *name*: the one ``ModelRegistry.upsert_provider``
+    writes. A write or a check of a named row is held against it, never
+    against ``get_provider``'s fuzzy match (a new ``router`` is not the stored
+    ``openrouter``; the review of d3ae5b2c8, N1)."""
+    wanted = str(name or "").strip()
+    if not wanted:
+        return None
+    return next((dict(p) for p in registry.list_providers() if p.get("name") == wanted), None)
 
 
 def address_moved(typed_base_url: str, stored: dict[str, Any] | None) -> bool:
@@ -165,11 +180,24 @@ def credentials_problem(registry: Any, entry: dict[str, Any], key: str = "") -> 
         return None if str(entry.get("project_id") or "").strip() else "project_required"
     if key_is_usable(coerce_api_key(key)):
         return None
-    if registry is not None and registry.get_provider(name) is not None:
+    if registry is not None and exact_row(registry, name) is not None:
         _url, resolved = registry.resolve_provider_credentials(name)
         if key_is_usable(coerce_api_key(resolved)):
             return None
     return "api_key_required"
+
+
+def _refuse_fields(entry: dict[str, Any], stored: dict[str, Any] | None) -> None:
+    """Refuse a candidate whose own fields are missing or malformed
+    (:func:`kazma_core.provider_setup.field_problems`), before anything is
+    sent to the address they would make."""
+    from kazma_core.provider_setup import field_problems
+
+    problems = field_problems(entry, stored)
+    if problems:
+        first = problems[0]
+        words = "is needed" if first["code"] == "missing" else "does not look right"
+        raise CandidateRefused(f"field_{first['code']}", f"{first['field']} {words}.")
 
 
 def _refuse_credentials(problem: str, registry: Any, pid: str, *, stored: bool, moved: bool) -> None:
@@ -206,7 +234,9 @@ def candidate_entry(
     from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
 
     pid = str(name or "").strip()
-    stored = registry.get_provider(pid) if pid else None
+    # The row by its exact name: a new ``router`` is not the stored
+    # ``openrouter`` (the review of d3ae5b2c8, N1).
+    stored = exact_row(registry, pid) if pid else None
     extra = {k: v for k, v in (typed or {}).items() if k in TYPED_FIELDS}
     preset_id = str(extra.get("preset") or (stored or {}).get("preset") or pid).strip().lower()
     preset = PROVIDER_PRESETS.get(preset_id) if preset_id else None
@@ -237,6 +267,7 @@ def candidate_entry(
     if preset is not None and preset_id != pid.lower():
         entry["preset"] = preset_id
     entry.setdefault("display_name", str((preset or {}).get("name") or pid))
+    _refuse_fields(entry, stored)
     # Moved: the stored key is not this address's, so it cannot count.
     problem = credentials_problem(None if moved else registry, entry, key)
     if problem is not None:
@@ -290,6 +321,8 @@ def _check_error(exc: BaseException) -> tuple[str, str]:
     kind = str(getattr(exc, "kind", "") or "")
     if kind in ("unusable_answer", "stream_truncated"):
         return "unusable_answer", "The provider answered, but not with a model answer."
+    if kind == "content_refused":
+        return "content_refused", "The provider's content filter refused the message."
     if kind == "rate_limit_exhausted":
         return "rate_limited", "The provider is limiting how often it may be called (HTTP 429)."
     status = _extract_http_status_code(exc if isinstance(exc, Exception) else Exception(str(exc)))
@@ -338,6 +371,10 @@ async def check_model(
         "extra_headers": entry.get("secret_headers") or {},
         "api_version": str(entry.get("api_version") or ""),
     })
+    price = await asyncio.to_thread(known_price, entry, model)
+    if price is not None:
+        config.input_cost_per_1m, config.output_cost_per_1m = price["input"], price["output"]
+        config.cached_input_cost_per_1m = price["cached_input"]
     direct_url = str(config.base_url or "")
     typed_key = str(config.api_key or "")
     # A Google client may read Application Default Credentials: off the loop.
@@ -373,10 +410,37 @@ async def check_model(
             except Exception:  # noqa: BLE001 - a client that cannot close changes no answer
                 logger.debug("[provider-check] client close failed", exc_info=True)
     await _ledger_own_key_check(own_key_of, entry, model, resp, started, "")
-    if not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None):
+    empty = not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None)
+    thinking = empty and int(getattr(resp, "reasoning_chars", 0) or 0) > 0
+    if empty and not thinking:
         return {"ok": False, "model": model, "reachable": True, "error_code": "empty",
                 "error": "The provider returned an empty completion."}
-    return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True}
+    return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True,
+            # A model cut at the check's own limit while it was thinking works.
+            "thinking": thinking,
+            "answer": str(getattr(resp, "content", "") or "").strip()[:ANSWER_MAX], "price": price,
+            "cost_usd": float(resp.cost_usd) if getattr(resp, "cost_known", False) else None}
+
+
+def known_price(entry: dict[str, Any], model: str, listed: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """What *model* costs at the candidate *entry*, as the pages show it
+    (dollars per million tokens, and where the price is from), or None: the
+    owner's price, free on this network, what its own list said (*listed*),
+    Kazma's dated catalog. Reads the settings store: off the event loop."""
+    from kazma_core.model_details import ModelDetails, details_for
+    from kazma_core.model_prices import price_for
+
+    name = str(entry.get("name") or "")
+    details = ModelDetails()
+    details.fill(listed or {}, "provider")
+    known = details_for(name, model, preset=str(entry.get("preset") or ""))
+    details.fill(known.as_dict(), "catalog")
+    details.sources = {**known.sources, **{k: "provider" for k in (listed or {})}}
+    price = price_for(name, str(entry.get("base_url") or ""), model, details=details)
+    if price is None:
+        return None
+    return {"input": price.input_per_1m, "output": price.output_per_1m,
+            "cached_input": price.cached_input_per_1m, "source": price.source}
 
 
 def _go_direct(client: Any, url: str, key: str) -> None:

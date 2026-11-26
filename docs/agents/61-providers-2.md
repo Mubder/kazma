@@ -153,3 +153,63 @@ Gates: `tests/test_provider_keys.py`, and in a browser (by the sidebar)
 the setup wall stayed up over a network server in use: readiness now
 counts the active provider's address (`setup_api.compute_setup_status`).
 
+
+**Stage 5: the guided setup** (2026-11-25; the owner: "the add provider tab
+is so basic ... if I clicked outside the card the card gone").
+- **The data is `kazma_core/provider_endpoints.py`**: groups, each provider's
+  endpoints (the first is the preset's own address), the fields an address or
+  a row is made of (anchored, linear patterns: a typed value cannot name
+  another host), key pages, key shapes. `providers.catalog()` serves it;
+  `GET /api/providers/setup` the rest. A new provider takes its group and
+  endpoints there, and its words `settings.setup.endpoint_<id>` /
+  `field_<id>` in `i18n/catalog/provider_setup.py`.
+- **The rules are `kazma_core/provider_setup.py`**: `endpoint_address`,
+  `field_problems` (asked by the check and the save; a value a row already
+  has is never judged), `rows_at` (one row per provider and
+  address), `add_key` and `tidy`. Both writers go through
+  `ModelRegistry.update_provider_rows` (one `atomic_update` of the rows as
+  stored). A merge keeps every key as an extra key, records the merged names
+  as the kept row's `aliases` (`get_provider`, `split_model_ref` and X's exact
+  lookup answer them) and is refused whole when a row, or a key in it, changed
+  meanwhile (with the vault on a new key leaves the stored row as it was, so
+  the keys are read again inside the update); a row a person's list names, a
+  member may hold a key for (Spaces on), that is on and lives on a key of the
+  environment (`env_key`; an off row sends nothing, so it lives on none), or
+  with a key that does not open, its own headers
+  or sign-in, stays with the reason. The owner's prices are copied before the
+  rows are written and dropped from the old name after. A row that is off and
+  holds a key is not ticked, and the confirm says whose key is used first.
+- **A secret goes to the address it was saved with, and a typed key to the
+  provider it was typed for** (the review, 2026-11-26): a save that moves a
+  row and names no key, extra keys, headers or AWS fields drops them
+  (`ModelRegistry.upsert_provider`, every writer), the page's save of one with
+  the key left empty is refused as a masked one is, and a save is checked
+  against the row it writes, by its exact name (`ModelRegistry.provider_row`,
+  never `get_provider`'s fuzzy match: a new `router` is not `openrouter`; the
+  review of d3ae5b2c8, N1, N3); `add_key` refuses a key with a line break or
+  another control character; a setup never writes over a set-up row
+  (`create`, 409 `name_taken`), `add_key` checks the row is still at the
+  address it was offered for, and the page carries a key to another provider
+  only from the search box or the "looks like a key from" button and clears
+  key and headers when the host changes. A refused body is not answered back
+  (`no_echo_route.NoEchoRoute`).
+- **The page** (`settings_provider_setup.js`,
+  `components/provider_setup.html`): a key is matched to a provider in the
+  page; nothing is sent to a provider before **Find the models**, and the one
+  test message only when it is pressed (a model still thinking at the test's
+  limit works, and the page says so); Tab stays in the dialog; a late answer about an earlier key is
+  dropped; the resumable draft (`localStorage`) holds only `DRAFT_FIELDS`,
+  never a key, a secret, a header, an address that can hold one, or a value
+  of a key's shape put in another box.
+- **A dialog typed into asks before a click outside or Escape closes it**
+  (`modules/dialog_guard.js`, `KazmaDialogGuard`): every overlay a click
+  outside closes carries the guard or is declared in
+  `tests/test_dialogs_keep_typed_input.py` with its reason.
+- **An origin is read from `request.base_url`, never `request.url`**
+  (`csrf.py`, `same_origin.py`): the whole URL holds the decoded path, and a
+  space in it (a provider named "Qwen 1") made every browser write to that
+  provider's routes a cross-origin one. Gate: `tests/test_csrf.py`.
+
+Gates: `tests/test_provider_setup.py`, `tests/test_provider_setup_review.py`, `tests/js/test_provider_setup_logic.js`,
+and in a browser (by the sidebar, EN/AR)
+`tests/e2e/test_provider_setup_browser.py`.
