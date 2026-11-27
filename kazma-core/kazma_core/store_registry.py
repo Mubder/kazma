@@ -82,6 +82,8 @@ __all__ = [
     "is_kazma_secret_file",
     "is_kazma_store",
     "is_secret_file_name",
+    "kazma_exclude_pathspecs",
+    "kazma_excluded_among",
     "kazma_file_under",
     "kazma_files_in",
     "kazma_paths_among",
@@ -1823,12 +1825,19 @@ def kazma_paths_among(root: str | Path, rel_paths: Iterable[str]) -> list[str]:
     For listings of many thousand paths: the predicate resolves its path
     (about a millisecond each), so every path is screened first by what can
     make it Kazma's -- its name (a secret file's, a protected store's, a
-    database's or a copy's), its place under the data dir, or being the file
-    ``KAZMA_ENV_FILE`` names -- and only a path the screen keeps is asked.
-    The screen is the predicate's own rules read on the text, so it narrows
-    the work, not the answer.
+    database's or a copy's), its place under the data dir, being the file
+    ``KAZMA_ENV_FILE`` names, or lying under a linked folder (a junction or
+    a symbolic link, which can lead anywhere: git tracks files through a
+    junction), or holding a Windows short name (``KAZMA-~1`` names the
+    folder it shortens) -- and only a path the screen keeps is asked. The root is
+    resolved once, so a root named through a link screens as its real
+    place. The screen is the predicate's own rules read on the text, so it
+    narrows the work, not the answer.
     """
-    base = Path(root)
+    try:
+        base = Path(root).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        base = Path(root)
     try:
         from kazma_core.paths import data_dir
 
@@ -1840,6 +1849,19 @@ def kazma_paths_among(root: str | Path, rel_paths: Iterable[str]) -> list[str]:
         env_file = os.path.normcase(str(Path(named).expanduser().resolve())) if named else ""
     except (OSError, RuntimeError, ValueError):
         env_file = ""
+    linked: dict[str, bool] = {}
+
+    def under_a_link(rel: str) -> bool:
+        parts = rel.replace("\\", "/").strip("/").split("/")[:-1]
+        here = ""
+        for part in parts:
+            here = f"{here}/{part}" if here else part
+            if here not in linked:
+                linked[here] = _links_out(base / here)
+            if linked[here]:
+                return True
+        return False
+
     found: set[str] = set()
     for rel in rel_paths:
         if not rel:
@@ -1854,10 +1876,84 @@ def kazma_paths_among(root: str | Path, rel_paths: Iterable[str]) -> list[str]:
             or bool(_DB_COPY_NAME.search(name))
             or (bool(data) and (full == data or full.startswith(data + os.sep)))
             or (bool(env_file) and full == env_file)
+            or under_a_link(rel)
+            or bool(_SHORT_NAME.search(rel))
         )
         if candidate and is_kazma_store(base / rel):
             found.add(rel)
     return sorted(found)
+
+
+#: Glob patterns, matched case-insensitively anywhere in a repository, for
+#: every name rule of :func:`is_kazma_store`: the secret files by name, the
+#: env files (templates too: a pathspec cannot keep them), and the
+#: databases, their sidecars and their copies.
+_EXCLUDED_NAMES: tuple[str, ...] = (
+    *sorted(SECRET_FILE_NAMES),
+    ".env", ".env.*",
+    *(f"*{suffix}" for suffix in _DB_SUFFIXES),
+    *(f"*{suffix}{mark}*" for suffix in _DB_SUFFIXES for mark in (".", "-", "_", "~")),
+)
+#: A Windows short name (``KAZMA-~1``): it names the folder it shortens.
+_SHORT_NAME = re.compile(r"~\d")
+
+
+def kazma_exclude_pathspecs(top: str | Path) -> list[str]:
+    """Git pathspecs that keep every path :func:`is_kazma_store` can accept by
+    its name or its place out of a read of the repository at *top*: each name
+    rule as ``:(top,exclude,glob,icase)**/<pattern>``, and the data dir and the
+    file ``KAZMA_ENV_FILE`` names, when they are inside the repository, as
+    ``:(top,exclude,literal)<path>``. :func:`kazma_excluded_among` answers
+    the same rules for paths. What only a file's contents decide (a SQLite file
+    under a folder linked into the data dir) cannot be a pathspec: a reader
+    drops such a section by its path after git runs
+    (``safety.git_kazma_files``)."""
+    specs = [f":(top,exclude,glob,icase)**/{pattern}" for pattern in _EXCLUDED_NAMES]
+    specs += [f":(top,exclude,literal){place}" for place in _excluded_places(top)]
+    return specs
+
+
+def kazma_excluded_among(top: str | Path, rel_paths: Iterable[str]) -> set[str]:
+    """Which of *rel_paths* -- paths from the top of the repository at *top*,
+    as git prints them -- :func:`kazma_exclude_pathspecs` keeps out of a
+    read: the last part matches a name pattern (case-insensitively), or the
+    path is a place or lies under one. The places are worked out once. The
+    gate checks the two agree with git itself
+    (``tests/test_git_reads_print_no_kazma_file.py``)."""
+    places = _excluded_places(top)
+    patterns = [pattern.lower() for pattern in _EXCLUDED_NAMES]
+    found: set[str] = set()
+    for rel in rel_paths:
+        text = rel.replace("\\", "/").strip("/")
+        leaf = text.rsplit("/", 1)[-1].lower()
+        if any(fnmatch.fnmatchcase(leaf, pattern) for pattern in patterns) or any(
+            text == place or text.startswith(place + "/") for place in places
+        ):
+            found.add(rel)
+    return found
+
+
+def _excluded_places(top: str | Path) -> list[str]:
+    """The data dir and the file ``KAZMA_ENV_FILE`` names, each as a path
+    from the repository at *top*, when it lies inside that repository."""
+    try:
+        base = Path(top).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        base = Path(top)
+    places: list[Path] = []
+    try:
+        from kazma_core.paths import data_dir
+
+        places.append(data_dir().resolve())
+    except (ImportError, OSError, RuntimeError):
+        pass  # no data dir to keep out; the name rules still hold
+    named = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
+    if named:
+        try:
+            places.append(Path(named).expanduser().resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass  # an unresolvable KAZMA_ENV_FILE names no file
+    return [place.relative_to(base).as_posix() for place in places if place != base and _under(place, base)]
 
 
 def _has_sqlite_header(path: Path) -> bool:

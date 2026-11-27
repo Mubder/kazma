@@ -62,9 +62,11 @@ IDE_READS: dict[str, str] = {
         "is_kazma_store on each file before it is read",
     "kazma-tui/kazma_tui/files.py::FilesPanel._read_preview_text":
         "is_kazma_store before the preview opens the file",
-    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run":
-        "git_policy.validate_read_paths: no --no-index, diff only in a repository, "
-        "every operand inside the workspace and asked is_kazma_store",
+    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run._ask":
+        "git_policy's card-less forms (kazma_operand_refusal and validate_read_paths: every "
+        "operand inside the workspace and asked is_kazma_store); a content read as "
+        "safety.git_kazma_files plans it: the predicate's name and place rules as exclude "
+        "pathspecs, every section kazma_paths_among accepts dropped; anything else the card",
     "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.review":
         "check_path_access(read) on each held path again, before it is read",
     "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.restore_hunk":
@@ -80,9 +82,6 @@ IDE_READS: dict[str, str] = {
 FIXED_PROCESSES: dict[str, str] = {
     "kazma-core/kazma_core/ide/env_context.py::_git":
         "git config --get remote.origin.url and git branch --show-current, literals",
-    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run._ask":
-        "a content read's own questions to git (safety.git_kazma_files: rev-parse, ls-files, "
-        "show-ref, rev-list --objects): names and object ids, never a file's contents",
     "kazma-gateway/kazma_gateway/agent_handler/commands.py::_try_ide_command":
         "/ide clone: git clone --depth 1 of https://github.com/<slug>.git into a new folder; "
         "reads no file of the workspace",
@@ -356,10 +355,6 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (root / "src" / "app.py").write_text("def greet_all(items):\n    return items\n",
                                          encoding="utf-8")
     (root / ".env.example").write_text("KAZMA_VAULT_KEY=put_yours_here\n", encoding="utf-8")
-    from kazma_core.safety import git_kazma_files
-
-    # Each test's repository is its own: no tip listing kept from another.
-    monkeypatch.setattr(git_kazma_files, "_tips", {})
     reset_ide_service()
     yield root
     reset_ide_service()
@@ -386,6 +381,17 @@ def _blind(monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_core import store_registry
 
     monkeypatch.setattr(store_registry, "is_kazma_store", lambda *_a, **_k: False)
+
+
+def _blind_with_its_exclusions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The git door's control: the predicate blind, and the exclusions the
+    door builds from the predicate's name and place rules
+    (``store_registry.kazma_exclude_pathspecs`` / ``kazma_excluded_among``)."""
+    from kazma_core import store_registry
+
+    _blind(monkeypatch)
+    monkeypatch.setattr(store_registry, "kazma_exclude_pathspecs", lambda _top: [])
+    monkeypatch.setattr(store_registry, "kazma_excluded_among", lambda _top, _paths: set())
 
 
 # ── The probes: what each door hands back for Kazma's files ─────────────
@@ -599,7 +605,14 @@ PROBES: dict[str, Callable[[Path, list], str]] = {
     "kazma-gateway/kazma_gateway/mcp_server.py::_tool_read_file": _probe_mcp_read,
     "kazma-gateway/kazma_gateway/mcp_server.py::_tool_search_code": _probe_mcp_search,
     "kazma-tui/kazma_tui/files.py::FilesPanel._read_preview_text": _probe_tui_preview,
-    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run": _probe_git,
+    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run._ask": _probe_git,
+}
+
+
+#: A read whose check is the predicate and rules built from it: its
+#: control blinds them all (the git door's exclusions, 2026-11-27).
+BLINDS: dict[str, Callable[[pytest.MonkeyPatch], None]] = {
+    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run._ask": _blind_with_its_exclusions,
 }
 
 
@@ -613,7 +626,7 @@ def test_no_ide_read_hands_back_a_kazma_file(read: str, install: Path, tool_call
 def test_control_with_the_predicate_blind_each_probe_finds_the_secret(
     read: str, install: Path, tool_calls: list, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _blind(monkeypatch)
+    BLINDS.get(read, _blind)(monkeypatch)
     seen = PROBES[read](install, tool_calls)
     assert SECRET in seen, f"{read}'s probe does not reach the predicate it names"
 
@@ -738,243 +751,8 @@ def test_the_ide_saves_no_kazma_configuration_and_still_opens_it(
         svc.resolve("kazma.yaml", write=True)
 
 
-# ── Read-only git compares the repository's versions, nothing else ──────
-
-
-def test_read_only_git_compares_no_two_paths_of_the_disk(install: Path) -> None:
-    """``diff --no-index`` is no read, and outside a repository ``diff``
-    would compare its operands as files: both are refused before git runs,
-    for folders and files alike."""
-    from kazma_core.ide.service import get_ide_service
-
-    svc = get_ide_service()
-    outside_a_repository = ["diff kazma-data src", "diff . src", "diff --stat kazma-data src",
-                            "diff --no-index kazma-data src", "diff --no-index .env src/app.py"]
-    answers = [asyncio.run(svc.git(c)) for c in outside_a_repository]
-    assert all(a["ok"] is False for a in answers), answers
-    assert SECRET not in json.dumps(answers)
-    # A repository that keeps Kazma's files out (as the shipped .gitignore
-    # does): the option is still no read, and ordinary reads work.
-    _commit(install, "src")
-    for command in ("diff --no-index kazma-data src", "diff --no-index . src"):
-        answer = asyncio.run(svc.git(command))
-        assert answer["ok"] is False and SECRET not in json.dumps(answer), (command, answer)
-    (install / "src" / "app.py").write_text("def greet_all(items):\n    return list(items)\n",
-                                             encoding="utf-8")
-    changed = asyncio.run(svc.git("diff -- src/app.py"))
-    assert changed["ok"] is True and "list(items)" in changed["output"], changed
-    for command in ("status --short", "log --oneline", "show --stat HEAD", "diff --stat", "diff"):
-        answer = asyncio.run(svc.git(command))
-        assert answer["ok"] is True and SECRET not in json.dumps(answer), (command, answer)
-
-
-def _without_the_new_rules(patch: pytest.MonkeyPatch) -> None:
-    """The control's policy: ``--no-index`` allowed, the repository guessed
-    from the ``.git`` folder, and git never asked."""
-    from kazma_core.ide import git_policy
-    from kazma_core.safety import git_kazma_files
-
-    patch.setitem(git_policy._FLAGS, "diff", git_policy._FLAGS["diff"] | {"--no-index"})
-    patch.setattr(git_policy, "is_a_repository", lambda _root: True)
-    patch.setattr(git_kazma_files, "read_refusal", lambda _root, _run: None)
-
-
-def test_control_the_old_policy_compares_folders_of_the_disk(
-    install: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The control: with the old policy the same reads print the secret file."""
-    from kazma_core.ide.service import get_ide_service
-
-    svc = get_ide_service()
-    _without_the_new_rules(monkeypatch)
-    assert SECRET in json.dumps(asyncio.run(svc.git("diff --no-index kazma-data src")))
-    assert SECRET in json.dumps(asyncio.run(svc.git("diff kazma-data src")))
-
-
-def _broken_head(root: Path) -> None:
-    (root / ".git" / "objects").mkdir(parents=True)
-    (root / ".git" / "refs").mkdir()
-    (root / ".git" / "HEAD").write_text("garbage\n", encoding="utf-8")
-
-
-def _unknown_extension(root: Path) -> None:
-    _git(root, "init", "-q")
-    _git(root, "config", "core.repositoryformatversion", "1")
-    _git(root, "config", "extensions.madeupext", "true")
-
-
-def _another_owner(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A repository git refuses for its owner: git's own switch for that,
-    with no ``safe.directory`` from any configuration. The IDE drops GIT_*
-    variables, so they are put back on the way to the process."""
-    _commit(root, "src")
-    empty = root.parent / "no-config"
-    empty.write_text("", encoding="utf-8")
-    real = subprocess.run
-
-    def run(argv, *args, **kwargs):
-        env = dict(kwargs.get("env") or {})
-        env.update({"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "GIT_CONFIG_GLOBAL": str(empty),
-                    "GIT_CONFIG_NOSYSTEM": "1"})
-        kwargs["env"] = env
-        return real(argv, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", run)
-
-
-_TURNED_DOWN = {
-    "a broken HEAD": lambda root, patch: _broken_head(root),
-    "an unknown extension": lambda root, patch: _unknown_extension(root),
-    "another owner": _another_owner,
-}
-
-
-@pytest.mark.parametrize("shape", sorted(_TURNED_DOWN))
-def test_a_diff_runs_only_in_a_work_tree_git_itself_accepts(
-    shape: str, install: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Git is asked (``rev-parse --is-inside-work-tree``, the read's own argv
-    and environment) before a content read: a folder it turns down is no
-    repository, whatever its ``.git`` holds."""
-    from kazma_core.ide.service import get_ide_service
-
-    _TURNED_DOWN[shape](install, monkeypatch)
-    svc = get_ide_service()
-    answers = [asyncio.run(svc.git(c)) for c in ("diff kazma-data src", "diff . src")]
-    assert all(a["ok"] is False for a in answers), answers
-    assert SECRET not in json.dumps(answers)
-
-
-@pytest.mark.parametrize("shape", sorted(_TURNED_DOWN))
-def test_control_without_asking_git_each_shape_compares_the_folders(
-    shape: str, install: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from kazma_core.ide.service import get_ide_service
-
-    _TURNED_DOWN[shape](install, monkeypatch)
-    _without_the_new_rules(monkeypatch)
-    answer = asyncio.run(get_ide_service().git("diff kazma-data src"))
-    assert SECRET in json.dumps(answer), answer
-
-
-# ── A repository that holds Kazma's files is read by no git door ────────
-
-
-def test_no_content_read_runs_in_a_repository_that_holds_kazma_files(install: Path) -> None:
-    """Every content form is refused there, with the catalog's sentence
-    naming the files; names-only reads still run."""
-    from kazma_core.ide.service import get_ide_service
-
-    _commit_everything(install)
-    svc = get_ide_service()
-    for command in _UNNAMED_READS:
-        answer = asyncio.run(svc.git(command))
-        assert answer["ok"] is False and SECRET not in json.dumps(answer), (command, answer)
-    said = asyncio.run(svc.git("show HEAD"))["error"]
-    assert "Kazma's own files" in said and ".env" in said
-    for command in ("status --short", "ls-files", "rev-parse HEAD", "branch --list"):
-        assert asyncio.run(svc.git(command))["ok"] is True, command
-
-
-def test_the_refusal_is_said_in_arabic_too(install: Path) -> None:
-    from kazma_core.ide.service import get_ide_service
-    from kazma_ui import i18n
-
-    _commit_everything(install)
-    token = i18n.set_request_language("ar")
-    try:
-        said = asyncio.run(get_ide_service().git("show HEAD"))["error"]
-    finally:
-        i18n._REQUEST_LANG.reset(token)
-    assert said.startswith(i18n.TRANSLATIONS["ide.git_holds_kazma_files"]["ar"].split("{")[0])
-
-
-def test_a_kazma_file_only_staged_or_only_on_another_branch_counts(install: Path) -> None:
-    """The index and the tree of every ref tip: a file staged and never
-    committed, and one committed on a branch HEAD is not on."""
-    from kazma_core.ide.service import get_ide_service
-
-    svc = get_ide_service()
-    _commit(install, "src")
-    _git(install, "add", "-f", "--", ".env")
-    assert asyncio.run(svc.git("diff --cached"))["ok"] is False
-    _git(install, "commit", "-q", "-m", "on the side")
-    _git(install, "branch", "side")
-    _git(install, "reset", "-q", "--hard", "HEAD~1")
-    answer = asyncio.run(svc.git("log -p side"))
-    assert answer["ok"] is False and SECRET not in json.dumps(answer), answer
-
-
-def test_reflog_selectors_and_older_stash_entries_are_no_read(install: Path) -> None:
-    """A commit the refs may no longer reach is out of the check's view:
-    the reflog and the stash's older entries are refused on their text."""
-    from kazma_core.ide.service import get_ide_service
-
-    _commit(install, "src")
-    app = install / "src" / "app.py"
-    app.write_text("def greet_all(items):\n    return list(items)\n", encoding="utf-8")
-    _git(install, "commit", "-q", "-am", "second")
-    for words in ("first change\n", "second change\n"):
-        app.write_text(words, encoding="utf-8")
-        _git(install, "stash", "-q")
-    svc = get_ide_service()
-    for command in ("show HEAD@{1}", "log -p HEAD@{1}", "show stash@{1}",
-                    "stash show -p 1", "stash show -p stash@{0}", "stash show --include-untracked"):
-        assert asyncio.run(svc.git(command))["ok"] is False, command
-    # The latest stash entry and the refs themselves still read.
-    assert asyncio.run(svc.git("stash show -p"))["ok"] is True
-    assert asyncio.run(svc.git("log -p -1"))["ok"] is True
-
-
-# ── The agent's git_diff: the same rule ─────────────────────────────────
-
-
-def _agent_git_diff(**kwargs: str) -> str:
-    from kazma_skills.native.git_github_manager.tools import git_diff
-
-    return asyncio.run(git_diff(**kwargs))
-
-
-def test_the_agents_git_diff_reads_no_repository_that_holds_kazma_files(install: Path) -> None:
-    _commit_everything(install)
-    for kwargs in ({}, {"path": ".env"}, {"target": "HEAD"}, {"target": "HEAD", "stat": "1"}):
-        said = _agent_git_diff(**kwargs)
-        assert said.startswith("Error:") and SECRET not in said, (kwargs, said)
-    assert _agent_git_diff(path=r"\\attacker\share\x").startswith("Error:")
-
-
-def test_the_agents_git_diff_still_reads_an_ordinary_repository(install: Path) -> None:
-    _commit(install, "src")
-    (install / "src" / "app.py").write_text("def greet_all(items):\n    return list(items)\n",
-                                             encoding="utf-8")
-    said = _agent_git_diff()
-    assert "list(items)" in said and SECRET not in said, said
-
-
-def test_control_with_the_predicate_blind_the_agents_git_diff_prints_the_secret(
-    install: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _commit_everything(install)
-    _blind(monkeypatch)
-    assert SECRET in _agent_git_diff(target="HEAD")
-
-
-def test_a_folder_named_git_is_no_repository(tmp_path: Path) -> None:
-    """Git looks for HEAD, objects and refs; an empty ``.git`` folder makes
-    no repository, and diff would compare paths again."""
-    from kazma_core.ide.git_policy import is_a_repository
-
-    assert not is_a_repository(tmp_path)
-    (tmp_path / ".git").mkdir()
-    assert not is_a_repository(tmp_path)
-    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-    (tmp_path / ".git" / "objects").mkdir()
-    (tmp_path / ".git" / "refs").mkdir()
-    assert is_a_repository(tmp_path)
-    linked = tmp_path / "linked"
-    linked.mkdir()
-    (linked / ".git").write_text("gitdir: ../.git/worktrees/linked\n", encoding="utf-8")
-    assert is_a_repository(linked)
+# Read-only git's own classes (what git prints, both doors, the folders git
+# turns down) are tests/test_git_reads_print_no_kazma_file.py's.
 
 
 # ── The checkpoint review page reads a held path only when it may ───────

@@ -90,22 +90,54 @@ workspace. Three new modules; understanding their interaction is essential.
   `read_file` / `search_code` and the TUI's file preview ask the same
   predicate. A save, a patch or a delete resolves with `write=True`, so
   Kazma's configuration (readable by every door) is refused before the
-  tool and its card run. **Git with no card** (the IDE's read-only git:
-  `/api/ide/git`, the chat command `/ide git`; the agent's `git_diff`):
-  `ide/git_policy.validate_read_paths` allows read verbs and flags only (no
-  `--no-index`), operands inside the workspace and asked `is_kazma_store`,
-  a network or device operand refused on its text before anything resolves
-  it, no reflog selector and no stash entry but the latest. A content read
-  (`diff`, `show`, `log`, `blame`, `stash`) then runs only when
-  `safety/git_kazma_files.read_refusal` lets it: git itself accepts the
-  workspace as a work tree (`rev-parse --is-inside-work-tree`, the read's
-  own argv and environment; `is_a_repository` is only the early, cheap
-  refusal), and the repository holds none of Kazma's files
-  (`store_registry.kazma_paths_among`:
-  the predicate's rules screened on the text, then the predicate). Git prints
-  a file it holds by forms that never name it, so naming cannot be the rule.
-  The refusal is a
-  catalog sentence in English and Arabic. The census counts as a read a
+  tool and its card run. **Git with no card** (the IDE's git:
+  `/api/ide/git`, the chat command `/ide git`, the TUI; the agent's
+  `git_status`, `git_log`, `git_diff`) is an allowlist of forms, and
+  everything outside it goes to the approval card (`shell_exec`, danger
+  tier), which shows the exact command: an unknown verb, option, value or
+  operand is asked, not refused (2026-11-27).
+  `ide/git_policy.CARD_LESS` lists the forms: status; branch and tag
+  listings; rev-parse; ls-files; describe, rev-list, shortlog, version;
+  `stash list` without patches; log (a `--format` only of the placeholders
+  it bounds: no `%N`, `%G`, `%g`, `%(...)`; a built-in pretty name only),
+  diff, show and `blame` of one work-tree file. `remote` (its URLs can carry
+  a password), `stash show`, `rev:path`, `:path`, a reflog selector,
+  pathspec magic, `log -p --all` and `--graph` with a patch go to the card.
+  A word that names one of Kazma's files is refused before anything runs
+  (`kazma_operand_refusal`, the one predicate); a network or device operand
+  is never resolved here. `safety/git_kazma_files.run_card_less` runs a
+  form, every question with the read's own argv and environment
+  (`--no-replace-objects` in `READ_GLOBALS`, no lazy fetch, hooks, pager,
+  fsmonitor; git's own variables
+  dropped), and first judges one that prints contents: only in a work tree
+  git itself accepts; every revision of a diff or show, and of a log with a
+  patch, a commit (`<rev>^{commit}`) reachable from HEAD, a branch, a tag
+  or a remote-tracking branch and sharing no history with a notes ref (a
+  tree, a blob, a note, a stash entry or a commit no ref holds goes to the
+  card); `blame` of a file that is
+  on disk and not Kazma's at any work tree; a path the read names, not
+  Kazma's. Kazma's paths are excluded at the source
+  (`store_registry.kazma_exclude_pathspecs`: each name and place rule of
+  the predicate as a `:(top,exclude,...)` pathspec, at every work tree;
+  `kazma_excluded_among` answers the same for paths), every section whose
+  path `kazma_paths_among` accepts is dropped after the run (what only
+  contents decide, such as a SQLite file reached through a junction or a
+  short name), and a line in the reader's language counts the items left
+  out: the same read's names, without the exclusions, judged by both. A log
+  or show with no path of its own keeps every commit it walks
+  (`--full-history --sparse`). The shape is fixed (`SECTION_SHAPE`:
+  `--no-color`, `--default-prefix`, `--no-relative`, `--submodule=short`,
+  `--no-ext-diff`, `--no-textconv`; `NO_NOTES` for log and show). The web
+  route admits a card-less form as a read (`ide_effects`), so a read the
+  repository check sends on comes back `needs_approval` and the page sends
+  its command through `/api/ide/run`; chat and the TUI go to the card
+  directly, and the agent's tools answer with the command to ask for. Gate:
+  `tests/test_git_reads_print_no_kazma_file.py` (the allowlist enumerated
+  from `CARD_LESS`; every verb git lists and every option outside it asks;
+  each way a file reaches what git prints, both doors; the old rule, each
+  piece, a planted extra form and each dropped force flag as controls).
+  The cost: a user's own `.env`, databases and secret-named files are
+  hidden from card-less reads too, and counted. The census counts as a read a
   process an IDE module starts (called or handed to a thread) and a call of
   a helper of the packages that reads a file itself (`read_exact` and its
   kin). Paths read again later ask again: the checkpoint review

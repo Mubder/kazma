@@ -71,6 +71,9 @@ def test_branch_mutations_require_approval(command):
     "remote -v add added local-repository", "remote --verbose remove origin",
 ])
 async def test_read_command_unsafe_options_never_spawn_or_write(monkeypatch, tmp_path, command):
+    """An option outside the card-less forms is not run with no card: it goes
+    to the approval card (``run`` -> shell_exec) with the exact command, and
+    no git process starts here (git_policy, 2026-11-27)."""
     from kazma_core.ide import service as svc
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
     for name, content in (("a.txt", "first"), ("b.txt", "second")):
@@ -78,29 +81,34 @@ async def test_read_command_unsafe_options_never_spawn_or_write(monkeypatch, tmp
     calls = []
     def forbidden(*args, **kwargs):
         calls.append(args)
-        raise AssertionError("unsafe read must be refused before dispatch")
+        raise AssertionError("a read outside the card-less forms must not start git here")
     monkeypatch.setattr(subprocess, "run", forbidden)
     ide = IdeService()
-    guarded_run = AsyncMock(side_effect=forbidden)
-    monkeypatch.setattr(ide, "run", guarded_run)
+    card = AsyncMock(return_value={"ok": False, "error": "waits for its approval card", "output": ""})
+    monkeypatch.setattr(ide, "run", card)
     result = await ide.git(command)
     assert result["ok"] is False
     assert calls == []
-    guarded_run.assert_not_awaited()
+    card.assert_awaited_once_with(f"git {command}", timeout=60)
     assert not (tmp_path / "inside.txt").exists()
     assert not (tmp_path.parent / "outside.txt").exists()
 
 
 @pytest.mark.parametrize("command", ["diff -- ../outside.txt", "show HEAD:../outside.txt"])
 async def test_read_git_paths_cannot_escape_workspace(monkeypatch, tmp_path, command):
+    """A path outside the workspace is no card-less read: the approval card
+    shows it, and no git process starts here."""
     from kazma_core.ide import service as svc
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
     def forbidden(*args, **kwargs):
-        raise AssertionError("outside path must be refused before spawning")
+        raise AssertionError("outside path must not start git before its card")
     monkeypatch.setattr(subprocess, "run", forbidden)
-    result = await IdeService().git(command)
+    ide = IdeService()
+    card = AsyncMock(return_value={"ok": False, "error": "waits for its approval card", "output": ""})
+    monkeypatch.setattr(ide, "run", card)
+    result = await ide.git(command)
     assert result["ok"] is False
-    assert "workspace" in result["error"].lower()
+    card.assert_awaited_once_with(f"git {command}", timeout=60)
 
 
 async def test_real_git_reads_do_not_run_repository_helpers(monkeypatch, tmp_path):
@@ -134,7 +142,7 @@ async def test_real_git_reads_do_not_run_repository_helpers(monkeypatch, tmp_pat
     (tmp_path / "file.txt").write_bytes(b"after\n")
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
     ide = IdeService()
-    for command in ("status -sb", "diff -- file.txt", "show HEAD:file.txt", "log -1 --oneline", "branch --list", "blame file.txt"):
+    for command in ("status -sb", "diff -- file.txt", "show HEAD -- file.txt", "log -1 --oneline", "branch --list", "blame file.txt"):
         result = await ide.git(command)
         assert not marker.exists(), command
         assert result["ok"], (command, result)

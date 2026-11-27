@@ -1039,6 +1039,11 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._post('/api/ide/git', { subcommand: sub });
+        if (data && data.needs_approval && data.command) {
+          // Not a read git runs without an approval: the command goes to the
+          // approval card, through the same route as a typed command.
+          data = await this._post('/api/ide/run', { command: data.command });
+        }
         this.showResult('git ' + sub, data.ok ? (data.output || this._tx('ide.clean', '(clean)')) : (data.error || data.output), true);
       } catch (err) {
         this.toast(this._tx('ide.toast_git_failed', 'Git failed'), false);
