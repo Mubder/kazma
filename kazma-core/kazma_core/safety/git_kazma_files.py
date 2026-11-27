@@ -23,7 +23,8 @@ that prints what files hold (``diff``, ``show``, ``log`` with a patch,
   after git runs, and a line says how many items were left out: the same
   read's names, without the exclusions, judged by both rules;
 - what shapes a section is fixed: ``--no-replace-objects`` (each door's
-  argv), :data:`SECTION_SHAPE` and, for log and show, :data:`NO_NOTES`.
+  argv), :data:`SECTION_SHAPE` and, for log and show, :data:`NO_NOTES`;
+  status looks into no submodule's work tree (:data:`STATUS_SHAPE`).
 
 Gate: ``tests/test_git_reads_print_no_kazma_file.py``.
 """
@@ -37,10 +38,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kazma_core.ide.git_policy import PATCH_OPTIONS, ReadForm, prints_patches
+from kazma_core.safety.git_read import NO_SUBMODULE_TREES
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BLAME_SHAPE", "NO_NOTES", "SECTION_SHAPE", "Ask", "CardLessRead", "run_card_less"]
+__all__ = ["BLAME_SHAPE", "NO_NOTES", "SECTION_SHAPE", "STATUS_SHAPE", "Ask", "CardLessRead", "run_card_less"]
 
 #: Runs ``git <args>`` the way the door runs its read (its argv, its
 #: environment) and answers ``(exit code, stdout, stderr)``.
@@ -48,10 +50,14 @@ Ask = Callable[[Sequence[str]], tuple[int, str, str]]
 
 #: Fixed for every diff, show and log: what a section looks like. A
 #: repository's configuration cannot drop the ``a/`` and ``b/`` prefixes,
-#: print paths from a subfolder, expand a submodule into its files or run a
-#: diff or textconv program.
+#: print paths from a subfolder, expand a submodule into its files, run a
+#: diff or textconv program, or look into a submodule's work tree (where
+#: the filter drivers of its own configuration run): the option wins over
+#: every ``ignore`` setting.
 SECTION_SHAPE = ("--no-color", "--default-prefix", "--no-relative", "--submodule=short",
-                 "--no-ext-diff", "--no-textconv")
+                 "--no-ext-diff", "--no-textconv", *NO_SUBMODULE_TREES)
+#: Fixed for every status: it looks into no submodule's work tree either.
+STATUS_SHAPE = NO_SUBMODULE_TREES
 #: For log and show: a note is a blob with no path.
 NO_NOTES = ("--no-notes",)
 #: Fixed for every blame: no textconv program, and no file of object ids
@@ -254,7 +260,7 @@ def _plan(root: Path, ask: Ask, form: ReadForm) -> tuple[_Plan | None, str]:
     tail = ["--", *form.after] if form.after is not None else []
     patches = prints_patches(verb, form.options)
     if verb not in ("diff", "show", "log", "blame") or (verb == "log" and not patches):
-        shape = [*SECTION_SHAPE, *NO_NOTES] if verb == "log" else []
+        shape = {"log": [*SECTION_SHAPE, *NO_NOTES], "status": list(STATUS_SHAPE)}.get(verb, [])
         return _Plan([*form.head, *shape, *form.options, *form.before, *tail]), ""
     top = _work_tree_top(ask)
     if top is None:

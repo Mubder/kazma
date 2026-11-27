@@ -93,7 +93,7 @@ _MAY_NAME_ONE = re.compile(
     r"(?i)(cmd|command|program|helper|hook|editor|pager|path|file|dir|directory|driver|textconv|clean|"
     r"smudge|process|proxy|tunnel|external|browser|viewer|askpass|pack|vcs|httpd|fsmonitor|template|blob|"
     r"tree|url|target|signature|sort|pretty|\*)$")
-_KINDS = ("programs", "files", "signature", "moves", "plain")
+_KINDS = ("programs", "files", "signature", "moves", "reopens", "plain")
 
 
 def test_the_data_is_gits_own_list_classified() -> None:
@@ -265,6 +265,7 @@ def _repository(root: Path, tmp: Path) -> Planted:
     _commit(root, "src", ".gitattributes", message="first")
     (root / "src" / "app.py").write_text("def greet_all(items):\n    return sorted(items)\n", encoding="utf-8")
     _commit(root, "src", message="sorted greeting")
+    _git(root, "branch", "side", "HEAD~1")
     _signed(root)
     (root / "src" / "app.py").write_text("def greet_all(items):\n    return SORTED(items)\n", encoding="utf-8")
     return planted
@@ -374,6 +375,321 @@ def test_a_submodules_own_settings_start_nothing(ws: Path, tmp_path: Path, raw: 
         _ide(command)
     assert "src/app.py" in _agent_reads()["git_status()"], "the read answered"
     assert not planted.ran(), planted.ran()
+
+
+# ── Behaviour, not names: settings that reopen a route, drivers of any name
+
+
+def _absorbed_submodule(root: Path, planted: Planted) -> Path:
+    """A submodule added the usual way (its repository under ``.git/modules``,
+    named in ``.gitmodules``) whose own configuration names a filter for
+    every file, with a same-size change the filter must read."""
+    lib = planted.tmp / "lib"
+    lib.mkdir()
+    _init(lib)
+    (lib / ".gitattributes").write_bytes(b"* filter=inner\n")
+    (lib / "lib.txt").write_text("alpha\n", encoding="utf-8")
+    _commit(lib, message="lib")
+    _git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib.as_posix(), "vendor")
+    _git(root, "commit", "-q", "-m", "with a submodule")
+    inner = root / "vendor"
+    _git(inner, "config", "filter.inner.clean", planted.command("sub:filter.clean", "pass"))
+    _git(inner, "config", "filter.inner.process", planted.command("sub:filter.process"))
+    (inner / "lib.txt").write_text("omega\n", encoding="utf-8")
+    return inner
+
+
+def _ignore_in_config(value: str) -> Callable[[Path, Planted], None]:
+    def plant(root: Path, _planted: Planted) -> None:
+        _git(root, "config", "submodule.vendor.ignore", value)
+    return plant
+
+
+def _ignore_included(root: Path, planted: Planted) -> None:
+    included = planted.tmp / "submodules.cfg"
+    included.write_bytes(b'[submodule "vendor"]\n\tignore = none\n')
+    _git(root, "config", "include.path", included.as_posix())
+
+
+def _ignore_in_gitmodules(*, committed: bool) -> Callable[[Path, Planted], None]:
+    def plant(root: Path, _planted: Planted) -> None:
+        with (root / ".gitmodules").open("ab") as fh:
+            fh.write(b"\tignore = none\n")
+        if committed:
+            _git(root, "commit", "-q", "-m", "ignore none", "--", ".gitmodules")
+    return plant
+
+
+#: Each way a submodule's ``ignore`` can reopen its work tree: git lets it
+#: win over a ``diff.ignoreSubmodules`` default, from any of these.
+_REOPENED: dict[str, Callable[[Path, Planted], None]] = {
+    "ignore=none in .git/config": _ignore_in_config("none"),
+    "ignore=untracked in .git/config": _ignore_in_config("untracked"),
+    "ignore=none in an included file": _ignore_included,
+    "ignore=none in .gitmodules, committed": _ignore_in_gitmodules(committed=True),
+    "ignore=none in .gitmodules, in the work tree only": _ignore_in_gitmodules(committed=False),
+}
+#: The other settings that reopen a route, planted with each.
+_REOPEN_SETTINGS = (("diff.ignoreSubmodules", "none"), ("status.submoduleSummary", "true"),
+                    ("submodule.recurse", "true"), ("diff.submodule", "diff"))
+
+
+def _refusals(root: Path) -> None:
+    """The check before a git command's card (shell_exec), which reads git."""
+    from kazma_core.safety.git_tree_writes import git_command_refusal
+
+    for words in (["stash"], ["checkout", "side"], ["restore", "."], ["checkout", "--", "."]):
+        git_command_refusal(words, root)
+
+
+def _ran_through_each_door(root: Path, planted: Planted, commands: tuple[str, ...]) -> dict[str, list[str]]:
+    ran: dict[str, list[str]] = {}
+    for door, read in (("IDE", lambda: [_ide(c) for c in commands]), ("agent", _agent_reads),
+                       ("check before the card", lambda: _refusals(root))):
+        before = len(planted.ran())
+        read()
+        ran[door] = planted.ran()[before:]
+    return ran
+
+
+_WORK_TREE_READS = ("status", "status -s", "status --porcelain", "diff", "diff --stat", "diff HEAD",
+                    "diff --exit-code", "ls-files -m", "log -p -1", "show HEAD")
+
+
+def test_the_reopening_settings_are_all_planted() -> None:
+    assert {"submodule.<name>.ignore", *(name for name, _ in _REOPEN_SETTINGS)} == set(DATA["reopens"])
+
+
+@pytest.mark.parametrize("how", sorted(_REOPENED))
+def test_a_setting_that_reopens_a_submodule_starts_nothing(how: str, ws: Path, tmp_path: Path, raw: None) -> None:
+    planted = _repository(ws, tmp_path)
+    _absorbed_submodule(ws, planted)
+    _REOPENED[how](ws, planted)
+    for name, value in _REOPEN_SETTINGS:
+        _git(ws, "config", name, value)
+    ran = _ran_through_each_door(ws, planted, _WORK_TREE_READS)
+    assert not any(ran.values()), (how, ran)
+
+
+#: Settings the all-at-once sweep leaves out: those that move what git
+#: reads (their own test) and those that change what a repository is.
+_NOT_SWEPT = frozenset({"include.path", "includeIf.kz.path", "core.worktree", "core.bare",
+                        "core.repositoryFormatVersion", "extensions.kz", "core.sharedRepository",
+                        "safe.directory"})
+#: What git itself runs while the sweep finds the settings it refuses.
+_PLAIN_READS = (("status", "-s"), ("log", "-1", "-p"), ("diff", "HEAD"), ("blame", "src/app.py"),
+                ("branch", "-v"), ("tag", "-l"), ("shortlog", "-sn", "HEAD"), ("ls-files", "-m"),
+                ("show", "HEAD"), ("stash", "list"), ("describe", "--always"), ("rev-list", "--count", "HEAD"),
+                ("rev-parse", "HEAD"), ("diff",))
+_SWEEP_READS = ("status", "status -s", "diff", "diff HEAD", "diff --stat", "show HEAD", "log -1", "log -p -1",
+                "log --oneline", "log --format=%aN", "blame src/app.py", "branch -v", "tag -l", "shortlog -sn HEAD",
+                "ls-files -m", "describe --always", "stash list", "rev-list --count HEAD", "log -1 sig-openpgp",
+                "log -1 sig-ssh", "show sig-x509")
+
+
+def _swept_names() -> list[str]:
+    """Every name git lists, placeholders filled, but those git refuses a
+    text value for (the data, found by this sweep) and :data:`_NOT_SWEPT`."""
+    names = []
+    for documented in DATA["listed"]:
+        name = re.sub(r"<[^>]+>|\*", "kz", documented)
+        if ("hasconfig:" in documented or name in _NOT_SWEPT or name in DATA["refused_with_a_text_value"]
+                or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", name.rpartition(".")[2])):
+            continue
+        names.append(name)
+    return names
+
+
+def _config_text(names: list[str], value: str) -> str:
+    def quoted(text: str) -> str:
+        return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    text = []
+    for name in names:
+        section, _, rest = name.partition(".")
+        sub, _, key = rest.rpartition(".")
+        text.append(f"[{section} {quoted(sub)}]\n\t{key} = {quoted(value)}\n" if sub
+                    else f"[{section}]\n\t{key} = {quoted(value)}\n")
+    return "".join(text)
+
+
+def _plain(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([shutil.which("git") or "git", *args], cwd=root, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=60, check=False)
+
+
+def _plant_every_setting(root: Path, value: str) -> list[str]:
+    """Every swept name at *value*, written into ``.git/config`` (``git
+    config`` itself stops on a value git refuses); a name git still refuses
+    -- named in its error, or found by halving -- is taken out. Answers
+    those taken out."""
+    config = root / ".git" / "config"
+    base = config.read_text(encoding="utf-8")
+    names = _swept_names()
+
+    def failing(chosen: list[str]) -> str | None:
+        config.write_text(base + _config_text(chosen, value), encoding="utf-8")
+        for args in _PLAIN_READS:
+            done = _plain(root, *args)
+            if done.returncode not in (0, 1):
+                return done.stderr
+        return None
+
+    refused: list[str] = []
+    while (err := failing(names)) is not None:
+        assert len(refused) < 25, f"git refuses more settings than the data says: {refused} (refresh it)"
+        named = re.search(r"for '([^']+)'", err)
+        lower = {name.lower(): name for name in names}
+        if named and named.group(1).lower() in lower:
+            bad = lower[named.group(1).lower()]
+        else:
+            low, high = 0, len(names)
+            while high - low > 1:
+                middle = (low + high) // 2
+                low, high = (low, middle) if failing(names[:middle]) is not None else (middle, high)
+            bad = names[low]
+        refused.append(bad)
+        names.remove(bad)
+    return refused
+
+
+@pytest.mark.parametrize("kind", ("a program", "a Kazma file"))
+def test_every_setting_git_lists_at_once_starts_nothing_and_prints_no_kazma_file(
+    kind: str, ws: Path, tmp_path: Path, raw: None, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Behaviour, not names: every setting git lists, at a program or at the
+    Kazma file, whatever its name says, through every door."""
+    caplog.set_level(logging.DEBUG)
+    planted = _repository(ws, tmp_path)
+    value = planted.command("any-setting", "pass") if kind == "a program" else planted.env_file.as_posix()
+    _plant_every_setting(ws, value)
+    planted.marker.unlink(missing_ok=True)
+    answers: list[Any] = [_ide(c) for c in _SWEEP_READS]
+    answers += list(_agent_reads().values())
+    _refusals(ws)
+    assert not planted.ran(), planted.ran()
+    assert not any(_leaked(a) for a in answers) and SECRET not in _logged(caplog)
+    for command in ("status -s", "log --oneline", "show HEAD", "diff", "blame src/app.py"):
+        assert _ide(command)["ok"], f"the read answers with every setting planted: {command}"
+    # The instrument: git as it is starts the program or prints the file.
+    plain = [_plain(ws, *args) for args in _PLAIN_READS]
+    if kind == "a program":
+        assert planted.ran(), "git itself started nothing: this proves nothing"
+    else:
+        assert any(SECRET in p.stdout + p.stderr for p in plain), "git itself printed nothing: this proves nothing"
+
+
+#: Filter driver names git takes from ``.gitattributes``: one holding ``=``
+#: (``-c`` splits at the first), the empty name, a dot, case, another
+#: script. Each drives its own file, as a clean or a process filter.
+_DRIVER_NAMES = {"": "clean", "a=b": "clean", "c=d": "process", "x.y": "process", "UP": "clean",
+                 "A=B": "process", "مرشح": "clean", "a==b": "process"}
+
+
+def _odd_drivers(root: Path, planted: Planted) -> None:
+    lines = []
+    for index, name in enumerate(_DRIVER_NAMES):
+        (root / "src" / f"drv{index}.txt").write_text("alpha\n", encoding="utf-8")
+        lines.append(f"drv{index}.txt filter={name}\n")
+    (root / "src" / ".gitattributes").write_text("".join(lines), encoding="utf-8")
+    _git(root, "add", "-f", "--", "src")
+    _git(root, "commit", "-q", "-m", "drivers")
+    for index, (name, kind) in enumerate(_DRIVER_NAMES.items()):
+        extra = ["pass"] if kind == "clean" else []
+        _git(root, "config", f"filter.{name}.{kind}", planted.command(f"driver{index}", *extra))
+        (root / "src" / f"drv{index}.txt").write_text("omega\n", encoding="utf-8")
+
+
+_DRIVER_READS = ("status", "status -s", "status --porcelain", "diff", "diff --stat", "diff HEAD",
+                 "diff --exit-code", "ls-files -m", "blame src/drv1.txt", "blame src/drv2.txt")
+
+
+def test_no_filter_driver_runs_whatever_its_name(ws: Path, tmp_path: Path, raw: None) -> None:
+    planted = _repository(ws, tmp_path)
+    _odd_drivers(ws, planted)
+    ran = _ran_through_each_door(ws, planted, _DRIVER_READS)
+    assert not any(ran.values()), ran
+
+
+def _as_dash_c(env: dict[str, str], listed: str = "") -> dict[str, str]:
+    """The control's settings: the same pairs as ``git -c key=value`` passes
+    them (``GIT_CONFIG_PARAMETERS``, split at the first ``=``)."""
+    from kazma_core.safety import git_read
+
+    pairs = [setting.split("=", 1) for setting in git_read.read_settings()]
+    pairs += [[key, "false" if key.lower().endswith(".required") else ""] for key in listed.split("\0") if key]
+    env["GIT_CONFIG_PARAMETERS"] = " ".join(f"'{key}={value}'" for key, value in pairs)
+    return env
+
+
+def test_control_as_dash_c_a_driver_named_with_equals_runs_in_every_door(
+    ws: Path, tmp_path: Path, raw: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kazma_core.safety import git_read
+
+    planted = _repository(ws, tmp_path)
+    _odd_drivers(ws, planted)
+    monkeypatch.setattr(git_read, "read_config_env", _as_dash_c)
+    with_equals = {f"driver{i}" for i, name in enumerate(_DRIVER_NAMES) if "=" in name}
+    ran = _ran_through_each_door(ws, planted, _DRIVER_READS)
+    assert all(with_equals & set(names) for names in ran.values()), ran
+
+
+# ── Every read is bounded, with what git starts ─────────────────────────
+
+
+def _holder() -> list[str]:
+    """A program that starts one more holding the output pipes, then waits."""
+    return [sys.executable, "-c",
+            "import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(12)']); time.sleep(12)"]
+
+
+def test_a_read_that_never_ends_is_cut_with_what_it_started(tmp_path: Path) -> None:
+    import os
+    import time
+
+    from kazma_core.safety.git_read import run_git
+
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_git(_holder(), cwd=str(tmp_path), env=dict(os.environ), timeout=2)
+    assert time.monotonic() - started < 8
+
+
+def test_control_a_bare_timeout_waits_for_what_the_read_started(tmp_path: Path) -> None:
+    import threading
+
+    done = threading.Event()
+
+    def bare() -> None:
+        try:
+            subprocess.run(_holder(), cwd=str(tmp_path), capture_output=True, timeout=2, check=False)
+        except subprocess.TimeoutExpired:
+            pass
+        done.set()
+
+    worker = threading.Thread(target=bare, daemon=True)
+    worker.start()
+    assert not done.wait(6), "subprocess.run returned on its timeout: this control proves nothing"
+    done.wait(20)
+
+
+def test_every_door_runs_git_through_the_bounded_runner() -> None:
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    places = {"kazma-core/kazma_core/ide/service.py": "_git_read",
+              "kazma-skills/kazma_skills/native/git_github_manager/tools.py": "_git_read",
+              "kazma-core/kazma_core/safety/git_read.py": "run_read"}
+    for rel, name in places.items():
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        func = next(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and n.name == name)
+        called = {n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
+                  for n in ast.walk(func) if isinstance(n, ast.Call)}
+        assert "run_git" in called and "read_config_env" in called, rel
+        assert not called & {"run", "Popen", "check_output", "call"}, (rel, called)
 
 
 def _partial_clone(root: Path, tmp: Path, planted: Planted) -> str:
@@ -497,6 +813,20 @@ def _plant_partial(root: Path, planted: Planted) -> None:
     _partial_clone(root, planted.tmp, planted)
 
 
+def _without_submodule_option(patch: pytest.MonkeyPatch) -> None:
+    from kazma_core.safety import git_kazma_files, git_read
+
+    patch.setattr(git_read, "NO_SUBMODULE_TREES", ())
+    patch.setattr(git_kazma_files, "STATUS_SHAPE", ())
+    patch.setattr(git_kazma_files, "SECTION_SHAPE",
+                  tuple(f for f in git_kazma_files.SECTION_SHAPE if f != "--ignore-submodules=dirty"))
+
+
+def _plant_reopened_submodule(root: Path, planted: Planted) -> None:
+    _absorbed_submodule(root, planted)
+    _ignore_in_config("none")(root, planted)
+
+
 #: Each override -> (how it is dropped, what is planted, the IDE reads, the
 #: agent's tools read too, what shows: "ran" a program or "printed" the file
 #: in an answer or the log).
@@ -510,8 +840,13 @@ _OVERRIDES: dict[str, tuple[Callable[[pytest.MonkeyPatch], None], Callable[[Path
                       ("log --format=%aN", "shortlog -sn HEAD"), True, "printed"),
     "mailmap.blob=": (_without_setting("mailmap.blob="), _plant_file("mailmap.blob"),
                       ("log --format=%aN", "shortlog -sn HEAD"), True, "printed"),
-    "diff.ignoreSubmodules=dirty": (_without_setting("diff.ignoreSubmodules=dirty"), _submodule,
+    # A second layer behind the command-line option.
+    "diff.ignoreSubmodules=dirty": (_both(_without_setting("diff.ignoreSubmodules=dirty"),
+                                         _without_submodule_option), _submodule,
                                     ("status -s",), True, "ran"),
+    # A submodule's own ignore=none wins over the setting; the option wins over it.
+    "--ignore-submodules=dirty": (_without_submodule_option, _plant_reopened_submodule,
+                                  ("status -s", "diff"), True, "ran"),
     # A second layer: behind it, the signature program cannot start.
     "log.showSignature=false": (_both(_without_setting("log.showSignature=false"),
                                       _without_programs("gpg.program")),
@@ -540,6 +875,7 @@ def test_every_override_has_a_control() -> None:
     from kazma_core.safety import git_kazma_files, git_read
 
     overrides = {*git_read.READ_CONFIG, *git_read.NO_PROGRAM_KEYS, "core.hooksPath",
+                 *git_read.NO_SUBMODULE_TREES, *git_kazma_files.STATUS_SHAPE,
                  *(f for f in git_kazma_files.BLAME_SHAPE if f != "--no-textconv"),
                  *(f for f in git_read.READ_GLOBALS if f != "--no-replace-objects")}
     # --no-textconv and --no-replace-objects: controls in
@@ -596,6 +932,22 @@ def test_a_failed_read_answers_a_sentence_in_the_readers_language(
     _git(ws, "checkout", "-q", "--orphan", "empty")
     said = asyncio.run(tools.git_log())
     assert said.startswith("Error: git log failed (exit code 128)") and "does not have any commits" not in said
+
+
+def test_differences_found_with_exit_code_are_an_answer(ws: Path, tmp_path: Path) -> None:
+    """``diff --exit-code`` and ``--quiet`` exit 1 when they find
+    differences: an answer, said in a sentence, not a failure."""
+    from kazma_ui import i18n
+
+    _repository(ws, tmp_path)
+    found = _ide("diff --exit-code")
+    assert found["ok"] is True and found.get("exit_code") == 1, found
+    assert "SORTED(items)" in found["output"] and i18n.t("ide.git_read_differences", "en") in found["output"]
+    quiet = _ide("diff --quiet")
+    assert quiet["ok"] is True and quiet["output"] == i18n.t("ide.git_read_differences", "en"), quiet
+    _git(ws, "checkout", "-q", "--", "src/app.py")
+    same = _ide("diff --exit-code")
+    assert same == {"ok": True, "error": None, "output": ""}, same
 
 
 def test_control_with_the_old_answer_gits_text_quotes_the_file(

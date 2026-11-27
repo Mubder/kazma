@@ -275,6 +275,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم يُكمل Git هذه القراءة (رمز الخروج {code}). التفاصيل في سجل Kazma.",
         "en": "Git could not complete this read (exit code {code}). The details are in Kazma's log.",
     },
+    # A diff asked with --exit-code or --quiet that exits 1: an answer.
+    "ide.git_read_differences": {
+        "ar": "وجد Git فروقات (رمز الخروج 1).",
+        "en": "Git found differences (exit code 1).",
+    },
     "ide.git_read_timed_out": {
         "ar": "استغرقت قراءة Git وقتًا أطول من المسموح فتوقفت.",
         "en": "This git read took longer than allowed and was stopped.",

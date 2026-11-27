@@ -116,9 +116,10 @@ def _git_answer(parts: list[str], code: int, out: str, err: str) -> dict[str, An
     output, and for a read that failed a sentence in the reader's language.
 
     Git's own error text is never in the answer: a repository's settings
-    can make it quote a file (a line of one it reads as object ids, a part
-    of one it reads as attributes). It goes to the log, secrets masked by
-    shape (``errors.redact_secrets``) and cut.
+    can make it quote a file. It goes to the log, masked by shape
+    (``errors.redact_secrets``) and cut. A diff, show or log asked with
+    ``--exit-code`` or ``--quiet`` that exits 1 found differences: that is
+    an answer, said in a sentence, not a failure.
     """
     from kazma_core.errors import redact_secrets
 
@@ -128,6 +129,10 @@ def _git_answer(parts: list[str], code: int, out: str, err: str) -> dict[str, An
         if said:
             logger.debug("[IdeService] git %s wrote to its error output: %s", verb, said)
         return {"ok": True, "error": None, "output": out.strip()}
+    if code == 1 and verb in ("diff", "show", "log") and {"--exit-code", "--quiet"} & set(parts):
+        found = _said("ide.git_read_differences")
+        return {"ok": True, "error": None, "exit_code": 1,
+                "output": f"{out.strip()}\n{found}" if out.strip() else found}
     logger.info("[IdeService] git %s exited %d: %s", verb, code, said or "(no message)")
     if "unknown option" in err.lower() and "no-lazy-fetch" in err:
         return {"ok": False, "error": _said("ide.git_read_needs_newer_git"), "output": ""}
@@ -699,12 +704,14 @@ class IdeService:
         The form is checked in the workspace (``git_policy.card_less_form``)
         and judged, run and filtered by ``safety.git_kazma_files.
         run_card_less``, every question to git with this read's own argv
-        (no pager, ``READ_GLOBALS``, ``read_settings()``: the repository's
-        settings that would start a program or name a file for git to read
-        are switched off, and each filter driver it defines is emptied) and
-        environment. The answer is what git printed on its output: a read
-        that fails says so in a sentence of the reader's language, and git's
-        own error text goes to the log only (it can quote what a file holds)."""
+        (no pager, ``READ_GLOBALS``, the workspace as the work tree) and
+        environment (git's own variables dropped; ``git_read.read_config_env``:
+        the settings ``read_settings()`` lists and each filter driver key
+        the configuration holds, emptied), through ``git_read.run_git``,
+        whose bound holds for the programs git starts. The answer is what
+        git printed on its output: a read that fails says so in a sentence
+        of the reader's language, and git's own error text goes to the log
+        only, masked by shape (it can quote what a file holds)."""
         import asyncio
         import os
         import subprocess
@@ -712,7 +719,7 @@ class IdeService:
 
         from kazma_core.ide.git_policy import card_less_form
         from kazma_core.safety.git_kazma_files import CardLessRead, run_card_less
-        from kazma_core.safety.git_read import READ_GLOBALS, read_settings
+        from kazma_core.safety.git_read import FILTER_KEYS, READ_GLOBALS, read_config_env, run_git
         from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
@@ -730,10 +737,7 @@ class IdeService:
         # --no-lazy-fetch (READ_GLOBALS) is also a capability requirement:
         # older Git must refuse before a read, rather than silently ignoring
         # a new environment key.
-        base_argv = [binary, "--no-pager", *READ_GLOBALS]
-        for setting in await asyncio.to_thread(read_settings):
-            base_argv += ["-c", setting]
-        base_argv.append(f"--work-tree={cwd}")
+        base_argv = [binary, "--no-pager", *READ_GLOBALS, f"--work-tree={cwd}"]
 
         def _run() -> CardLessRead:
             import time
@@ -751,26 +755,18 @@ class IdeService:
                 "GIT_CEILING_DIRECTORIES": str(root.parent),
                 "GIT_NO_LAZY_FETCH": "1",
             })
+            # The read's settings, in the environment (git_read.read_config_env):
+            # first without the filter drivers, which git is asked for whole.
+            asked_env = read_config_env(dict(env))
 
             def _ask(args: Sequence[str]) -> tuple[int, str, str]:
-                asked = subprocess.run(
-                    [*base_argv, *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    timeout=max(0.001, deadline - time.monotonic()), check=False,
-                )
-                return asked.returncode, asked.stdout or "", asked.stderr or ""
+                return run_git([*base_argv, *args], cwd=cwd, env=asked_env,
+                               timeout=deadline - time.monotonic())
 
-            # Clean/process filters also execute programs during work-tree
-            # comparisons. Query names only, then disable each configured
-            # driver while preserving unrelated operator Git configuration.
-            code, listed, err = _ask(["config", "--null", "--name-only", "--get-regexp",
-                                      r"^filter\..*\.(clean|smudge|process|required)$"])
+            code, listed, err = _ask(FILTER_KEYS)
             if code not in (0, 1):
                 return CardLessRead(code, listed, err)
-            for key in listed.split("\0"):
-                if key:
-                    value = "false" if key.endswith(".required") else ""
-                    base_argv.extend(["-c", f"{key}={value}"])
+            asked_env = read_config_env(dict(env), listed)
             return run_card_less(root, _ask, form)
 
         try:

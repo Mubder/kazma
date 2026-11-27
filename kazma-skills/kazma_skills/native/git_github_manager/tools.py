@@ -67,7 +67,6 @@ _READ_CONFIG = _shared_git_read.READ_CONFIG
 _NO_DIFF_PROGRAMS = _shared_git_read.NO_DIFF_PROGRAMS
 _PROGRAM_ENV = _shared_git_read.PROGRAM_ENV
 _no_hooks_dir = _shared_git_read.no_hooks_dir
-_filter_driver_overrides = _shared_git_read.filter_driver_overrides
 _git_read_argv = _shared_git_read.read_argv
 
 
@@ -77,14 +76,14 @@ async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
 
     The command must be one of ``ide.git_policy``'s card-less forms, checked
     in the workspace, and is judged, run and filtered by
-    ``safety.git_kazma_files.run_card_less``: these tools show no card. It
-    takes no program and no file for git to read from the repository's
-    settings: the fsmonitor, pager, hooks, signature programs, external diff
-    and textconv drivers, filter drivers (a submodule's own too), a lazy
-    fetch's transport, an attributes file and a mailmap are all switched off
-    (``_git_read_argv``: ``git_read.read_settings``), and the child gets the
-    tool child environment without the variables that name a program or
-    another repository (``_for_a_read``). Until 2026-11-10 only fsmonitor was:
+    ``safety.git_kazma_files.run_card_less``: these tools show no card. Each
+    command runs with the read's argv (``_git_read_argv``) and its settings
+    in the environment (``git_read.read_config_env``: the settings
+    ``read_settings()`` lists and each filter driver key the configuration
+    holds, emptied), through ``git_read.run_git``, whose bound holds for the
+    programs git starts; the child gets the tool child environment without
+    the variables that name a program or another repository
+    (``_for_a_read``). Until 2026-11-10 only fsmonitor was switched off:
     ``git_diff`` on a repository whose ``.git/config`` set ``diff.external``
     ran that program with no approval card.
     """
@@ -92,6 +91,7 @@ async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
 
     from kazma_core.ide.git_policy import card_less_form
     from kazma_core.safety.git_kazma_files import CardLessRead, run_card_less
+    from kazma_core.safety.git_read import FILTER_KEYS, read_config_env, run_git
     from kazma_core.security.child_env import tool_child_env
 
     cwd = await asyncio.to_thread(_get_workspace)
@@ -103,21 +103,14 @@ async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
     _for_a_read(env)
 
     def run() -> CardLessRead:
-        # Reading the configuration starts nothing; the driver names it lists
-        # are emptied for every command of the read.
-        listing = subprocess.run(  # noqa: S603 -- git, reading its configuration
-            ["git", "config", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
-        )
+        # Reading the configuration starts nothing; every filter key it lists
+        # is emptied, whole, for every command of the read.
+        _code, listed, _err = run_git(["git", *FILTER_KEYS], cwd=str(cwd),
+                                      env=read_config_env(dict(env)), timeout=timeout)
+        asked_env = read_config_env(dict(env), listed)
 
         def ask(asked: Any) -> tuple[int, str, str]:
-            res = subprocess.run(  # noqa: S603 -- git, a hardened reading argv
-                _git_read_argv(list(asked), listing.stdout or ""), cwd=cwd, env=env,
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=timeout, stdin=subprocess.DEVNULL,
-            )
-            return res.returncode, res.stdout or "", res.stderr or ""
+            return run_git(_git_read_argv(list(asked)), cwd=str(cwd), env=asked_env, timeout=timeout)
 
         return run_card_less(root, ask, form)
 
