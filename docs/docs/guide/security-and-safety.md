@@ -344,11 +344,11 @@ the code.
 
 ## 8. Security config files
 
-`kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty` (**disabled** — no paid program), and `hardening`. **No Kazma code reads that file** (checked 2026-09-27): it records the security program for people, and nothing below runs because of it. Its `hardening` section lists 8 checks ( `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files) and root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
+The security program itself (how to report, the response targets, no paid bounty) is stated in root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md) and on [Security policy](../security/security-policy). The YAML file that used to declare it was read by no code, and nothing below ran because of it; it was removed on 2026-11-27 ([Configuration → security config](configuration#7-security-config-files)). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
 
 ### 8.1 Hardening report (`security/hardening.py`) {#hardening-report}
 
-`SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet. The `run_on_startup` / `fail_on_critical` keys in `kazma-security.yaml` are not read.
+`SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet.
 
 Each check measures the property it names, using the same answer the rest of Kazma uses:
 
@@ -383,15 +383,15 @@ Some advisories have no fixed release and cannot be reached through Kazma's use 
 
 An OSV failure answers `{"status": "error"}`, never an empty list.
 
-Neither scan is scheduled. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly `uv` lockfile update PRs (`.github/dependabot.yml`; until 2026-10-02 it watched the `pip` ecosystem, which never touched `uv.lock`), and bandit's HIGH gate on every CI run. CI's `uv export --locked` and the release's SBOM step fail when `uv.lock` no longer matches `pyproject.toml`.
+Neither scan is scheduled. What does run on a schedule is GitHub's: Dependabot's weekly `uv` lockfile update PRs (`.github/dependabot.yml`; until 2026-10-02 it watched the `pip` ecosystem, which never touched `uv.lock`), and bandit's HIGH gate on every CI run. CI's `uv export --locked` and the release's SBOM step fail when `uv.lock` no longer matches `pyproject.toml`.
 
 ### 8.3 Disclosure workflow (`security/disclosure.py`)
 
 SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → acknowledged → investigating → confirmed → patched → closed`. `publish_advisory()` mints an internal **`KAZMA-ADV-YYYY-…`** id (not a MITRE CVE) plus a markdown template, only from `patched`/`closed` states. `encrypt_report()` HMAC-SHA256-signs the JSON payload with `KAZMA_DISCLOSURE_KEY`.
 
-`kazma-security.yaml`: response window 48 h, assessment 7 d, `security_txt_url` (RFC 9116 contact file — **not** a PGP key), channels email + GitHub private reporting. **`bug_bounty.enabled: false`** (no paid bounty). Canonical policy: root `SECURITY.md` and [Vulnerability reporting](../security/vulnerability-reporting).
+The reporting channels (GitHub's private form first, `admin@kazma.ai` as the backup), the response targets and the no-bounty statement are in root `SECURITY.md` and on [Vulnerability reporting](../security/vulnerability-reporting). The RFC 9116 contact file is `.well-known/security.txt`; there is no PGP key.
 
-> **What enforces security at run time is in the code, not in `kazma-security.yaml`:** the approval gates (§7 of AGENTS.md), the commitment layer, the vault, SSRF/CSRF checks and the fence — each with its gate in `tests/`. The YAML is a declaration.
+> **What enforces security at run time is in the code:** the approval gates (§7 of AGENTS.md), the commitment layer, the vault, SSRF/CSRF checks and the fence — each with its gate in `tests/`.
 
 ---
 

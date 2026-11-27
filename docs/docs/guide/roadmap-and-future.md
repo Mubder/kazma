@@ -96,7 +96,6 @@ Items are marked:
 | `/undo` / `/edit` checkpoint mutation | ✅ | Live graph path via `aget_state` / `aupdate_state`. |
 | Remote secret login page | ✅ | `/login` + `POST /api/auth/login`. |
 | Cryptographic "trust tiers" | 🔴 | Only the hub's boolean `certified` flag and an MCP server's `trust: trusted` (skips its approval card). |
-| `kazma-security.yaml` hardening checks | 🔴 | No code reads that file; it is a declaration. What enforces security lives in the code and CI: the approval gates, the commitment layer, the vault, the static gates in `tests/`, bandit in CI and Dependabot. |
 
 ---
 
