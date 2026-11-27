@@ -40,6 +40,7 @@ from typing import Any
 
 import pytest
 
+from tests._as_request import lock_armed, not_armed
 from tests.test_pg_app_role import SCRIPT, _every_store_set_up, _with
 
 try:
@@ -97,10 +98,9 @@ def db() -> Iterator[dict[str, str]]:
 @pytest.fixture()
 def pool(db: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     """The shared pool on the private database, the lock armed."""
-    from kazma_core.db import row_security
     from kazma_core.db.postgres_pool import PostgresPool
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     made = PostgresPool(db["app"], min_size=1, max_size=3)
     try:
         yield made
@@ -184,7 +184,7 @@ def test_every_space_connection_is_the_space_role(db: dict[str, str], monkeypatc
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.scope import bind_scope
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     monkeypatch.setattr(row_security, "space_conninfo", lambda url, environ=None: url)  # the option lost
     monkeypatch.setattr(row_security, "_half_said", {})
     monkeypatch.setattr(row_security, "_role_refused", (0.0, ""))
@@ -217,11 +217,10 @@ def test_a_dead_backend_at_the_checkout_raises(db: dict[str, str]) -> None:
 
 
 def test_not_armed_the_pool_is_todays(db: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from kazma_core.db import row_security
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.scope import bind_scope
 
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     made = PostgresPool(db["app"], min_size=1, max_size=2)
     try:
         with bind_scope("sa", "owner"):
@@ -240,11 +239,10 @@ def test_a_role_a_checkout_set_for_its_session_is_gone_in_the_next(db: dict[str,
     """M1: a session-level ``SET ROLE NONE`` (and a session ``set_config``) on
     a space connection outlived its checkout: with one connection, the next
     request, in another space, ran as ``kazma_app`` and saw every space's rows."""
-    from kazma_core.db import row_security
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.scope import bind_scope
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     made = PostgresPool(db["app"], min_size=1, max_size=1)
     try:
         with bind_scope("sa", "owner"), made.connection() as conn:
@@ -291,7 +289,7 @@ def test_a_space_connection_that_is_not_the_space_role_is_closed_and_refused(db:
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.scope import bind_scope
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     monkeypatch.setattr(row_security, "end_space", lambda conn: setattr(conn, "_kazma_out", False))
     made = PostgresPool(db["app"], min_size=1, max_size=1)
     try:
@@ -345,7 +343,7 @@ def test_a_failed_space_checkout_says_what_failed_once_a_minute(db: dict[str, st
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.scope import bind_scope
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     monkeypatch.setattr(row_security, "_half_said", {})
     monkeypatch.setattr(row_security, "_role_refused", (0.0, ""))
     monkeypatch.setenv("KAZMA_PG_POOL_TIMEOUT", "1")
@@ -392,12 +390,11 @@ def test_a_row_of_no_spaces_shape_is_refused_before_a_connection(db: dict[str, s
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
     """L4: ``begin_space`` raised ValueError for such an id, after taking a
     connection; it is a refusal before any is asked for."""
-    from kazma_core.db import row_security
     from kazma_core.db.postgres_pool import PostgresPool
     from kazma_core.spaces.row_work import statements_of
     from kazma_core.spaces.scope import NoSpaceBound
 
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     made = PostgresPool(db["app"], min_size=1, max_size=1)
     try:
         with statements_of("telegram:42"), pytest.raises(NoSpaceBound, match="not a space id"):
@@ -577,7 +574,7 @@ def test_what_reaches_the_server_is_the_workloads_own(db: dict[str, str], monkey
 
     address = urlsplit(db["app"])
     wire = _Wire(address.hostname or "127.0.0.1", address.port or 5432)
-    monkeypatch.setattr(row_security, "_armed", armed)
+    lock_armed(monkeypatch, armed)
     made = PostgresPool(_via(db["app"], wire.port), min_size=1, max_size=2)
     try:
         with install_statements("a test: the pool's own first connection, before the record"):

@@ -24,6 +24,8 @@ import pytest
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import bind_scope
 
+from tests._as_request import lock_armed, not_armed
+
 try:
     import psycopg
 except ImportError:  # CI's light job has no psycopg: collected and skipped, so the counts agree
@@ -47,7 +49,7 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     # run (tests/_second_lock_armed.py) the setup's writes would otherwise go
     # through a space door before this test's rules are back in place (the
     # last test's teardown took the space role's rights).
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     _every_store_set_up(dsn)
     monkeypatch.setattr(row_security, "_in_place", row_security.in_place())  # given back after the test
     # Every table's rule, but not the checkpoints' backfill: the session's
@@ -61,7 +63,7 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     pool = PostgresPool(dsn, min_size=1, max_size=4)
     monkeypatch.setattr("kazma_core.db.postgres_pool.get_postgres_pool", lambda: pool)
     monkeypatch.setattr(scope, "_enforced", True)
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     try:
         yield pool
     finally:
@@ -132,10 +134,9 @@ def test_each_space_lists_its_own_documents(documents: Any) -> None:
 def test_not_armed_a_forgotten_filter_reads_another_spaces_document(documents: Any,
                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     # The control: the same statement as the owner, as Kazma signs in today.
-    from kazma_core.db import row_security
 
     w = documents
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     with bind_scope(w.a, w.person_a):
         assert [d.id for d in w.svc.repository.list_documents(tenant_id=w.b)] == [w.jobs["b"].document_id]
 
@@ -298,6 +299,112 @@ def test_the_mirror_on_kazmas_database_takes_the_shared_door(armed: Any, monkeyp
     finally:
         _install("DELETE FROM kazma_beliefs WHERE id = ANY(%s)", (list(facts.values()),))
         mirror.close()
+
+
+def test_armed_a_fact_kept_under_another_space_reads_gone_there_and_stays(armed: Any,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """The armed twin of ``test_memory_rows_in_their_space.py``'s
+    ``test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres``,
+    which disarms (step 5 review L3). Unarmed, a delete in B sees the copy
+    kept under A and keeps it, said (False). Armed, that copy is out of B's
+    door's sight and the delete reads gone (True) -- while the copy stays, A's.
+    So once armed a delete cannot tell a copy held under another space: that
+    none is held is step 6's arming proof (0b delta review L-b), and this pins
+    the answer that proof stands in for."""
+    from kazma_core.memory.state_backend import PostgresStateBackend
+
+    dsn = os.environ["KAZMA_DATABASE_URL"]
+    a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
+    mirror = PostgresStateBackend(dsn)
+    fact = f"s401-{uuid.uuid4().hex[:12]}"
+    try:
+        with bind_scope(a, "reem"):  # A's turn wrote it
+            assert mirror.mirror_belief({"id": fact, "tenant_id": a, "subject": "user",
+                                         "predicate": "lives_in", "object": a}) is True
+        assert mirror.delete_belief(fact, tenant_id=b) is True, "armed: B's door sees no copy, so it reads gone"
+        held = _install("SELECT tenant_id FROM kazma_beliefs WHERE id = %s", (fact,))
+        assert [r["tenant_id"] for r in held] == [a], "the copy stays, A's"
+        with bind_scope(a, "reem"):
+            assert [r["id"] for r in mirror.fetch_beliefs([fact], tenant_id=a)] == [fact]
+        # The control: the same delete unarmed sees the copy under A and keeps it, said.
+        not_armed(monkeypatch)
+        assert mirror.delete_belief(fact, tenant_id=b) is False
+        assert [r["tenant_id"] for r in _install("SELECT tenant_id FROM kazma_beliefs WHERE id = %s", (fact,))] == [a]
+    finally:
+        _install("DELETE FROM kazma_beliefs WHERE id = %s", (fact,))
+        mirror.close()
+
+
+def _another_name_for(dsn: str) -> str:
+    """The same database through another host name: ``hostaddr`` carries the
+    address, ``host`` a name no resolver is asked for."""
+    import socket
+
+    conninfo = psycopg.conninfo  # the module's guarded import: no bare one in a test
+    host = str(conninfo.conninfo_to_dict(dsn).get("host") or "localhost")
+    return conninfo.make_conninfo(dsn, host="kazma-db.invalid", hostaddr=socket.gethostbyname(host))
+
+
+@pytest.mark.parametrize("told", ["by identity", "by address alone", "not told"],
+                         ids=["told by identity", "the control: by address alone", "not told: refused"])
+def test_the_mirror_and_pgvector_by_another_name_take_the_shared_door(armed: Any, monkeypatch: pytest.MonkeyPatch,
+                                                                      told: str) -> None:
+    """Step 5 review M1: through another name for Kazma's database (a
+    ``hostaddr`` alias) the mirror and pgvector took it for another, signed in
+    as the tables' owner -- whom row security does not hold -- and read every
+    space's rows (the control: the address-only answer they asked before).
+    Told by its identity, they take the shared door: the space role, the
+    space's own rows. Not told (an identity that cannot be read), they are
+    refused, never reached as the owner."""
+    from kazma_core.db import availability
+    from kazma_core.memory.backends import PgvectorBackend
+    from kazma_core.memory.state_backend import PostgresStateBackend
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    dsn = os.environ["KAZMA_DATABASE_URL"]
+    if told == "by address alone":
+        def by_address(asked: str | None, *, or_its_server: bool = False, **_: Any) -> bool:
+            return availability._same_as_kazmas(asked, availability._server_of if or_its_server
+                                                else availability._database_of)
+
+        monkeypatch.setattr(availability, "kazma_database", by_address)
+    elif told == "not told":
+        monkeypatch.setattr(availability, "server_identity", lambda _dsn, **_: None)
+    a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
+    mirror = PostgresStateBackend(dsn)
+    facts = {space: f"s401-{uuid.uuid4().hex[:12]}" for space in (a, b)}
+    alias = _another_name_for(dsn)
+    aliased = PostgresStateBackend(alias)
+    try:
+        for space, who in ((a, "reem"), (b, "omar")):
+            with bind_scope(space, who):
+                assert mirror.mirror_belief({"id": facts[space], "tenant_id": space, "subject": "user",
+                                             "predicate": "lives_in", "object": space}) is True
+        seen = {}
+        with bind_scope(a, "reem"):
+            for name, backend in (("mirror", aliased), ("pgvector", PgvectorBackend(dsn=alias))):
+                if told == "not told":
+                    with pytest.raises(NoSpaceBound):
+                        backend._connect()
+                    continue
+                conn = backend._connect()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT current_user::text, (SELECT count(*) FROM kazma_beliefs WHERE id = ANY(%s))",
+                                (list(facts.values()),))
+                    seen[name] = tuple(cur.fetchone())
+                finally:
+                    conn.close()
+        assert len(seen) == (0 if told == "not told" else 2)
+        for name, (who, rows) in seen.items():
+            if told == "by identity":
+                assert (who, rows) == ("kazma_space", 1), (name, who, rows)
+            else:
+                assert who != "kazma_space" and rows == 2, (name, who, rows)
+    finally:
+        _install("DELETE FROM kazma_beliefs WHERE id = ANY(%s)", (list(facts.values()),))
+        mirror.close()
+        aliased.close()
 
 
 # ── the step 3 review ────────────────────────────────────────────────────

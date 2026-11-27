@@ -27,7 +27,7 @@ from contextlib import nullcontext
 
 from kazma_core.db.pg_helpers import is_space_refusal
 from kazma_core.spaces.row_work import door_hides, install_statements, row_statements
-from kazma_core.spaces.scope import space_named_or_bound, space_of_record, spaces_enforced
+from kazma_core.spaces.scope import NoSpaceBound, space_named_or_bound, space_of_record, spaces_enforced
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
@@ -217,15 +217,28 @@ class PostgresStateBackend:
         from kazma_core.db import availability, space_doors
 
         if self._ours is None:
-            ours = availability.is_kazma_database(self._dsn, or_its_server=True)
-            # This first: a thread that finds _ours set finds this set too.
-            self._kazmas_database = availability.is_kazma_database(self._dsn)
-            self._ours = ours
-        ours = self._ours
-        held = _armed_door(self._kazmas_database)
+            # The one answer (``availability.kazma_database``, S4-01 step 5
+            # review M1), read with this backend's own timeout. Kept only once
+            # it cannot change: told by identity (armed), or Kazma's own by
+            # address. Not armed, any other answer is asked again -- by
+            # address alone, no I/O -- so an arming later reads the identity
+            # (delta review N1). Armed, an untold one is refused (_armed_door).
+            from kazma_core.db import row_security
+
+            told = row_security.armed()
+            on_its_server = availability.kazma_database(self._dsn, or_its_server=True, timeout=self._timeout)
+            database = availability.kazma_database(self._dsn, timeout=self._timeout)
+            if on_its_server is not None and database is not None and (told or (on_its_server and database)):
+                # This first: a thread that finds _ours set finds this set too.
+                self._kazmas_database = database
+                self._ours = on_its_server
+            ours, kazmas = bool(on_its_server), database
+        else:
+            ours, kazmas = self._ours, self._kazmas_database
+        held = _armed_door(kazmas)
         if held is not None:
             return held
-        if self._kazmas_database:
+        if kazmas:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
             space_doors.checkout("memory mirror")
@@ -971,16 +984,30 @@ class PostgresStateBackend:
             return 0
 
 
+class _UntoldDatabase(NoSpaceBound):
+    """Armed, a memory store's address that may be Kazma's own database --
+    whether it is cannot be told now -- is refused (S4-01 step 5)."""
+
+
 def _armed_door(kazmas_database: bool | None) -> Any | None:
     """Once the second lock is armed (S4-01 step 3), a connection to Kazma's
     own database is a checkout of the shared pool's door: a space's
     statements as the space role, the install's as the owner, none refused.
     None while it is not armed, or for a database elsewhere (outside the
-    lock, as memory health says)."""
+    lock, as memory health says).
+
+    Armed, an address whose answer is not told (``None``: a server's
+    identity could not be read) is refused, a space refusal, said and asked
+    again at the next connection -- never reached on its own sign-in as the
+    tables' owner, whom the lock does not hold: through another name for
+    Kazma's database that read every space's rows (step 5 review M1)."""
     from kazma_core.db import row_security
 
-    if not kazmas_database or not row_security.armed():
+    if kazmas_database is False or not row_security.armed():
         return None
+    if kazmas_database is None:
+        raise _UntoldDatabase("whether a memory store's address is Kazma's own database cannot be told now (a "
+                              "server's identity could not be read): armed, it is not reached as the tables' owner")
     from kazma_core.db.postgres_pool import get_postgres_pool
 
     pool = get_postgres_pool()

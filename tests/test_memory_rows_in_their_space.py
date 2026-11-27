@@ -24,7 +24,7 @@ from kazma_core.spaces import scope
 from kazma_core.spaces.row_work import Door, install_statements, row_statements, statements_of
 from kazma_core.spaces.scope import bind_scope, install_work
 
-from tests._as_request import not_armed
+from tests._as_request import lock_armed, not_armed
 
 # ── the rule: a row Kazma keeps for itself ───────────────────────────────
 
@@ -278,7 +278,6 @@ def test_the_probe_is_a_ping_of_the_install(mirror: Any) -> None:
 @pytest.mark.parametrize("method", ["fetch_episodes", "fetch_beliefs", "search_episodes", "search_beliefs"])
 def test_a_refused_read_is_never_nothing_found(mirror: Any, monkeypatch: pytest.MonkeyPatch, method: str) -> None:
     """Review 40: a refusal answered [] even on recall's strict path."""
-    from kazma_core.db import row_security
     from kazma_core.spaces.scope import NoSpaceBound
 
     def refused() -> Any:
@@ -290,14 +289,14 @@ def test_a_refused_read_is_never_nothing_found(mirror: Any, monkeypatch: pytest.
     args = (["e1"],) if method.startswith("fetch") else ("trip to kuwait",)
     # Spaces off and nothing armed: as before. Its own state, whatever the
     # suite runs as (KAZMA_TEST_SECOND_LOCK=armed arms every test).
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     monkeypatch.setattr(scope, "_enforced", False)
     assert ask(*args, tenant_id="family") == [], "Spaces off: as before"
     # Armed, Spaces not enforced: a refusal is one (S4-01 step 3 review M3).
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     with pytest.raises(NoSpaceBound):
         ask(*args, tenant_id="family")
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     monkeypatch.setattr(scope, "_enforced", True)
     with pytest.raises(NoSpaceBound):
         ask(*args, tenant_id="family")
@@ -751,7 +750,6 @@ def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: An
 @pytest.mark.parametrize("store", ["mirror", "pgvector"])
 def test_once_armed_kazmas_database_is_reached_through_the_shared_door(
         monkeypatch: pytest.MonkeyPatch, store: str, armed: bool, ours: bool, through_the_door: bool) -> None:
-    from kazma_core.db import row_security
     from kazma_core.memory.backends import PgvectorBackend
     from kazma_core.memory.state_backend import PostgresStateBackend
 
@@ -761,7 +759,7 @@ def test_once_armed_kazmas_database_is_reached_through_the_shared_door(
         def held_connection(self) -> Any:
             return held
 
-    monkeypatch.setattr(row_security, "_armed", armed)
+    lock_armed(monkeypatch, armed)
     monkeypatch.setattr("kazma_core.db.postgres_pool.get_postgres_pool", lambda: _Pool())
     dsn = f"postgresql://kazma@db.example/{uuid.uuid4().hex}"
     if store == "mirror":

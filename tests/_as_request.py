@@ -70,13 +70,22 @@ def own(target: Any) -> Any:
 
 def not_armed(monkeypatch: Any) -> None:
     """The second lock not armed for this test: a test of how an install that
-    does not enforce Spaces reads today ("Spaces off, as before"). Such an
-    install is never armed -- arming is at start only, and switching Spaces
-    off later disarms or is refused (S4-01 step 3 review M3, step 6) -- so in
-    an armed run its reading is still the unarmed one."""
+    does not enforce Spaces reads today ("Spaces off, as before") -- such an
+    install is never armed: arming requires Spaces enforced, and switching
+    Spaces off disarms or is refused (S4-01 step 6, a requirement there) --
+    or a test of the lock itself that starts from the unarmed state. Every
+    disarm in the tests is this call, so one search finds them all (step 5
+    review L3; ``tests/test_armed_state_declared.py``)."""
+    lock_armed(monkeypatch, False)
+
+
+def lock_armed(monkeypatch: Any, value: bool) -> None:
+    """The second lock armed, or not, for this test: a test of the lock
+    itself. Every change of the armed state in the tests is this call or
+    :func:`not_armed` (``tests/test_armed_state_declared.py``)."""
     from kazma_core.db import row_security
 
-    monkeypatch.setattr(row_security, "_armed", False)
+    monkeypatch.setattr(row_security, "_armed", bool(value))
 
 
 def bound_like_a_request(app: Any) -> Any:

@@ -483,6 +483,25 @@ jobs:
           # Without this the root conftest.py force-pins sqlite and strips the
           # DSN, and this job would silently prove nothing (audit F-7).
           KAZMA_TEST_ALLOW_REAL_DB: "1"
+      - name: A fresh database for the armed run
+        if: ${{ !cancelled() }}
+        run: python -c "import psycopg; psycopg.connect('postgresql://kazma:kazma@localhost:5432/kazma_test', autocommit=True).execute('CREATE DATABASE kazma_armed')"
+      - name: The same tests with Spaces' second lock armed
+        # Spaces S4-01 step 5 review M2: every Postgres test again with the
+        # row-level lock armed (tests/_second_lock_armed.py puts the rules in
+        # place on this fresh database and arms each module), so a new test or
+        # a product caller that says no space's door fails here, not only in
+        # an armed run made by hand. test_pg_armed_is_armed.py checks
+        # the run is armed exactly when it says so: an armed run that stopped
+        # arming would report the unarmed run's count. It runs even when the
+        # unarmed step failed, so one failure does not hide the other.
+        if: ${{ !cancelled() }}
+        run: python scripts/postgres_suite.py
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_armed
+          KAZMA_TEST_ALLOW_REAL_DB: "1"
+          KAZMA_TEST_SECOND_LOCK: armed
 
   pgvector:
     name: Tests (pgvector)

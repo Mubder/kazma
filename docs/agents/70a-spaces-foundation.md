@@ -216,11 +216,35 @@ an install with one account behaves as before.
   (step 4 review L6). It trusts this install's records only on this
   install's own database -- its own address, or any other way to the same
   server and database, told by the server's system identifier and the
-  database's name (`row_security._this_installs_own`); the script reads this
+  database's name. That is `availability.kazma_database`, the one answer to
+  "is this Kazma's own database", which the memory mirror and pgvector ask
+  too (step 5 review M1: they decided by address, so through another name
+  for Kazma's database they signed in as the tables' owner, whom row
+  security does not hold, and read every space's rows;
+  `tests/test_kazmas_own_database.py` finds any other own-database decision
+  -- an identity read in SQL, a comparison with Kazma's own address, a parse
+  of it to compare -- each planted as its control, delta review N3). Another
+  address is told by identity only while the lock is armed, and in the
+  operator's `apply` (`by_identity=True`); not armed, by address alone with
+  no I/O, as before (step 5 delta review N1: during an outage every mirror
+  and pgvector connection paid two failed 5 s identity reads first). The
+  read uses the asker's own timeout, and one that fails is not read again
+  for `UNTOLD_FOR_SECONDS` (30 s). Two system identifiers tell; a start time
+  (a login that may not read `pg_control_system()`) tells nothing, nor does
+  a restart between two reads: "not told" (delta review N2). The mirror and
+  pgvector keep an answer only once it cannot change (told armed, or Kazma's
+  own by address). An answer not told is never "another database": armed,
+  the mirror and pgvector refuse the address as a space refusal and ask
+  again later, never reaching it on their own sign-in as the owner; the
+  backfill says it could not tell, at WARNING, with the remedy (run again).
+  It is asked on its own connection, so the
+  apply's stays outside a transaction and the schema lock is not held across
+  the backfill (step 5 review L1). A physical copy -- a `pg_basebackup`
+  clone, a promoted standby -- shares the identifier and the name and counts
+  as Kazma's own: Spaces on replicas is not covered. The script reads this
   install's files even with `--url-from`. Elsewhere `Applied.not_backfilled`,
-  and the script exits 1 with one message naming the remedy: Spaces on
-  replicas is not covered (review M2, delta review N3, second delta review
-  L2) -- reads them read-only,
+  and the script exits 1 with one message naming the remedy (review M2,
+  delta review N3, second delta review L2). It reads the records read-only,
   and a missing record store, an empty one while rows carry a space, or one
   that cannot be read keeps `apply` from being complete, changing nothing
   (M1: a missing store used to be made empty and read as "no threads").
@@ -236,7 +260,9 @@ an install with one account behaves as before.
   L1); a closed or closing pool makes no space half: `close()` says it is
   closing before it awaits the old half, as `closed` turns True only after,
   and the half asks again under its lock (L3, delta review N2, second delta
-  review L1). Gates:
+  review L1) and once more after it opened: a pool closed while its half
+  opened (a psycopg_pool release whose `open` yields) closes that half and
+  raises `PoolClosed` (step 5 review L2). Gates:
   `tests/test_pg_checkpoint_spaces.py` (real Postgres, the saver called
   directly: wire, stamp, a space's own threads, refused, backfill, the
   backfill's trust, prune; each with its control) and
@@ -251,19 +277,32 @@ an install with one account behaves as before.
   the faults hold armed: a space role lost while running (refused and said
   as the space half's, never an outage), `/health/ready` and `/health/deep`,
   the audit prune (`tests/test_pg_second_lock_faults.py`). The whole
-  Postgres suite runs armed as well as not. Each test binds what the
+  Postgres suite runs armed as well as not, and so does CI's Postgres job:
+  a second step on a fresh database with `KAZMA_TEST_SECOND_LOCK=armed`
+  (step 5 review M2; `tests/test_postgres_suite.py` holds the job to it,
+  each rule with its control). Each run checks it is what it says
+  (`tests/test_pg_armed_is_armed.py`): from space A a store read and a raw
+  SELECT of B's task, and a statement with no space, read across unarmed
+  and are refused armed. Each test binds what the
   request or turn it stands for would (`tests/_as_request.py`: `as_owner`,
   the tenant middleware's answer with Spaces off; `in_space`; the real
   tenant middleware in front of a test's own app); a store test's own seeds
   and checks are the install's (`tests_own`, `own(store)`); a private part
   of a declared pass, called directly, takes that pass's door; a thread a
   test starts says its own. A test that pins how an install reads with the
-  lock not armed says so (`not_armed`): Spaces off as before, step 1's
+  lock not armed says so (`not_armed`; every arm or disarm in the tests is
+  `not_armed` or `lock_armed`, `tests/test_armed_state_declared.py`): Spaces
+  off as before -- which holds armed only by step 6's requirement that the
+  lock is armed only with Spaces enforced and switching Spaces off disarms
+  or is refused -- step 1's
   report mode, the first lock's controls, a database of a test's own that
   never had the rules, the mirror's own connections, and a restore of the
   shared tables while running, which takes the space role's rights until a
-  whole `apply` (step 6's to handle). The armed run found one fault, fixed
-  with its class: a closed shared pool made a space half at its next space
+  whole `apply` (step 6's to handle). A disarmed test's armed answer is
+  pinned beside it where it matters: armed, a delete of a fact kept under
+  another space reads gone and the copy stays (`tests/test_pg_armed_flows.py`),
+  the answer step 6's arming proof stands in for. The armed run found two
+  faults, each fixed with its class: a closed shared pool made a space half at its next space
   checkout and wrote through it (`PostgresPool._space_half` raises
   `PoolClosed`, as the checkpointer's does; a gate reads every
   `_space_half`, `tests/test_checkpoint_doors.py`), and a catalog read lost
@@ -271,7 +310,9 @@ an install with one account behaves as before.
   short row; a gate: each query names its columns once). The proof that
   nothing is blinded: the space matrix runs on Postgres armed (every route
   and tool in its own space; a Documents case speaks of the documents it
-  seeded, the shared tables holding the cases before), and every
+  seeded, the shared tables holding the cases before -- A's set aside, B's
+  never: a document of B's in A's listing is a leak whichever case made
+  it, step 5 review L3), and every
   maintenance sweep does the same armed as not
   (`tests/test_pg_sweeps_armed.py`: one database seeded in three spaces,
   copied, each copy's sweeps in a process of their own as the cadence runs

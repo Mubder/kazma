@@ -51,6 +51,9 @@ MADE: dict[str, str] = {
     "kazma-core/kazma_core/db/pg_backup.py::revoke_public_execute":
         "own sign-in: after the upgrade's or the move's whole copy, the functions' owner takes PUBLIC's "
         "EXECUTE away (S4-01 step 2 review L3); no row of any table",
+    "kazma-core/kazma_core/db/availability.py::server_identity":
+        "own sign-in: asks the server its system identifier and the database's name, to tell Kazma's "
+        "own database by any address (S4-01 step 5 review M1); no row of any table",
     "kazma-core/kazma_core/db/row_security.py::_owner_connect":
         "own sign-in: the second lock's rules are read and put in place as the tables' owner (S4-01 step 2)",
     "kazma-core/kazma_core/db/row_security.py::_space_connect":

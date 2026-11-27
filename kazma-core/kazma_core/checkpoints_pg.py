@@ -150,6 +150,13 @@ def _reported_pool_class() -> type:
                             open=False,
                         )
                         await half.open()
+                        if self.closed or self._kazma_closing:
+                            # Closed or closing while it opened: today open()
+                            # never yields, but a release whose open() does
+                            # would leave this half open, referenced by a
+                            # closed pool (step 5 review L2).
+                            await half.close()
+                            raise PoolClosed("the checkpointer's pool is closed")
                         self._kazma_space_half = half
             return self._kazma_space_half
 

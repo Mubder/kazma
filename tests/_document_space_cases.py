@@ -96,7 +96,9 @@ class _Engine:
 class World:
     """Two spaces with a ready document each, on a private store -- or, with
     Postgres metadata, the shared tables, where the matrix's two spaces keep
-    the documents of the cases before (``earlier``)."""
+    the documents of the cases before: A's are ``earlier``, and only A's --
+    a document of B's in a listing read from A is a leak whichever case made
+    it (step 5 review L3)."""
 
     matrix: Matrix
     service: Any
@@ -110,7 +112,8 @@ class World:
     earlier: frozenset[str] = frozenset()
 
     def listed_now(self, rows: list[dict[str, Any]]) -> list[str]:
-        """The ids of a listing, less the documents of the cases before."""
+        """The ids of a listing read from A, less A's own documents of the
+        cases before: B's, of this case or any before, stay in it."""
         return [row["document_id"] for row in rows if row["document_id"] not in self.earlier]
 
     def seed_a(self, word: str) -> Seeded:
@@ -202,8 +205,8 @@ def world(matrix: Matrix) -> Iterator[World]:
         set_ingestion_service(service)
         try:
             marks = matrix.plant("doc")
-            earlier = frozenset(str(record.id) for space in (Matrix.SPACE_A, Matrix.SPACE_B)
-                                for record in tests_own_of(service.repository).list_documents(tenant_id=space))
+            earlier = frozenset(str(record.id) for record
+                                in tests_own_of(service.repository).list_documents(tenant_id=Matrix.SPACE_A))
             a = seed_document(service, tenant_id=Matrix.SPACE_A, owner=matrix.account_a, marker=marks.a)
             b = seed_document(service, tenant_id=Matrix.SPACE_B, owner=matrix.account_b, marker=marks.b)
             yield World(matrix=matrix, service=service, engine=engine, a=a, b=b,

@@ -826,10 +826,25 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
     finished is in ``left``."""
     import sqlite3
 
+    from kazma_core.db.availability import kazma_database
     from kazma_core.spaces import threads
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-    if not _this_installs_own(url, conn):
+    # The one answer (availability.kazma_database: by identity too; S4-01
+    # step 5 review M1). Asked on its own connection: the apply's is left as
+    # it was, outside a transaction (review L1).
+    ours = kazma_database(url, by_identity=True)  # the operator's apply: by any name, armed or not
+    if ours is None:
+        # Not told: the servers' identities could not be read now. Not read
+        # as "another database" -- said as what it is, so a run again is the
+        # remedy, not --url-from.
+        result.not_backfilled = ("checkpoints: whether this is the database this install's own address names "
+                                 "could not be told now (a server's identity could not be read), so their spaces "
+                                 "are not backfilled; run it again when both servers answer")
+        logger.warning("[row_security] %s", result.not_backfilled)
+        result.notes.append(result.not_backfilled)
+        return
+    if not ours:
         result.not_backfilled = ("checkpoints: not the database this install's own address names (compared by "
                                  "server and database), so their spaces are not backfilled from this install's "
                                  "thread records (Spaces on replicas is not covered)")
@@ -870,49 +885,6 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
             cur.execute(f"DROP TABLE IF EXISTS {_HOMES}")
     if result.backfilled:
         result.changed.append(f"checkpoints: {result.backfilled} row(s) given their thread's space")
-
-
-def _server_identity(cur: Any) -> tuple[str, str]:
-    """Which server and database *cur*'s connection reached: the cluster's
-    system identifier (its start time where a login may not read it) and the
-    database's name -- the same for two addresses of one database, whatever
-    host name or alias each names (second delta review L2)."""
-    import psycopg
-
-    try:
-        with cur.connection.transaction():
-            server = _one(cur, "SELECT system_identifier::text FROM pg_control_system()")
-    except psycopg.errors.InsufficientPrivilege:
-        server = None
-    if not server:
-        server = _one(cur, "SELECT pg_postmaster_start_time()::text")
-    return str(server), str(_one(cur, "SELECT current_database()"))
-
-
-def _this_installs_own(url: str, conn: Any) -> bool:
-    """Whether *url* (with *conn* on it) is the database this install's own
-    address names: the same address (``availability.is_kazma_database``), or
-    another way to the same server and database -- another host name, a
-    ``hostaddr`` alias -- told by its server identity, read on both
-    (second delta review L2: such a database counted as "elsewhere" and was
-    not backfilled)."""
-    import psycopg
-
-    from kazma_core.db.availability import is_kazma_database
-    from kazma_core.db.backend import get_database_url
-
-    if is_kazma_database(url):
-        return True
-    ours = get_database_url() or ""
-    if not ours.startswith(("postgres://", "postgresql://")):
-        return False
-    try:
-        with _owner_connect(ours, autocommit=True) as own, own.cursor() as theirs, conn.cursor() as cur:
-            return _server_identity(theirs) == _server_identity(cur)
-    except psycopg.Error as exc:
-        logger.warning("[row_security] this install's own database could not be compared with the one named "
-                       "(%s): it counts as another", type(exc).__name__)
-        return False
 
 
 def _any_stamped(conn: Any, tables: list[str]) -> bool:

@@ -204,15 +204,145 @@ def _same_as_kazmas(dsn: str | None, reading: Callable[[str], Any]) -> bool:
     return a is not None and a == reading(ours)
 
 
-def is_kazma_database(dsn: str | None, *, or_its_server: bool = False) -> bool:
-    """True when *dsn* is Kazma's own database, not only on its server.
+#: Each address's server identity, read once (S4-01 step 5 review M1): a
+#: database's identity does not change while an address names it.
+_IDENTITIES: dict[str, tuple[str, str, str]] = {}
+_IDENTITIES_LOCK = threading.Lock()
+#: How long an address whose identity could not be read stays "not told"
+#: before it is read again (step 5 delta review N1): during an outage a
+#: connection does not first pay a failed identity read every time.
+UNTOLD_FOR_SECONDS = 30.0
+#: Address -> the clock reading before which it is not read again.
+_UNTOLD: dict[str, float] = {}
 
-    *or_its_server*: any database of that server. A memory mirror there
-    shares the server's outages, and none of the database's tables, roles or
-    policies (S4-01, M8); one on another server is its own outage, never
-    Kazma's.
+
+def _first(cur: Any, sql: str) -> Any:
+    cur.execute(sql)
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return next(iter(row.values())) if isinstance(row, dict) else row[0]
+
+
+def _read_server_identity(cur: Any) -> tuple[str, str, str]:
+    """Which server and database *cur*'s connection reached, with what kind
+    of value tells the server: ``("system", identifier, database)`` -- the
+    cluster's system identifier, the same for every address of one database
+    and across restarts -- or ``("start", start time, database)`` where the
+    login may not read the identifier. Only two system identifiers tell two
+    servers apart (:func:`_same_identity`)."""
+    import psycopg
+
+    try:
+        with cur.connection.transaction():
+            server = _first(cur, "SELECT system_identifier::text FROM pg_control_system()")
+    except psycopg.errors.InsufficientPrivilege:
+        server = None
+    kind = "system"
+    if not server:
+        kind, server = "start", _first(cur, "SELECT pg_postmaster_start_time()::text")
+    return kind, str(server), str(_first(cur, "SELECT current_database()"))
+
+
+def server_identity(dsn: str, *, timeout: float = 5.0) -> tuple[str, str, str] | None:
+    """*dsn*'s :func:`_read_server_identity`, read once and kept by address,
+    signing in with the asker's *timeout*. None when it cannot be read now
+    (no driver, the server away, a refusal): then not read again for
+    :data:`UNTOLD_FOR_SECONDS` (step 5 delta review N1), so an outage does
+    not cost every connection a failed read first."""
+    with _IDENTITIES_LOCK:
+        known = _IDENTITIES.get(dsn)
+        untold_until = _UNTOLD.get(dsn, 0.0)
+    if known is not None:
+        return known
+    if _clock() < untold_until:
+        return None
+    try:
+        import psycopg
+    except ImportError:
+        return None
+    try:
+        with psycopg.connect(dsn, autocommit=True, connect_timeout=max(1, int(timeout))) as conn, \
+                conn.cursor() as cur:
+            found = _read_server_identity(cur)
+    except (psycopg.Error, OSError) as exc:
+        logger.debug("[db] a database's identity could not be read: %s", type(exc).__name__)
+        with _IDENTITIES_LOCK:
+            _UNTOLD[dsn] = _clock() + UNTOLD_FOR_SECONDS
+        return None
+    with _IDENTITIES_LOCK:
+        _IDENTITIES[dsn] = found
+        _UNTOLD.pop(dsn, None)
+    return found
+
+
+def _same_identity(theirs: tuple[str, str, str], mine: tuple[str, str, str], *,
+                   or_its_server: bool) -> bool | None:
+    """Two identities compared like with like (step 5 delta review N2): two
+    system identifiers tell -- *or_its_server*, the identifier alone. A start
+    time on either side tells nothing (None): beside an identifier it never
+    matches, and two start times differ across a restart between two reads."""
+    if theirs[0] != "system" or mine[0] != "system":
+        return None
+    return theirs[1] == mine[1] if or_its_server else theirs[1:] == mine[1:]
+
+
+def kazma_database(dsn: str | None, *, or_its_server: bool = False, by_identity: bool | None = None,
+                   timeout: float = 5.0) -> bool | None:
+    """Whether *dsn* reaches Kazma's own database -- or, *or_its_server*, any
+    database of its server; None when that cannot be told now.
+
+    The one answer to this question (§35; S4-01 step 5 review M1: the memory
+    mirror and pgvector asked by address while the checkpoints' backfill
+    asked by identity, and through another name the mirror connected as the
+    tables' owner and read every space's rows). The same address answers at
+    once, with no I/O. Another one -- another host name, a ``hostaddr``
+    alias, another port mapping -- is told *by_identity*: the server
+    identity of both, read with the asker's *timeout* (system identifier and
+    database name; *or_its_server*, the identifier alone; a start time tells
+    nothing, delta review N2). A physical copy of the cluster
+    (``pg_basebackup``, a promoted standby) shares both, and counts as
+    Kazma's own: Spaces on replicas is not covered.
+
+    *by_identity* None (the default) reads the identity only while the
+    second lock is armed, where an owner's sign-in on another name is what
+    the lock must not allow; not armed, the address alone answers, with no
+    I/O, as before step 5's review (delta review N1: during an outage every
+    connection of the mirror and pgvector paid two failed identity reads
+    first). The operator's ``apply`` passes True: its backfill trusts this
+    install's records on its own database by any name.
+
+    *or_its_server*: a memory mirror on Kazma's server shares its outages,
+    and none of the database's tables, roles or policies (S4-01, M8); one on
+    another server is its own outage, never Kazma's.
     """
-    return _same_as_kazmas(dsn, _server_of if or_its_server else _database_of)
+    if not dsn:
+        return False
+    if _same_as_kazmas(dsn, _server_of if or_its_server else _database_of):
+        return True
+    if by_identity is None:
+        from kazma_core.db.row_security import armed
+
+        by_identity = armed()
+    if not by_identity:
+        return False
+    from kazma_core.db.backend import get_database_url
+
+    ours = get_database_url() or ""
+    postgres = ("postgres://", "postgresql://")
+    if not ours.startswith(postgres) or not (dsn.startswith(postgres) or "=" in dsn):
+        return False
+    theirs, mine = server_identity(dsn, timeout=timeout), server_identity(ours, timeout=timeout)
+    if theirs is None or mine is None:
+        return None
+    return _same_identity(theirs, mine, or_its_server=or_its_server)
+
+
+def is_kazma_database(dsn: str | None, *, or_its_server: bool = False) -> bool:
+    """:func:`kazma_database`, with "cannot be told now" as not Kazma's: for a
+    caller that asks again later. A caller that keeps the answer keeps only
+    a known one (:func:`kazma_database`)."""
+    return bool(kazma_database(dsn, or_its_server=or_its_server))
 
 
 def _describe(exc: BaseException | None) -> str:
@@ -368,6 +498,9 @@ def reset() -> None:
         _state.outage_id = old.outage_id + 1
         _state.last_outage_id = old.outage_id + 1
     old.wake.set()
+    with _IDENTITIES_LOCK:
+        _IDENTITIES.clear()
+        _UNTOLD.clear()
 
 
 # ── the prober ───────────────────────────────────────────────────────────

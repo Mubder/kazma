@@ -457,6 +457,10 @@ def _reset_database_availability(monkeypatch):
 
     availability.reset()
     monkeypatch.setattr(availability, "_probe", lambda: (None, None))
+    if not _ALLOW_REAL_DB:
+        # No real database in this run: telling an address apart reads no
+        # server's identity over the network (S4-01 step 5 review M1).
+        monkeypatch.setattr(availability, "server_identity", lambda dsn, **_: None)
     yield
     availability.reset()
 

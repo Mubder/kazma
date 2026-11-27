@@ -29,12 +29,14 @@ from kazma_core.spaces import scope
 from kazma_core.spaces.row_work import Door, install_statements, statements_of
 from kazma_core.spaces.scope import NoSpaceBound, bind_scope
 
+from tests._as_request import lock_armed, not_armed
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
 def lock(monkeypatch: pytest.MonkeyPatch) -> Any:
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     monkeypatch.setattr(scope, "_enforced", False)
     return row_security
 
@@ -65,7 +67,7 @@ def test_enforced_a_spaces_door_stamps_and_nothing_is_refused(lock: Any, monkeyp
 
 
 def test_armed_nothing_said_is_refused(lock: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(lock, "_armed", True)
+    lock_armed(monkeypatch, True)
     with pytest.raises(NoSpaceBound):
         lock.checkpoint_door()
     with install_statements("a test"):
@@ -420,6 +422,41 @@ def test_a_half_asked_for_while_the_pool_closes_is_refused() -> None:
         first, second = runner.run(scenario())
     assert first.closed
     assert second is None, "a second half was made while the pool closed"
+
+
+def test_a_pool_closed_while_its_half_opens_keeps_no_half(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 5 review L2: a psycopg_pool whose ``open()`` yields (none does
+    today), the pool closed meanwhile -- without the check after the open,
+    the half stayed open, referenced by a closed pool."""
+    pool_module = pytest.importorskip("psycopg_pool")
+    from kazma_core import checkpoints_pg
+
+    made: list[Any] = []
+    real_open = pool_module.AsyncConnectionPool.open
+
+    async def open_that_yields(self: Any, *args: Any, **kwargs: Any) -> None:
+        made.append(self)
+        await asyncio.sleep(0)
+        await real_open(self, *args, **kwargs)
+
+    async def scenario() -> Any:
+        pool = checkpoints_pg._reported_pool_class()(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0,
+                                                        max_size=1, open=False)
+        await pool.open()  # no connection: min_size 0
+        monkeypatch.setattr(pool_module.AsyncConnectionPool, "open", open_that_yields)
+        asking = asyncio.create_task(pool._space_half())
+        await asyncio.sleep(0)  # the half is opening
+        await pool.close()
+        try:
+            await asking
+        except pool_module.PoolClosed:
+            return None, pool._kazma_space_half
+        return "a half", pool._kazma_space_half
+
+    with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+        outcome, kept = runner.run(scenario())
+    assert (outcome, kept) == (None, None), "refused, and no half kept"
+    assert made and all(half.closed for half in made), "the half that opened was closed"
 
 
 def test_a_closed_shared_pool_makes_no_space_half() -> None:

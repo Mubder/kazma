@@ -15,6 +15,8 @@ from kazma_core.documents.capacity import CapacityError
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import NoSpaceBound
 
+from tests._as_request import lock_armed, not_armed
+
 
 class _Jobs:
     def __init__(self, error: BaseException) -> None:
@@ -59,10 +61,10 @@ def test_armed_and_not_enforced_a_refusal_is_still_one(monkeypatch: pytest.Monke
     from kazma_core.db.pg_helpers import is_space_refusal
 
     monkeypatch.setattr(scope, "_enforced", False)
-    monkeypatch.setattr(row_security, "_armed", True)
+    lock_armed(monkeypatch, True)
     assert is_space_refusal(NoSpaceBound("refused")) and is_space_refusal(row_security._SecondTransaction("spent"))
     with pytest.raises(NoSpaceBound):
         _guard(NoSpaceBound("refused"), tmp_path).check_intake(tenant_id="family", byte_size=1)
     # The control: neither armed nor enforced, an install reads its errors as before.
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     assert not is_space_refusal(NoSpaceBound("refused"))
