@@ -837,9 +837,13 @@ def test_every_force_flag_has_a_control() -> None:
     forced = {*git_read.READ_GLOBALS, *git_kazma_files.NO_NOTES, *git_kazma_files.SECTION_SHAPE}
     with_a_program = {"--no-ext-diff", "--no-textconv"}
     through_a_junction = {"--default-prefix", "--no-color"}
+    # Its control starts the promisor's transport:
+    # tests/test_git_settings_start_nothing_and_quote_no_file.py.
+    in_the_settings_gate = {"--no-lazy-fetch"}
     # --no-relative: the IDE reads at the top (--work-tree=<root>, the
     # ceiling at its parent), where diff.relative changes nothing.
-    assert forced == set(_FORCED) | with_a_program | through_a_junction | {"--no-relative"}
+    assert forced == (set(_FORCED) | with_a_program | through_a_junction | in_the_settings_gate
+                      | {"--no-relative"})
 
 
 @pytest.mark.parametrize("flag", sorted(_FORCED))

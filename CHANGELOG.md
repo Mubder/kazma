@@ -35,6 +35,13 @@
   Every other command, option or operand goes to the approval card with
   the exact command shown. A word naming one of Kazma's files is refused,
   and a network path given to git is refused before anything touches it.
+- **A git read with no approval takes no program or file from the
+  repository's settings**: the IDE's git and the agent's git reads switch
+  off each setting git's own list documents as a program it starts or a
+  file it reads -- the signature programs, an attributes file or mailmap
+  the settings name, a submodule's own filters, the fetch a partial clone
+  would start. A read that fails says so in a sentence, in English or
+  Arabic; git's own message goes to Kazma's log only.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

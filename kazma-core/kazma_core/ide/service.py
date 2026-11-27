@@ -97,14 +97,42 @@ def _kazma_file_refusal(target: Path, *, write: bool) -> str | None:
     return store_refusal(target, door="the IDE")
 
 
-def _said(key: str) -> str:
-    """*key*'s sentence in the reader's language; the key itself where the
-    UI's catalog is not loaded (a code a page can word)."""
+def _said(key: str, **values: Any) -> str:
+    """*key*'s sentence in the reader's language, *values* filled in; the
+    key itself where the UI's catalog is not loaded (a code a page can word)."""
     try:
         from kazma_ui.i18n import current_language, t
     except ImportError:
         return key
-    return t(key, current_language())
+    return t(key, current_language(), **values)
+
+
+#: How much of git's own error text a log record keeps.
+_GIT_ERR_LOGGED = 500
+
+
+def _git_answer(parts: list[str], code: int, out: str, err: str) -> dict[str, Any]:
+    """The IDE's answer to a card-less git read: what git printed on its
+    output, and for a read that failed a sentence in the reader's language.
+
+    Git's own error text is never in the answer: a repository's settings
+    can make it quote a file (a line of one it reads as object ids, a part
+    of one it reads as attributes). It goes to the log, secrets masked by
+    shape (``errors.redact_secrets``) and cut.
+    """
+    from kazma_core.errors import redact_secrets
+
+    said = redact_secrets(err.strip())[:_GIT_ERR_LOGGED] if err.strip() else ""
+    verb = parts[0] if parts else "?"
+    if code == 0:
+        if said:
+            logger.debug("[IdeService] git %s wrote to its error output: %s", verb, said)
+        return {"ok": True, "error": None, "output": out.strip()}
+    logger.info("[IdeService] git %s exited %d: %s", verb, code, said or "(no message)")
+    if "unknown option" in err.lower() and "no-lazy-fetch" in err:
+        return {"ok": False, "error": _said("ide.git_read_needs_newer_git"), "output": ""}
+    return {"ok": False, "error": _said("ide.git_read_failed", code=code),
+            "output": out.strip()}
 
 
 def _is_readonly_git(subcommand: str) -> bool:
@@ -671,8 +699,12 @@ class IdeService:
         The form is checked in the workspace (``git_policy.card_less_form``)
         and judged, run and filtered by ``safety.git_kazma_files.
         run_card_less``, every question to git with this read's own argv
-        (``READ_GLOBALS``, no lazy fetch, no pager, hooks, fsmonitor,
-        signature program or filter driver) and environment."""
+        (no pager, ``READ_GLOBALS``, ``read_settings()``: the repository's
+        settings that would start a program or name a file for git to read
+        are switched off, and each filter driver it defines is emptied) and
+        environment. The answer is what git printed on its output: a read
+        that fails says so in a sentence of the reader's language, and git's
+        own error text goes to the log only (it can quote what a file holds)."""
         import asyncio
         import os
         import subprocess
@@ -680,7 +712,7 @@ class IdeService:
 
         from kazma_core.ide.git_policy import card_less_form
         from kazma_core.safety.git_kazma_files import CardLessRead, run_card_less
-        from kazma_core.safety.git_read import READ_CONFIG, READ_GLOBALS, no_hooks_dir
+        from kazma_core.safety.git_read import READ_GLOBALS, read_settings
         from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
@@ -694,11 +726,12 @@ class IdeService:
             restricted_path=os.pathsep.join(system_path_dirs()),
         )
         if not binary:
-            return {"ok": False, "error": "Git could not be resolved on the trusted tool PATH", "output": ""}
-        # The flag is also a capability requirement: older Git must refuse
-        # before a read, rather than silently ignoring a new environment key.
-        base_argv = [binary, "--no-pager", "--no-lazy-fetch", *READ_GLOBALS]
-        for setting in (*READ_CONFIG, f"core.hooksPath={no_hooks_dir()}"):
+            return {"ok": False, "error": _said("ide.git_read_not_found"), "output": ""}
+        # --no-lazy-fetch (READ_GLOBALS) is also a capability requirement:
+        # older Git must refuse before a read, rather than silently ignoring
+        # a new environment key.
+        base_argv = [binary, "--no-pager", *READ_GLOBALS]
+        for setting in await asyncio.to_thread(read_settings):
             base_argv += ["-c", setting]
         base_argv.append(f"--work-tree={cwd}")
 
@@ -743,23 +776,13 @@ class IdeService:
         try:
             read = await asyncio.to_thread(_run)
         except subprocess.TimeoutExpired:
-            return {"ok": False, "error": "git timed out", "output": ""}
+            return {"ok": False, "error": _said("ide.git_read_timed_out"), "output": ""}
         except OSError as exc:
-            return {"ok": False, "error": str(exc), "output": ""}
+            logger.warning("[IdeService] git could not start for a card-less read: %s", type(exc).__name__)
+            return {"ok": False, "error": _said("ide.git_read_not_found"), "output": ""}
         if read.card is not None:
             return None
-        out = (read.out + read.err).strip()
-        if read.code and "unknown option" in out.lower() and "no-lazy-fetch" in out:
-            return {
-                "ok": False,
-                "error": "Read-only Git requires --no-lazy-fetch support; upgrade Git or use approved terminal execution",
-                "output": out,
-            }
-        return {
-            "ok": read.code == 0,
-            "error": None if read.code == 0 else (out or f"exit {read.code}"),
-            "output": out,
-        }
+        return _git_answer(parts, read.code, read.out, read.err)
 
     async def send_to_swarm(
         self,

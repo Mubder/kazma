@@ -107,8 +107,14 @@ workspace. Three new modules; understanding their interaction is essential.
   (`kazma_operand_refusal`, the one predicate); a network or device operand
   is never resolved here. `safety/git_kazma_files.run_card_less` runs a
   form, every question with the read's own argv and environment
-  (`--no-replace-objects` in `READ_GLOBALS`, no lazy fetch, hooks, pager,
-  fsmonitor, signature program or filter driver; git's own variables
+  (`safety/git_read.py`: `READ_GLOBALS`, `--no-lazy-fetch` and
+  `--no-replace-objects`; `read_settings()`, which takes from the
+  repository's settings no program and no file for git to read: no hooks,
+  fsmonitor or pager, each signature program a path that cannot start
+  (`NO_PROGRAM_KEYS`), no attributes file or mailmap, a submodule's work
+  tree not looked into (`diff.ignoreSubmodules=dirty`, so its own filters
+  never run); each filter driver the repository defines emptied; blame
+  with `BLAME_SHAPE`, `--no-ignore-revs-file` among it; git's own variables
   dropped), and first judges one that prints contents: only in a work tree
   git itself accepts; every revision of a diff or show, and of a log with a
   patch, a commit (`<rev>^{commit}`) reachable from HEAD, a branch, a tag
@@ -131,11 +137,23 @@ workspace. Three new modules; understanding their interaction is essential.
   route admits a card-less form as a read (`ide_effects`), so a read the
   repository check sends on comes back `needs_approval` and the page sends
   its command through `/api/ide/run`; chat and the TUI go to the card
-  directly, and the agent's tools answer with the command to ask for. Gate:
+  directly, and the agent's tools answer with the command to ask for. The
+  answer is what git printed on its output; a read that fails says so in a
+  sentence (`ide.git_read_failed`, EN and AR; the agent's tools give the
+  exit code), and git's own error text goes to the log only, masked by
+  shape (it can quote what a file holds). Gates:
   `tests/test_git_reads_print_no_kazma_file.py` (the allowlist enumerated
   from `CARD_LESS`; every verb git lists and every option outside it asks;
   each way a file reaches what git prints, both doors; the old rule, each
-  piece, a planted extra form and each dropped force flag as controls).
+  piece, a planted extra form and each dropped force flag as controls) and
+  `tests/test_git_settings_start_nothing_and_quote_no_file.py` (git's own
+  list of settings as data, `tests/fixtures/git_config_keys.json`, each
+  that names a program or a file classified from git's documentation; all
+  of them planted at once with signed commits of each format, every
+  card-less form and the agent's tools run; a submodule's own settings, a
+  partial clone, settings that move what git reads; the installed git's
+  list checked against the data; each override dropped as a control, and
+  the old answer as the sentence's control).
   The cost: a user's own `.env`, databases and secret-named files are
   hidden from card-less reads too, and counted. The census counts as a read a
   process an IDE module starts (called or handed to a thread) and a call of

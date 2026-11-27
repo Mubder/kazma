@@ -50,7 +50,8 @@ async def git_status() -> str:
 
         return f"On branch {branch}\nChanges:\n{status_lines}"
     except Exception as e:
-        return f"Error executing git status: {e}"
+        logger.info("[git_status] git could not run: %s", type(e).__name__)
+        return f"Error executing git status: {type(e).__name__}"
 
 
 #: Bounds of the read-only history tools (the model's context, not git's).
@@ -77,11 +78,13 @@ async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
     The command must be one of ``ide.git_policy``'s card-less forms, checked
     in the workspace, and is judged, run and filtered by
     ``safety.git_kazma_files.run_card_less``: these tools show no card. It
-    starts no program the repository chose: the fsmonitor, pager, hooks,
-    signature program, external diff and textconv drivers and filter drivers
-    are all switched off (``_git_read_argv``), and the child gets the tool
-    child environment without the variables that name a program or another
-    repository (``_for_a_read``). Until 2026-11-10 only fsmonitor was:
+    takes no program and no file for git to read from the repository's
+    settings: the fsmonitor, pager, hooks, signature programs, external diff
+    and textconv drivers, filter drivers (a submodule's own too), a lazy
+    fetch's transport, an attributes file and a mailmap are all switched off
+    (``_git_read_argv``: ``git_read.read_settings``), and the child gets the
+    tool child environment without the variables that name a program or
+    another repository (``_for_a_read``). Until 2026-11-10 only fsmonitor was:
     ``git_diff`` on a repository whose ``.git/config`` set ``diff.external``
     ran that program with no approval card.
     """
@@ -119,6 +122,18 @@ async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
         return run_card_less(root, ask, form)
 
     return await asyncio.to_thread(run)
+
+
+def _read_failed(verb: str, code: int, err: str) -> str:
+    """The answer for a read git ran and failed: its exit code. Git's own
+    error text goes to the log only, secrets masked by shape and cut: a
+    repository's settings can make it quote what a file holds."""
+    from kazma_core.errors import redact_secrets
+
+    said = redact_secrets(err.strip())[:500] if err.strip() else "(no message)"
+    logger.info("[git-read] git %s exited %d: %s", verb, code, said)
+    return (f"Error: git {verb} failed (exit code {code}). Git's message is in Kazma's log; "
+            "check that the workspace is a git repository and the revision exists.")
 
 
 def _to_the_card(command: list[str], why: str) -> str:
@@ -200,11 +215,12 @@ async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
     try:
         code, out, err, card = await _git_read(args)
     except (OSError, subprocess.TimeoutExpired) as e:
-        return f"Error executing git log: {e}"
+        logger.info("[git_log] git could not run: %s", type(e).__name__)
+        return f"Error executing git log: {type(e).__name__}"
     if card is not None:
         return _to_the_card(args, card)
     if code != 0:
-        return f"Error: git log failed: {err.strip()[:300] or 'not a git repository'}"
+        return _read_failed("log", code, err)
     from kazma_core.safety.prompt_fence import fence_untrusted
 
     # Commit messages are written by whoever committed: data, not instructions.
@@ -260,11 +276,12 @@ async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
     try:
         code, out, err, card = await _git_read(command, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as e:
-        return f"Error executing git diff: {e}"
+        logger.info("[git_diff] git could not run: %s", type(e).__name__)
+        return f"Error executing git diff: {type(e).__name__}"
     if card is not None:
         return _to_the_card(command, card)
     if code != 0:
-        return f"Error: git diff failed: {err.strip()[:300] or 'not a git repository'}"
+        return _read_failed(command[0], code, err)
     text = out.strip() or "No changes."
     if len(text) > _DIFF_MAX_CHARS:
         text = text[:_DIFF_MAX_CHARS] + f"\n... [cut at {_DIFF_MAX_CHARS} characters; pass path= or stat=true]"

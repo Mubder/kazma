@@ -40,7 +40,7 @@ from kazma_core.ide.git_policy import PATCH_OPTIONS, ReadForm, prints_patches
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NO_NOTES", "SECTION_SHAPE", "Ask", "CardLessRead", "run_card_less"]
+__all__ = ["BLAME_SHAPE", "NO_NOTES", "SECTION_SHAPE", "Ask", "CardLessRead", "run_card_less"]
 
 #: Runs ``git <args>`` the way the door runs its read (its argv, its
 #: environment) and answers ``(exit code, stdout, stderr)``.
@@ -54,6 +54,9 @@ SECTION_SHAPE = ("--no-color", "--default-prefix", "--no-relative", "--submodule
                  "--no-ext-diff", "--no-textconv")
 #: For log and show: a note is a blob with no path.
 NO_NOTES = ("--no-notes",)
+#: Fixed for every blame: no textconv program, and no file of object ids
+#: from the configuration (``blame.ignoreRevsFile``).
+BLAME_SHAPE = ("--no-textconv", "--no-ignore-revs-file")
 _HEADERS = ("diff --git ", "diff --cc ", "diff --combined ")
 _RANGE = re.compile(r"\.\.\.?")
 #: Options the names-only twin of a patch read leaves out: what is printed,
@@ -239,7 +242,10 @@ def _blame_plan(root: Path, tops: tuple[Path, ...], form: ReadForm) -> tuple[_Pl
     repo = _repo_path(root, tops[0], str(target.resolve()))
     if is_kazma_store(target, write=False) or _kazmas(tops, [repo]):
         return None, "the file is one of Kazma's"
-    return _Plan(["blame", "--no-textconv", *form.options, "--", rel], tops), ""
+    # --no-ignore-revs-file: a blame.ignoreRevsFile setting names a file git
+    # reads as object ids and quotes in its error. Only the option clears
+    # it: the setting is a sorted list, so an empty -c entry resets nothing.
+    return _Plan(["blame", *BLAME_SHAPE, *form.options, "--", rel], tops), ""
 
 
 def _plan(root: Path, ask: Ask, form: ReadForm) -> tuple[_Plan | None, str]:

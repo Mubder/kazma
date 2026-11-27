@@ -1,17 +1,25 @@
-"""A git command that reads a repository and starts no program it chose.
+"""A git command that reads a repository, starts no program it chose and
+reads no file its settings name.
 
 A repository's configuration can make git start programs: its fsmonitor, a
 pager, hooks (a status may refresh the index, which runs post-index-change),
-a signature program, external diff and textconv drivers, filter drivers. A
-read Kazma runs on its own -- the git read tools (no approval card), the
-check of which files a checkout would write (``safety.git_tree_writes``) --
-switches every one of them off: :func:`read_argv` builds the argv and
-:func:`read_env` the environment (the tool child environment without the
-variables that name a program). :func:`run_read` runs one, blocking.
+the signature programs (a log format, a ref sort or ``log.showSignature``
+makes git verify), external diff and textconv drivers, filter drivers (a
+submodule's own among them), the transport of a lazy fetch. It can also
+name files git reads and quotes: an attributes file, a mailmap. A read
+Kazma runs on its own -- the IDE's git and the git read tools (no approval
+card), the check of which files a checkout would write
+(``safety.git_tree_writes``) -- switches every one of them off:
+:func:`read_settings` holds the ``-c`` settings, :func:`read_argv` builds
+the argv and :func:`read_env` the environment (the tool child environment
+without the variables that name a program). :func:`run_read` runs one,
+blocking.
 
 Moved here from the git skill's tools (2026-11-16), which keep their names
 for these: one hardening for every read, in the package both can import.
-Gate: ``tests/test_git_read_tools_start_no_repo_program.py``.
+Gates: ``tests/test_git_read_tools_start_no_repo_program.py``,
+``tests/test_git_settings_start_nothing_and_quote_no_file.py`` (git's own
+list of settings, swept).
 """
 
 from __future__ import annotations
@@ -28,25 +36,50 @@ __all__ = [
     "PROGRAM_ENV",
     "READ_CONFIG",
     "READ_GLOBALS",
+    "NO_PROGRAM_KEYS",
     "filter_driver_overrides",
     "no_hooks_dir",
     "read_argv",
     "read_env",
+    "read_settings",
     "run_read",
 ]
 
-#: Configuration a read must not take from the repository: each names a
-#: program git would start. ``log.showSignature`` makes log/show run
-#: ``gpg.program``.
+#: Configuration a read must not take from the repository.
+#:
+#: - ``core.fsmonitor``, ``core.pager``: a program git would start.
+#: - ``log.showSignature``: log/show would run the signature program.
+#: - ``core.attributesFile``, ``mailmap.file``, ``mailmap.blob``: a file git
+#:   reads and quotes -- an attribute it cannot parse is printed with its
+#:   text, a mailmap line becomes an author's name in log, shortlog and blame.
+#:   Empty is none; the work tree's own ``.gitattributes`` and ``.mailmap``
+#:   still apply.
+#: - ``diff.ignoreSubmodules=dirty``: status and diff do not look inside a
+#:   submodule's work tree, where its own configuration's filter drivers
+#:   would run (the overrides below name only the repository's own drivers).
 READ_CONFIG = (
     "core.fsmonitor=false",
     "core.pager=cat",
     "log.showSignature=false",
+    "core.attributesFile=",
+    "mailmap.file=",
+    "mailmap.blob=",
+    "diff.ignoreSubmodules=dirty",
 )
-#: Git's own options before the verb of every read: a replace ref
-#: (``refs/replace/``) makes git print one object's bytes under another's
-#: name, a blob of ``.env`` as ``src/app.py``.
-READ_GLOBALS = ("--no-replace-objects",)
+#: The signature programs: a ``%G`` placeholder in a log format
+#: (``format.pretty``, ``pretty.<name>``) and a ref sort by signature
+#: (``tag.sort``, ``branch.sort``) make a read verify a signed commit or tag.
+#: Each is set to :func:`_no_program`. ``gpg.openpgp.program`` is the newer
+#: name of ``gpg.program``: one setting in git, the last value read wins.
+NO_PROGRAM_KEYS = ("gpg.program", "gpg.ssh.program", "gpg.x509.program")
+#: Git's own options before the verb of every read: no lazy fetch (a
+#: partial clone would start the remote's transport -- its upload-pack, ssh
+#: command or credential helper -- for an object it lacks), and a replace
+#: ref (``refs/replace/``) never makes git print one object's bytes under
+#: another's name, a blob of ``.env`` as ``src/app.py``. A git too old for
+#: ``--no-lazy-fetch`` refuses the read rather than ignoring it. (A pager
+#: starts only on a terminal; a read's output is a pipe.)
+READ_GLOBALS = ("--no-lazy-fetch", "--no-replace-objects")
 #: Diff options that keep external diff drivers (``diff.external``,
 #: ``diff.<driver>.command``) and textconv drivers from running.
 NO_DIFF_PROGRAMS = ("--no-ext-diff", "--no-textconv")
@@ -76,6 +109,22 @@ def _remove_no_hooks_dir(path: str) -> None:
         os.rmdir(path)  # empty by design; a folder holding anything is kept
     except OSError:
         pass
+
+
+def _no_program() -> str:
+    """A program path that cannot start: a folder never made, inside the
+    empty folder :func:`no_hooks_dir` keeps."""
+    return os.path.join(no_hooks_dir(), "absent", "no-program")
+
+
+def read_settings() -> list[str]:
+    """Every ``-c`` setting of a read: :data:`READ_CONFIG`, no hooks, and
+    each signature program one that cannot start."""
+    return [
+        *READ_CONFIG,
+        f"core.hooksPath={no_hooks_dir()}",
+        *(f"{key}={_no_program()}" for key in NO_PROGRAM_KEYS),
+    ]
 
 
 def filter_driver_overrides(listing: str) -> list[str]:
@@ -109,7 +158,7 @@ def read_argv(args: Sequence[str], filter_listing: str = "", *, location: Sequen
     repository that command will; :data:`READ_GLOBALS` come before the verb.
     """
     argv = ["git", *location, "--no-optional-locks", *READ_GLOBALS]
-    for setting in (*READ_CONFIG, f"core.hooksPath={no_hooks_dir()}"):
+    for setting in read_settings():
         argv += ["-c", setting]
     argv += filter_driver_overrides(filter_listing)
     args = list(args)
