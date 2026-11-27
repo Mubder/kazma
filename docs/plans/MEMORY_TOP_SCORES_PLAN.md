@@ -997,6 +997,47 @@ LongMemEval-M (downloaded 21 Nov, revision `98d7416c24c7`,
 (embedding its rounds on CPU takes hours); recall p50 and p95, tokens and
 calls reported with every run; the scale bench at 10 and 100 times the store.
 
+Built 2026-11-28 (§15 G (2)): the harness, and no timed run.
+
+`scripts/memory_scale_speed.py` fills a private store the product's way
+(`episode_row`, the local embedder's vector, the quick pass with
+`private=True`; no deep pass, no mirror, passages off) to 1, 10 and 100
+times the episode count in `tests/fixtures/memory_bench/live_lengths.json`.
+The text is synthetic, cut to that file's length percentiles. Recall is the
+product's, local only, on a fixed English and Arabic question set. A report
+carries p50, p95, paid model calls and tokens. Recall makes no paid call;
+the question's local embedding is counted apart. `size` times a sample of
+the fill and extrapolates each factor. Recall is not in that sample. `run`
+starts 100x only when that fill estimate is under two hours. 1x and 10x are
+not gated on it.
+
+`scripts/longmemeval_bench.py size` counts LongMemEval-M's rounds and tokens
+and estimates the embedding from a length-stratified sample of the product's
+embed text. It does not retrieve or answer. The file stays outside the
+repository. On this machine it is `G:\BenchData\longmemeval-2026-11-21`. The
+script takes `--data` and does not default to that path.
+
+Each command below lowers its own process to below normal before it works
+(Windows below-normal priority class, otherwise nice 10). The `--out` file
+stays outside the repository.
+
+* 1x: `python scripts/memory_scale_speed.py run --factors 1 --out G:\BenchData\scale-speed\1.json`
+* 10x: `python scripts/memory_scale_speed.py run --factors 10 --out G:\BenchData\scale-speed\10.json`
+* 100x: `python scripts/memory_scale_speed.py run --factors 100 --out G:\BenchData\scale-speed\100.json`.
+  This is the rule. The command estimates the fill from its sample (recall
+  not included) and exits without starting when that estimate is two hours
+  or more.
+* Scale sizing, recall not run: `python scripts/memory_scale_speed.py size`
+* LongMemEval-M sizing, retrieve and answer nothing:
+  `python scripts/longmemeval_bench.py size --data G:\BenchData\longmemeval-2026-11-21`
+
+Gates, the embedder a stub: `tests/test_memory_scale_speed.py` (sizes as
+declared; a planted slow recall is the p95, the same questions all fast are
+the control), `tests/test_longmemeval_m_size.py` (a fixture; embedding every
+round, and a report that quotes the text, are the controls).
+
+Timed runs: not yet, they need a quiet machine.
+
 ### W9. The outside benchmarks, published (L)
 
 LongMemEval-S report split (once per release, logged), LongMemEval-M,
