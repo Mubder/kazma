@@ -117,7 +117,12 @@ queued by the maintenance sweep with at most two weeks in flight.
   June question in EN and AR in four zones, the stored stretch as control).
   Weeks and months are named and filed from their keys too (`rollup_label`,
   `_week_month`, `_month_settled`; a gate reads every place that dates a
-  stored stretch from source), and a project from its first and last part's
+  stored stretch from source, and the Memory page's `memory_console.js` and
+  `locale_format.js`). The page names a week and a month with
+  `KazmaFormat.weekOfKey` / `monthOfKey`, and a project from `span_keys` on
+  `list_summaries` (its first and last part's week keys), in the page's
+  language. It does not re-read `period_start` in the browser's zone: a June
+  written in Kuwait read "May" there. A project is filed from those same
   week keys (`recall._project_weeks`; read at midday, a zone 13 hours away
   moved it a day: the follow-up review's L2). A said period shorter than
   `_SAID_BY_MONTHS_S` (20 days: "What did we talk about last week?", "شنو
@@ -133,7 +138,8 @@ queued by the maintenance sweep with at most two weeks in flight.
   start of" a definite period or a month ("this month", "الشهر", "January",
   "يناير") reads that period's start; "at the start of" anything else (a
   story, Ramadan) names no time; "أول أسبوع" is "the first week" (paired
-  tests). A roll-up the model skips is retired with its
+  tests). "بداية أغسطس" and "بداية شهر أغسطس" are "at the start of August":
+  "شهر" between the word and the month still reads that month's start. A roll-up the model skips is retired with its
   parts and planned again only when they change: a project was left out of
   `_known_projects` and planned under the same id on every other sweep,
   about 48 model calls a day each (O1; gate: the sweep settles after a skip,

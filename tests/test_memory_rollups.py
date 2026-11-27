@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
+import re
 import sqlite3
 import time
 from types import SimpleNamespace
@@ -429,14 +430,73 @@ def _undated_by_key(source: str, path: str, *, bare: bool) -> list[str]:
     return found
 
 
+#: The Memory page names a week from its key. These two scripts are outside
+#: ``memory/`` and used to re-read ``period_start`` in the browser's zone.
+_PAGE_JS = ("kazma-ui/kazma_ui/static/js/memory_console.js",
+            "kazma-ui/kazma_ui/static/js/locale_format.js")
+_JS_INSTANT = re.compile(
+    r"""\.period_(?:start|end)\b|\[[ \t]*['"]period_(?:start|end)['"][ \t]*\]""")
+
+
+def _strip_js_comments(source: str) -> str:
+    """Comments out, strings kept, newlines kept, so a note may name the
+    field the code must not read and a real read stays on its line."""
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        if source.startswith("/*", i):
+            j = source.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("\n" * source.count("\n", i, j))
+            i = j
+            continue
+        if source.startswith("//", i):
+            j = source.find("\n", i)
+            j = n if j < 0 else j
+            i = j
+            continue
+        c = source[i]
+        if c in "'\"`":
+            out.append(c)
+            i += 1
+            while i < n:
+                ch = source[i]
+                out.append(ch)
+                i += 1
+                if ch == "\\":
+                    if i < n:
+                        out.append(source[i])
+                        i += 1
+                    continue
+                if ch == c:
+                    break
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _js_dated_from_an_instant(source: str, path: str) -> list[str]:
+    """Each line that names a summary's stretch from ``period_start`` or
+    ``period_end`` (a property or a subscript), after comments are gone."""
+    found = []
+    for lineno, line in enumerate(_strip_js_comments(source).splitlines(), 1):
+        if _JS_INSTANT.search(line):
+            found.append(f"{path}:{lineno} {line.strip()}")
+    return found
+
+
 def test_every_stored_stretch_is_dated_by_its_key_or_at_midday():
     """From source: the summary modules date a week or a month by its key or
     its stretch read at midday, nowhere by its start in the reader's zone;
-    and nothing in memory/ dates a stored ``period_start`` otherwise."""
+    nothing in memory/ dates a stored ``period_start`` otherwise; and the
+    Memory page's scripts do not read that instant either."""
     found = []
     for path in sorted((_REPO / "kazma-core/kazma_core/memory").glob("*.py")):
         rel = path.relative_to(_REPO).as_posix()
         found += _undated_by_key(path.read_text(encoding="utf-8"), rel, bare=rel in _SUMMARY_MODULES)
+    for rel in _PAGE_JS:
+        found += _js_dated_from_an_instant((_REPO / rel).read_text(encoding="utf-8"), rel)
     assert found == []
 
 
@@ -448,6 +508,72 @@ def test_control_the_old_readings_are_found():
            'AND period_start >= ? AND period_start < ? LIMIT 1", (t, start, end))\n')
     found = _undated_by_key(old, "old.py", bare=True)
     assert len(found) == 3, found
+
+
+def test_control_the_page_naming_a_week_from_its_instant_is_found():
+    """The negative control: the page as it named a week, a month and a
+    project from ``period_start`` (three lines) is caught, and a comment
+    that only mentions that field is not."""
+    old = (
+        "return _mt('memory.console.month_of', 'Month of {month}', { month: month(s.period_start) });\n"
+        "return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}',\n"
+        "  { from: month(s.period_start), to: month(Math.max(s.period_start, (s.period_end || 0) - 1)) });\n"
+        "return _mt('memory.console.week_of', 'Week of {date}', "
+        "{ date: s.period_start ? _memDay(s.period_start) : '' });\n"
+    )
+    found = _js_dated_from_an_instant(old, "old.js")
+    assert len(found) == 3, found
+    innocent = "// the browser used to read s.period_start\nvar key = s.period_key;\n"
+    assert _js_dated_from_an_instant(innocent, "note.js") == []
+    bracket = "var t = s['period_start'];\n"
+    assert len(_js_dated_from_an_instant(bracket, "bracket.js")) == 1
+
+
+def test_a_projects_span_is_its_week_keys():
+    """A project written at Kuwait midnights carries its first and last week
+    keys. The stored instant of the June week is 31 May in UTC; the keys
+    are not."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.memory.topic_summaries import list_summaries
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    # W32's key is the later week, and its stored instant is the earlier
+    # one, so a min of the instants would name the weeks backwards.
+    weeks = (("2026-W32", _dt.datetime(2026, 5, 1, tzinfo=kuwait)),
+             ("2026-W23", _dt.datetime(2026, 6, 1, tzinfo=kuwait)))
+    assert weeks[0][1] < weeks[1][1]
+    for key, start_at in weeks:
+        start = start_at.timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, "
+            "title, summary_text, status, created_at, updated_at) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', 't', 's', 'active', 0, 0)",
+            (f"sum_{key}", key, start, start + 7 * 86400))
+    june = weeks[1][1].timestamp()
+    conn.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, "
+        "title, summary_text, status, created_at, updated_at) "
+        "VALUES ('sum_p', 'default', 'project:abcd', ?, ?, 'project', 't', 's', 'active', 0, 0)",
+        (june, june + 60 * 86400))
+    conn.executemany(
+        "INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('sum_p', ?)",
+        [("sum_2026-W32",), ("sum_2026-W23",), ("sum_not_a_week",)])
+    conn.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, "
+        "title, summary_text, status, created_at, updated_at) "
+        "VALUES ('sum_not_a_week', 'default', '2026-06', ?, ?, 'month', 't', 's', 'active', 0, 0)",
+        (june, june + 30 * 86400))
+    rows = {r["id"]: r for r in list_summaries(conn, tenant_id="default", limit=10)}
+    conn.close()
+    assert rows["sum_p"]["span_keys"] == ["2026-W23", "2026-W32"]
+    assert "span_keys" not in rows["sum_2026-W23"]
+    raw = _dt.datetime.fromtimestamp(rows["sum_2026-W23"]["period_start"], _dt.UTC)
+    assert (raw.month, raw.day) == (5, 31)
 
 
 def test_a_rebuilt_old_week_is_introduced_with_its_own_monday(monkeypatch):

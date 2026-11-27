@@ -1180,13 +1180,41 @@ def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any
     return " AND ".join(where), params
 
 
+#: An ISO week key, zero-padded, so the least and greatest strings are the
+#: earliest and latest weeks. A project's own key is ``project:…`` and is
+#: not a date.
+_WEEK_KEY_GLOB = "[0-9][0-9][0-9][0-9]-W[0-9][0-9]"
+
+
+def _project_span_keys(conn: sqlite3.Connection, project_ids: list[str]) -> dict[str, list[str]]:
+    """The first and last week key of each project, from its parts.
+
+    The keys carry the weeks, with no zone in them. A part whose key is not
+    a week is not a date, so it is left out."""
+    if not project_ids:
+        return {}
+    marks = ",".join("?" for _ in project_ids)
+    rows = conn.execute(
+        "SELECT p.rollup_id AS id, MIN(w.period_key) AS first_key, MAX(w.period_key) AS last_key "
+        "FROM memory_summary_parts AS p JOIN memory_summaries AS w ON w.id = p.part_id "
+        f"WHERE p.rollup_id IN ({marks}) AND w.period_key GLOB ? GROUP BY p.rollup_id",
+        (*project_ids, _WEEK_KEY_GLOB),
+    ).fetchall()
+    return {
+        str(row["id"]): [str(row["first_key"]), str(row["last_key"])]
+        for row in rows if row["first_key"] and row["last_key"]
+    }
+
+
 def list_summaries(
     conn: sqlite3.Connection, *, tenant_id: str, limit: int = 30, include_hidden: bool = False, offset: int = 0,
 ) -> list[dict[str, Any]]:
     """The tenant's summaries, newest week first (the owner's tenant sees
     every tenant's while the install does not enforce Spaces:
     ``memory/tenant_view``), from *offset*. Forgotten and retired ones
-    only with *include_hidden*; they hold no text."""
+    only with *include_hidden*; they hold no text. A project also carries
+    ``span_keys``, its first and last part's week keys, so a page names
+    the stretch without reading the stored instants."""
     where, params = _summary_filter(tenant_id, include_hidden)
     rows = conn.execute(
         "SELECT id, tenant_id, period_key, period_start, period_end, title, summary_text, status, "
@@ -1195,7 +1223,12 @@ def list_summaries(
         "ORDER BY period_start DESC, turn_count DESC LIMIT ? OFFSET ?",
         (*params, max(1, min(int(limit), 500)), max(0, int(offset))),
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    spans = _project_span_keys(conn, [str(r["id"]) for r in out if r.get("level") == "project"])
+    for row in out:
+        if row.get("level") == "project":
+            row["span_keys"] = spans.get(str(row["id"]), [])
+    return out
 
 
 def count_summaries(conn: sqlite3.Connection, *, tenant_id: str, include_hidden: bool = False) -> int:

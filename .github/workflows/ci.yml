@@ -1012,7 +1012,8 @@ jobs:
             tests/e2e/test_document_moves_browser.py \
             tests/e2e/test_chat_moves_browser.py \
             tests/e2e/test_file_moves_browser.py \
-            tests/e2e/test_approval_card_reaches_the_asker.py
+            tests/e2e/test_approval_card_reaches_the_asker.py \
+            tests/e2e/test_memory_summary_dates.py
           )
           python scripts/ci_shards.py e2e --shard ${{ matrix.shard }}/${{ strategy.job-total }} \
             --durations-json "$RUNNER_TEMP/test-durations.json" "${files[@]}"

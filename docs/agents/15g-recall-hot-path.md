@@ -36,9 +36,14 @@
   framework audit F9 and F2 step 3; dataset v6). No model on this path.
   - *Time* (`memory/time_words.py`, `read_time`, EN/AR): in a question
     about the past (a past verb) a period ("last week", "in August", "قبل
-    أسبوعين") is read in the operator's zone, and its words are never
+    أسبوعين", "قبل ثلاث أسابيع", "السنة هذي" / "هذه السنة" / "هذا العام",
+    "past 10 days", "the last 3 weeks", "آخر عشر أيام", "آخر ثلاث أسابيع",
+    "الأيام العشرة الماضية", "الأسابيع الثلاثة الماضية", "بداية أغسطس" and
+    "بداية شهر أغسطس") is read in the operator's zone, and its words are never
     content words (`recall._without_time_words`; every question-word reader
-    in recall goes through it or `_search_words`, a gate). What was SAID in
+    in recall goes through it or `_search_words`, a gate). A word that only
+    shares those letters ("the last 3 emails", "قبل ثلاث صفحات", "السنة
+    الدراسية", "هذي السيارة") is not a period. What was SAID in
     a period keeps only that period's turns and facts (`_turns_in_time`,
     `_facts_in_time`); what was TRUE then keeps the facts that held then,
     an earlier value included (`_belief_history`, `_held_in`). "At first",

@@ -200,8 +200,9 @@ def rollup_label(level: str, period_start: float, period_end: float, period_key:
     "October 2026", "Project, Sep 2026 to Nov 2026". A week and a month are
     named from *period_key* when it is one ("2026-W41", "2026-10"), with no
     zone; otherwise from the stretch read at midday in the operator's zone.
-    The Memory page names them itself, in the browser (``memory_console.js``),
-    from ``period_start``: not this."""
+    The Memory page names them from the same keys (``KazmaFormat.weekOfKey``
+    and ``monthOfKey``, a project from its ``span_keys``), in the page's
+    language."""
     from kazma_core.memory.topic_summaries import memory_zone
 
     zone = memory_zone()
