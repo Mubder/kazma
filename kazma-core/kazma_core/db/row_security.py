@@ -826,14 +826,25 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
     finished is in ``left``."""
     import sqlite3
 
-    from kazma_core.db.availability import is_kazma_database
+    from kazma_core.db.availability import kazma_database
     from kazma_core.spaces import threads
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     # The one answer (availability.kazma_database: by identity too; S4-01
     # step 5 review M1). Asked on its own connection: the apply's is left as
     # it was, outside a transaction (review L1).
-    if not is_kazma_database(url):
+    ours = kazma_database(url)
+    if ours is None:
+        # Not told: the servers' identities could not be read now. Not read
+        # as "another database" -- said as what it is, so a run again is the
+        # remedy, not --url-from.
+        result.not_backfilled = ("checkpoints: whether this is the database this install's own address names "
+                                 "could not be told now (a server's identity could not be read), so their spaces "
+                                 "are not backfilled; run it again when both servers answer")
+        logger.warning("[row_security] %s", result.not_backfilled)
+        result.notes.append(result.not_backfilled)
+        return
+    if not ours:
         result.not_backfilled = ("checkpoints: not the database this install's own address names (compared by "
                                  "server and database), so their spaces are not backfilled from this install's "
                                  "thread records (Spaces on replicas is not covered)")

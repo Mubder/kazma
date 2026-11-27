@@ -714,7 +714,7 @@ class PgvectorBackend:
 
             answer = kazma_database(self._dsn)
             self._kazmas_database = answer
-            kazmas = bool(answer)
+            kazmas = answer  # None: not told, asked again; armed, refused (_armed_door)
         from kazma_core.memory.state_backend import _armed_door
 
         held = _armed_door(kazmas)

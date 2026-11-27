@@ -98,6 +98,74 @@ def test_an_unknown_answer_is_not_kept_by_pgvector(identities: dict[str, Any]) -
     assert vectors._kazmas_database is True, "known, kept"
 
 
+def _untold_store(store: str, monkeypatch: pytest.MonkeyPatch, opened: list[str]) -> Any:
+    """The mirror or pgvector on ALIAS, whose identity is not told; its own
+    sign-in recorded instead of made."""
+    if store == "mirror":
+        from kazma_core.memory.state_backend import PostgresStateBackend
+
+        backend = PostgresStateBackend(ALIAS)
+        monkeypatch.setattr(backend, "_open_connection", lambda: opened.append(store) or "its own sign-in")
+        return backend
+    psycopg = pytest.importorskip("psycopg")
+    from kazma_core.memory.backends import PgvectorBackend
+
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: opened.append(store) or "its own sign-in")
+    return PgvectorBackend(dsn=ALIAS)
+
+
+@pytest.mark.parametrize("store", ["mirror", "pgvector"])
+def test_armed_an_address_not_told_is_refused_never_reached_as_the_owner(
+        identities: dict[str, Any], monkeypatch: pytest.MonkeyPatch, store: str) -> None:
+    """When an identity could not be read, the mirror and pgvector took the
+    address for another database and signed in on their own -- on another
+    name for Kazma's database, as the tables' owner, whom the lock does not
+    hold -- armed too. Armed, an untold address is now a space refusal,
+    asked again next time; not armed, it is reached as before (the control)."""
+    pytest.importorskip("psycopg")
+    from kazma_core.db.pg_helpers import is_space_refusal
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    from tests._as_request import lock_armed, not_armed
+
+    opened: list[str] = []
+    backend = _untold_store(store, monkeypatch, opened)
+    lock_armed(monkeypatch, True)
+    with pytest.raises(NoSpaceBound) as refused:
+        backend._connect()
+    assert is_space_refusal(refused.value), "said as a refusal, never as an outage"
+    assert opened == [], "not reached on its own sign-in"
+    not_armed(monkeypatch)
+    assert backend._connect() == "its own sign-in"
+    assert opened == [store]
+
+
+def test_a_backfill_not_told_says_so_and_changes_nothing(identities: dict[str, Any],
+                                                         monkeypatch: pytest.MonkeyPatch,
+                                                         caplog: pytest.LogCaptureFixture) -> None:
+    """Not told is not "another database": the backfill says it could not
+    tell, with the remedy (run again), at WARNING, before it reads any
+    record."""
+    import logging
+
+    pytest.importorskip("psycopg")
+    from kazma_core.db import row_security
+    from kazma_core.spaces import threads
+
+    monkeypatch.setattr(threads, "thread_spaces", lambda: pytest.fail("no record is read when not told"))
+    result = row_security.Applied()
+    caplog.set_level(logging.WARNING, logger="kazma_core.db.row_security")
+    row_security._backfill(ALIAS, object(), ["checkpoints"], result, 100, 1, 0.0)
+    assert "could not be told now" in result.not_backfilled and "run it again" in result.not_backfilled
+    assert result.not_backfilled in result.notes and result.backfilled == 0
+    assert any("could not be told now" in r.getMessage() for r in caplog.records)
+    # The control: told another database, the other message, said as before.
+    identities[ALIAS] = ("1111111111111111111", "kazma")
+    other = row_security.Applied()
+    row_security._backfill(ALIAS, object(), ["checkpoints"], other, 100, 1, 0.0)
+    assert other.not_backfilled.startswith("checkpoints: not the database this install's own address names")
+
+
 # ── the gate: one answer ────────────────────────────────────────────────
 
 #: The one module that answers.
@@ -175,10 +243,12 @@ def test_every_function_let_read_kazmas_address_still_does() -> None:
 
 def test_the_gate_sees_a_second_answer() -> None:
     planted = {
-        "kazma-core/kazma_core/a.py": "def ours(cur):\n    cur.execute('SELECT system_identifier FROM pg_control_system()')\n",
+        "kazma-core/kazma_core/a.py": ("def ours(cur):\n"
+                                       "    cur.execute('SELECT system_identifier FROM pg_control_system()')\n"),
         "kazma-core/kazma_core/b.py": ("def same(dsn):\n"
                                        "    from psycopg.conninfo import conninfo_to_dict\n"
-                                       "    return conninfo_to_dict(dsn)['host'] == conninfo_to_dict(get_database_url())['host']\n"),
+                                       "    return (conninfo_to_dict(dsn)['host']\n"
+                                       "            == conninfo_to_dict(get_database_url())['host'])\n"),
         "kazma-core/kazma_core/c.py": "def mine(dsn):\n    return availability._database_of(dsn)\n",
         "kazma-core/kazma_core/fine.py": "def fine(dsn):\n    return availability.kazma_database(dsn)\n",
     }

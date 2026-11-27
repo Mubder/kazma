@@ -222,7 +222,11 @@ an install with one account behaves as before.
   for Kazma's database they signed in as the tables' owner, whom row
   security does not hold, and read every space's rows;
   `tests/test_kazmas_own_database.py` finds any other own-database decision,
-  a planted one as its control). It is asked on its own connection, so the
+  a planted one as its control). An answer not told (a server's identity
+  could not be read) is never "another database": armed, the mirror and
+  pgvector refuse the address as a space refusal and ask again next time,
+  never reaching it on their own sign-in as the owner; the backfill says it
+  could not tell, at WARNING, with the remedy (run again). It is asked on its own connection, so the
   apply's stays outside a transaction and the schema lock is not held across
   the backfill (step 5 review L1). A physical copy -- a `pg_basebackup`
   clone, a promoted standby -- shares the identifier and the name and counts

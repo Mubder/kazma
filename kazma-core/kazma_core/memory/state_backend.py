@@ -27,7 +27,7 @@ from contextlib import nullcontext
 
 from kazma_core.db.pg_helpers import is_space_refusal
 from kazma_core.spaces.row_work import door_hides, install_statements, row_statements
-from kazma_core.spaces.scope import space_named_or_bound, space_of_record, spaces_enforced
+from kazma_core.spaces.scope import NoSpaceBound, space_named_or_bound, space_of_record, spaces_enforced
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
@@ -222,7 +222,8 @@ class PostgresStateBackend:
             on_its_server = availability.kazma_database(self._dsn, or_its_server=True)
             database = availability.kazma_database(self._dsn)
             if on_its_server is None or database is None:
-                ours, kazmas = bool(on_its_server), bool(database)  # asked again next time
+                # Asked again next time; armed, an untold one is refused (_armed_door).
+                ours, kazmas = bool(on_its_server), database
             else:
                 # This first: a thread that finds _ours set finds this set too.
                 self._kazmas_database = database
@@ -979,16 +980,30 @@ class PostgresStateBackend:
             return 0
 
 
+class _UntoldDatabase(NoSpaceBound):
+    """Armed, a memory store's address that may be Kazma's own database --
+    whether it is cannot be told now -- is refused (S4-01 step 5)."""
+
+
 def _armed_door(kazmas_database: bool | None) -> Any | None:
     """Once the second lock is armed (S4-01 step 3), a connection to Kazma's
     own database is a checkout of the shared pool's door: a space's
     statements as the space role, the install's as the owner, none refused.
     None while it is not armed, or for a database elsewhere (outside the
-    lock, as memory health says)."""
+    lock, as memory health says).
+
+    Armed, an address whose answer is not told (``None``: a server's
+    identity could not be read) is refused, a space refusal, said and asked
+    again at the next connection -- never reached on its own sign-in as the
+    tables' owner, whom the lock does not hold: through another name for
+    Kazma's database that read every space's rows (step 5 review M1)."""
     from kazma_core.db import row_security
 
-    if not kazmas_database or not row_security.armed():
+    if kazmas_database is False or not row_security.armed():
         return None
+    if kazmas_database is None:
+        raise _UntoldDatabase("whether a memory store's address is Kazma's own database cannot be told now (a "
+                              "server's identity could not be read): armed, it is not reached as the tables' owner")
     from kazma_core.db.postgres_pool import get_postgres_pool
 
     pool = get_postgres_pool()
