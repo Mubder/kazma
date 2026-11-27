@@ -94,6 +94,17 @@ const arJune = ar.monthOfKey("2026-06");
 ok("Arabic June is يونيو", arJune.indexOf("يونيو") !== -1 && arJune.indexOf("مايو") === -1, arJune);
 const arEnd = ar.monthOfKey("2026-W40", "end");
 ok("Arabic week 40 ends in أكتوبر", arEnd.indexOf("أكتوبر") !== -1 && arEnd.indexOf("سبتمبر") === -1, arEnd);
+const byKeys = en.projectMonths(["2026-W23", "2026-W40"], ["2026-01", "2026-02"]);
+ok("a project's weeks name it", byKeys.from === "June 2026" && byKeys.to === "October 2026",
+  JSON.stringify(byKeys));
+const byStored = en.projectMonths([], ["2026-06", "2026-09"]);
+ok("no week parts fall back to the stored months",
+  byStored.from === "June 2026" && byStored.to === "September 2026", JSON.stringify(byStored));
+const blank = en.projectMonths([], []);
+ok("no keys and no months are blank", blank.from === "" && blank.to === "");
+const arStored = ar.projectMonths(null, ["2026-06", "2026-09"]);
+ok("Arabic stored months are يونيو to سبتمبر",
+  arStored.from.indexOf("يونيو") !== -1 && arStored.to.indexOf("سبتمبر") !== -1, JSON.stringify(arStored));
 
 if (fail) {
   console.log(fail + " failed");

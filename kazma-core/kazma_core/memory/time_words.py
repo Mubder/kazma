@@ -15,7 +15,9 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   (``_PAST``: "did", "was", "told", "قلت", "كان"): "What is on March 22?"
   asks about a day ahead, not about what was said on one, and is left alone.
   A word that only shares those letters ("the last 3 emails", "قبل ثلاث
-  صفحات", "السنة الدراسية") is not a period.
+  صفحات", "السنة الدراسية") is not a period. A counted stretch includes
+  today through now. "the last 3 days of August" / "آخر ٣ أيام من أغسطس"
+  is that month's last days. "كم" and "how many" are not counts.
 * **What was true before**: "before we moved", "at first", "originally",
   "used to", "previously", "قبل ما نغيره", "في البداية", "سابقاً". Recall
   then shows the values a fact had before its current one (its history), the
@@ -48,7 +50,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta
+from datetime import MAXYEAR, MINYEAR, UTC, date, datetime, timedelta
 from typing import Any
 
 __all__ = ["TIME_AFTER_EN", "TimeAsk", "is_weekday", "present_ar_words", "read_time", "says_day", "says_to_come",
@@ -136,6 +138,11 @@ _SPAN_EN = re.compile(
     re.IGNORECASE,
 )
 _MONTH_WORDS = "|".join(sorted(_EN_MONTHS, key=len, reverse=True))
+#: "the last 3 days of August": the stretch is tied to the month it names.
+_OF_MONTH_EN = re.compile(
+    rf"\s+of\s+({_MONTH_WORDS})\b(?:\s+((?:19|20)\d\d))?",
+    re.IGNORECASE,
+)
 #: A month named in context ("in June", "June 2025", "3 June", "June 3"): a
 #: bare "may" or "march" is a verb.
 _MONTH_EN = re.compile(
@@ -194,6 +201,11 @@ _AGO_NUMBERS_AR = {"ثلاثه": 3, "ثلاث": 3, "اربعه": 4, "اربع": 
                    "سبع": 7, "ثمانيه": 8, "ثماني": 8, "ثمان": 8, "تسعه": 9, "تسع": 9, "عشره": 10, "عشر": 10, "كم": 3,
                    "بضعه": 3, "عده": 3, "كذا": 3}
 _AR_NUMBER = "|".join(sorted(_AGO_NUMBERS_AR, key=len, reverse=True))
+#: "كم" (how many) and "كذا" count as a few after "قبل" ("قبل كم يوم").
+#: In a counted stretch they are the question, not the count.
+_AR_QUESTION_NUMBERS = frozenset({"كم", "كذا"})
+_AR_SPAN_NUMBER = "|".join(sorted(
+    (word for word in _AGO_NUMBERS_AR if word not in _AR_QUESTION_NUMBERS), key=len, reverse=True))
 _AR_UNIT = "|".join(sorted(
     ("يومين", "اسبوعين", "شهرين", "سنتين", "ايام", "اسابيع", "شهور", "اشهر", "سنوات", "سنين",
      "يوم", "اسبوع", "شهر", "سنه"),
@@ -226,14 +238,14 @@ _AR_RELATIVE = re.compile(
 _AR_SPAN_PLURAL = "|".join(sorted(("ايام", "اسابيع", "شهور", "اشهر", "سنوات", "سنين"), key=len, reverse=True))
 _SPAN_EDGE = r"(?=\s|$|[؟?.,،!])"
 _SPAN_AR_LAST = re.compile(
-    rf"(?:^|\s)اخر\s+(?:({_AR_NUMBER}|\d{{1,3}})\s+)?({_AR_UNIT}){_SPAN_EDGE}"
+    rf"(?:^|\s)اخر\s+(?:({_AR_SPAN_NUMBER}|\d{{1,3}})\s+)?({_AR_UNIT}){_SPAN_EDGE}"
 )
 _SPAN_AR_MSA = re.compile(
-    rf"(?:^|\s)(?:ال)?({_AR_SPAN_PLURAL})\s+(?:ال)?({_AR_NUMBER}|\d{{1,3}})\s+"
+    rf"(?:^|\s)(?:ال)?({_AR_SPAN_PLURAL})\s+(?:ال)?({_AR_SPAN_NUMBER}|\d{{1,3}})\s+"
     rf"(?:الماضيه|الماضي){_SPAN_EDGE}"
 )
 _SPAN_AR_GONE = re.compile(
-    rf"(?:^|\s)(?:اخر\s+)?({_AR_NUMBER}|\d{{1,3}})\s+({_AR_UNIT})\s+"
+    rf"(?:^|\s)(?:اخر\s+)?({_AR_SPAN_NUMBER}|\d{{1,3}})\s+({_AR_UNIT})\s+"
     rf"(?:اللي\s+)?(?:فاتت|فات|طافت|طاف){_SPAN_EDGE}"
 )
 
@@ -353,13 +365,10 @@ def _relative(phrase: str, today: datetime, now: float, zone: Any) -> tuple[floa
     if p in ("last year", "السنه الماضيه", "السنه اللي فاتت", "العام الماضي"):
         return datetime(today.year - 1, 1, 1, tzinfo=zone).timestamp(), datetime(
             today.year, 1, 1, tzinfo=zone).timestamp()
-    # this year: the phrases in _THIS_YEAR ("هالسنه", "السنة هذي", "هذه السنة",
-    # "هذا العام"). Any other relative phrase that reaches here is the same
-    # window — the patterns above are the only callers.
-    start = datetime(today.year, 1, 1, tzinfo=zone).timestamp()
-    if p in _THIS_YEAR:
-        return start, now + 1.0
-    return start, now + 1.0
+    # This year: the phrases in _THIS_YEAR ("هالسنه", "السنة هذي", "هذه السنة",
+    # "هذا العام"). The patterns above are the only callers, and each of
+    # them names this year.
+    return datetime(today.year, 1, 1, tzinfo=zone).timestamp(), now + 1.0
 
 
 def _ago(count: float, unit_days: float, now: float) -> tuple[float, float]:
@@ -369,10 +378,11 @@ def _ago(count: float, unit_days: float, now: float) -> tuple[float, float]:
     return centre - half, centre + half
 
 
-def _span_window(count: float, unit_days: float, today: datetime) -> tuple[float, float]:
-    """"past N days", "the last 3 weeks": that many units, ending as today starts."""
+def _span_window(count: float, unit_days: float, today: datetime, now: float) -> tuple[float, float]:
+    """"past N days", "the last 3 weeks": that many units back from today's
+    start, through now. Today is in it, as "this week" runs to now + 1."""
     start_today = _day_start(today)
-    return (start_today - timedelta(days=count * unit_days)).timestamp(), start_today.timestamp()
+    return (start_today - timedelta(days=count * unit_days)).timestamp(), now + 1.0
 
 
 def _counted(raw: str | None, unit: str, *, arabic: bool) -> tuple[float, float] | None:
@@ -381,7 +391,7 @@ def _counted(raw: str | None, unit: str, *, arabic: bool) -> tuple[float, float]
     if arabic:
         if unit in _AR_DUALS:
             return None if raw else (float(_AR_DUALS[unit][0]), _AR_DUALS[unit][1])
-        if not raw or unit not in _AR_UNITS:
+        if not raw or unit not in _AR_UNITS or raw in _AR_QUESTION_NUMBERS:
             return None
         if raw.isdigit():
             count = float(raw)
@@ -405,18 +415,98 @@ def _counted(raw: str | None, unit: str, *, arabic: bool) -> tuple[float, float]
     return count, _EN_UNITS[unit_key]
 
 
-def _note_counted(text: str, folded: str, today: datetime, took: Any) -> None:
-    """The counted stretches of *text*, each handed to *took*."""
-    for m in _SPAN_EN.finditer(text):
-        window = _counted(m.group(1), m.group(2), arabic=False)
-        if window:
-            took(*_span_window(*window, today), m.group(0))
-    for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2)):
-        unit_at = 1 if number_at == 2 else 2
-        for m in pattern.finditer(folded):
-            window = _counted(m.group(number_at), m.group(unit_at), arabic=True)
-            if window:
-                took(*_span_window(*window, today), m.group(0).strip())
+_OF_MONTH_AR: list[re.Pattern[str]] = []
+
+
+def _of_month_ar() -> re.Pattern[str]:
+    """"من أغسطس" / "من شهر أغسطس" after a counted stretch, on folded text."""
+    if not _OF_MONTH_AR:
+        if not _AR_MONTH_CACHE:
+            _AR_MONTH_CACHE.update(_ar_months())
+        names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
+        _OF_MONTH_AR.append(re.compile(
+            rf"\s+من\s+(?:شهر\s+)?({names})(?:\s+((?:19|20)\d\d))?(?=\s|$|[؟?.,،])"))
+    return _OF_MONTH_AR[0]
+
+
+def _month_tied(text: str, end: int, *, arabic: bool) -> tuple[int, int | None] | None:
+    """The month a counted stretch is of ("of August", "من أغسطس"), or none."""
+    found = (_of_month_ar() if arabic else _OF_MONTH_EN).match(text, end)
+    if found is None:
+        return None
+    if arabic:
+        return _AR_MONTH_CACHE[found.group(1)], int(found.group(2)) if found.group(2) else None
+    return _EN_MONTHS[found.group(1).lower()], int(found.group(2)) if found.group(2) else None
+
+
+def _tied_month_names(text: str) -> list[tuple[int, int]]:
+    """Spans of the month name that closes a counted stretch.
+
+    "of August" there names the stretch's month, not the whole of August.
+    "في أغسطس عن آخر ٣ أيام" does not: the month stands on its own."""
+    found: list[tuple[int, int]] = []
+    rows = (
+        (False, _SPAN_EN, 1, 2),
+        (True, _SPAN_AR_LAST, 1, 2),
+        (True, _SPAN_AR_GONE, 1, 2),
+        (True, _SPAN_AR_MSA, 2, 1),
+    )
+    for arabic, pattern, number_at, unit_at in rows:
+        tail_re = _of_month_ar() if arabic else _OF_MONTH_EN
+        for m in pattern.finditer(text):
+            if _counted(m.group(number_at), m.group(unit_at), arabic=arabic) is None:
+                continue
+            tail = tail_re.match(text, m.end())
+            if tail is not None:
+                found.append(tail.span(1))
+    return found
+
+
+def _closes_counted_stretch(at: int, spans: list[tuple[int, int]]) -> bool:
+    """Whether *at* sits inside a month name from :func:`_tied_month_names`."""
+    for start, end in spans:
+        if start <= at < end:
+            return True
+    return False
+
+
+def _last_of_month(
+    count: float, unit_days: float, month: int, year: int | None, today: datetime, zone: Any,
+) -> tuple[float, float]:
+    """The last *count* units of *month*: ending when the month ends."""
+    end = _latest_month(month, year, today, zone)[1]
+    return end - count * unit_days * DAY, end
+
+
+def _names_a_month(text: str, folded: str) -> bool:
+    return _MONTH_EN.search(text) is not None or _ar_month_re().search(folded) is not None
+
+
+def _note_counted(
+    text: str, folded: str, today: datetime, now: float, zone: Any, took: Any,
+) -> None:
+    """The counted stretches of *text*, each handed to *took*.
+
+    One tied to a month ("the last 3 days of August", "آخر ٣ أيام من أغسطس")
+    is that month's last days. Any other stretch is left out when the
+    question also names a month, so the month is the period. Otherwise the
+    stretch runs through now."""
+    month_named = _names_a_month(text, folded)
+    noted = ((text, False, _SPAN_EN, 1, 2),)
+    noted += tuple((folded, True, pattern, number_at, 1 if number_at == 2 else 2)
+                   for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2)))
+    for source, arabic, pattern, number_at, unit_at in noted:
+        for m in pattern.finditer(source):
+            window = _counted(m.group(number_at), m.group(unit_at), arabic=arabic)
+            if not window:
+                continue
+            tied = _month_tied(source, m.end(), arabic=arabic)
+            if tied:
+                took(*_last_of_month(*window, tied[0], tied[1], today, zone), m.group(0).strip())
+            elif month_named:
+                continue
+            else:
+                took(*_span_window(*window, today, now), m.group(0).strip())
 
 
 def read_time(question: str, *, now: float, zone: Any, past: bool | None = None) -> TimeAsk | None:
@@ -462,7 +552,7 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
             else:
                 count, unit_days = (float(raw) if raw else 1.0), _AR_UNITS[unit]
             took(*_ago(float(count), unit_days, now), m.group(0).strip())
-        _note_counted(text, folded, today, took)
+        _note_counted(text, folded, today, now, zone, took)
         for m in _MONTH_EN.finditer(text):
             name = next(g for g in (m.group(1), m.group(3), m.group(6), m.group(7)) if g)
             year = m.group(2) or m.group(4)
@@ -654,6 +744,7 @@ def _dates_said(text: str) -> list[tuple[int | None, int | None, int | None]]:
     None for what it leaves out. "3/4" is read both ways."""
     words = _said_words()
     out: list[tuple[int | None, int | None, int | None]] = []
+    tied = _tied_month_names(text)
     for m in _NUM_MONTH_EN.finditer(text):
         out.append((int(m[3]) if m[3] else None, _EN_MONTHS[m[2]], int(m[1])))
     for m in _MONTH_NUM_EN.finditer(text):
@@ -667,9 +758,14 @@ def _dates_said(text: str) -> list[tuple[int | None, int | None, int | None]]:
         year = int(m[6]) + (2000 if len(m[6]) == 2 else 0) if m[6] else None
         out += [(year, int(m[5]), int(m[4])), (year, int(m[4]), int(m[5]))]
     for m in _PLAIN_MONTH_EN.finditer(text):
+        if _closes_counted_stretch(m.start(1), tied):
+            continue
         out.append((int(m[2]) if m[2] else None, _EN_MONTHS[m[1]], None))
     for m in words.month.finditer(text):  # type: ignore[union-attr]
         name, year = m[1] or m[3], m[2] or m[4]
+        at = m.start(1) if m[1] else m.start(3)
+        if _closes_counted_stretch(at, tied):
+            continue
         out.append((int(year) if year else None, words.months[name], None))
     for m in _MONTH_NUMBER_AR.finditer(text):
         if 1 <= int(m[1]) <= 12:
@@ -742,6 +838,9 @@ def says_day(text: str, day: str, said_on: str | None) -> bool:
             return True
     # A counted stretch is the window it covers, not a point: "past 10 days"
     # says today and the day ten back, and not the day before that.
+    # "the last 3 days of August" says those days of August.
+    if _day_of_tied_month(folded, day, said_on):
+        return True
     if _in_counted_span(folded, near, far):
         return True
     return False
@@ -837,11 +936,38 @@ def _days_back(back: tuple[int, int] | str, said: date) -> tuple[int, int]:
     return (said - end).days, (said - start).days
 
 
+def _day_of_tied_month(folded: str, day: str, said_on: str | None) -> bool:
+    """Whether *day* is one of "the last N of <month>" in *folded*.
+
+    The same days :func:`_last_of_month` gives ``read_time``. A relative
+    "last N days" does not say them."""
+    said = _as_date(said_on)
+    want = _as_date(str(day)[:10]) if len(str(day)) >= 10 else None
+    if said is None or want is None:
+        return False
+    today = datetime(said.year, said.month, said.day, tzinfo=UTC)
+    want_ts = datetime(want.year, want.month, want.day, tzinfo=UTC).timestamp()
+    specs = [(False, _SPAN_EN, 1, 2)]
+    specs += [(True, pattern, number_at, 1 if number_at == 2 else 2)
+              for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2))]
+    for arabic, pattern, number_at, unit_at in specs:
+        for m in pattern.finditer(folded):
+            window = _counted(m.group(number_at), m.group(unit_at), arabic=arabic)
+            tied = _month_tied(folded, m.end(), arabic=arabic) if window else None
+            if not window or tied is None:
+                continue
+            start, end = _last_of_month(*window, tied[0], tied[1], today, UTC)
+            if start <= want_ts < end:
+                return True
+    return False
+
+
 def _in_counted_span(folded: str, near: int, far: int) -> bool:
     """Whether the day sits inside a counted stretch of *folded*.
 
-    *near* and *far* are the day's nearest and farthest day-counts before
-    the turn, as :func:`says_day` measures them."""
+    The same window :func:`_span_window` reads: from that many units before
+    the turn's day through the turn's day itself. *near* and *far* are the
+    day's nearest and farthest day-counts before the turn."""
     for count, unit in _span_counts(folded):
         if near >= 0 and far <= count * unit:
             return True
@@ -851,18 +977,19 @@ def _in_counted_span(folded: str, near: int, far: int) -> bool:
 def _span_counts(folded: str) -> list[tuple[float, float]]:
     """"past 10 days", "آخر ثلاث أسابيع": (how many, the unit's days).
 
-    The stretch ending on the turn's day, not the point :func:`_counts_back`
-    reads ("three weeks ago")."""
+    The stretch through the turn's day, not the point :func:`_counts_back`
+    reads ("three weeks ago"). A question word ("كم", "how many") is not a
+    count here."""
     found: list[tuple[float, float]] = []
     for m in _SPAN_EN.finditer(folded):
         got = _counted(m.group(1), m.group(2), arabic=False)
-        if got:
+        if got and _month_tied(folded, m.end(), arabic=False) is None:
             found.append(got)
     for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2)):
         unit_at = 1 if number_at == 2 else 2
         for m in pattern.finditer(folded):
             got = _counted(m.group(number_at), m.group(unit_at), arabic=True)
-            if got:
+            if got and _month_tied(folded, m.end(), arabic=True) is None:
                 found.append(got)
     return found
 

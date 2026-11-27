@@ -1180,30 +1180,38 @@ def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any
     return " AND ".join(where), params
 
 
-#: An ISO week key, zero-padded, so the least and greatest strings are the
-#: earliest and latest weeks. A project's own key is ``project:…`` and is
-#: not a date.
-_WEEK_KEY_GLOB = "[0-9][0-9][0-9][0-9]-W[0-9][0-9]"
+def project_week_keys(conn: sqlite3.Connection, project_ids: list[str]) -> dict[str, tuple[str, str]]:
+    """The first and last week key of each project, from its week parts.
 
-
-def _project_span_keys(conn: sqlite3.Connection, project_ids: list[str]) -> dict[str, list[str]]:
-    """The first and last week key of each project, from its parts.
-
-    The keys carry the weeks, with no zone in them. A part whose key is not
-    a week is not a date, so it is left out."""
+    The one reading of those keys (recall's ``_project_weeks`` calls this).
+    ISO keys sort as the weeks do and carry no zone. A project with no week
+    part is absent. A database that has no parts table yet reads as none,
+    and the stretch is then the stored one at midday."""
     if not project_ids:
         return {}
-    marks = ",".join("?" for _ in project_ids)
-    rows = conn.execute(
-        "SELECT p.rollup_id AS id, MIN(w.period_key) AS first_key, MAX(w.period_key) AS last_key "
-        "FROM memory_summary_parts AS p JOIN memory_summaries AS w ON w.id = p.part_id "
-        f"WHERE p.rollup_id IN ({marks}) AND w.period_key GLOB ? GROUP BY p.rollup_id",
-        (*project_ids, _WEEK_KEY_GLOB),
-    ).fetchall()
-    return {
-        str(row["id"]): [str(row["first_key"]), str(row["last_key"])]
-        for row in rows if row["first_key"] and row["last_key"]
-    }
+    try:
+        found = conn.execute(
+            "SELECT p.rollup_id, MIN(s.period_key), MAX(s.period_key) FROM memory_summary_parts p "
+            "JOIN memory_summaries s ON s.id = p.part_id AND s.level = 'week' "
+            f"WHERE p.rollup_id IN ({','.join('?' for _ in project_ids)}) GROUP BY p.rollup_id",
+            list(project_ids),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        logger.warning("[memory] a project's weeks could not be read; its stretch is read at midday",
+                       exc_info=True)
+        return {}
+    return {str(row[0]): (str(row[1]), str(row[2])) for row in found if row[1] and row[2]}
+
+
+def _stored_span_months(period_start: float, period_end: float) -> list[str]:
+    """The months of a project's stored stretch, when it has no week parts.
+
+    The same days :func:`kazma_core.memory.topic_rollups.stored_project_days`
+    names, so the page formats them in its own language."""
+    from kazma_core.memory.topic_rollups import stored_project_days
+
+    first, last = stored_project_days(period_start, period_end, memory_zone())
+    return [f"{first.year:04d}-{first.month:02d}", f"{last.year:04d}-{last.month:02d}"]
 
 
 def list_summaries(
@@ -1214,7 +1222,8 @@ def list_summaries(
     ``memory/tenant_view``), from *offset*. Forgotten and retired ones
     only with *include_hidden*; they hold no text. A project also carries
     ``span_keys``, its first and last part's week keys, so a page names
-    the stretch without reading the stored instants."""
+    the stretch without reading the stored instants. With no week part it
+    carries ``span_months``, the months of the stored stretch read at midday."""
     where, params = _summary_filter(tenant_id, include_hidden)
     rows = conn.execute(
         "SELECT id, tenant_id, period_key, period_start, period_end, title, summary_text, status, "
@@ -1224,10 +1233,16 @@ def list_summaries(
         (*params, max(1, min(int(limit), 500)), max(0, int(offset))),
     ).fetchall()
     out = [dict(r) for r in rows]
-    spans = _project_span_keys(conn, [str(r["id"]) for r in out if r.get("level") == "project"])
+    spans = project_week_keys(conn, [str(r["id"]) for r in out if r.get("level") == "project"])
     for row in out:
-        if row.get("level") == "project":
-            row["span_keys"] = spans.get(str(row["id"]), [])
+        if row.get("level") != "project":
+            continue
+        found = spans.get(str(row["id"]))
+        if found:
+            row["span_keys"] = [found[0], found[1]]
+        else:
+            row["span_keys"] = []
+            row["span_months"] = _stored_span_months(row["period_start"], row["period_end"])
     return out
 
 

@@ -576,6 +576,33 @@ def test_a_projects_span_is_its_week_keys():
     assert (raw.month, raw.day) == (5, 31)
 
 
+def test_a_project_with_no_week_parts_is_named_from_its_stored_stretch(monkeypatch):
+    """No week parts: the months are the stored stretch at midday. A June
+    written in Kuwait is 31 May in UTC, and midday of it is still June."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.memory.topic_summaries import list_summaries
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo("UTC"))
+    kuwait = ZoneInfo("Asia/Kuwait")
+    start = _dt.datetime(2026, 6, 1, tzinfo=kuwait).timestamp()
+    end = _dt.datetime(2026, 9, 15, tzinfo=kuwait).timestamp()
+    assert _dt.datetime.fromtimestamp(start, _dt.UTC).month == 5
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    conn.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, "
+        "title, summary_text, status, created_at, updated_at) "
+        "VALUES ('sum_p', 'default', 'project:abcd', ?, ?, 'project', 't', 's', 'active', 0, 0)",
+        (start, end))
+    rows = {r["id"]: r for r in list_summaries(conn, tenant_id="default", limit=10)}
+    conn.close()
+    assert rows["sum_p"]["span_keys"] == []
+    assert rows["sum_p"]["span_months"] == ["2026-06", "2026-09"]
+
+
 def test_a_rebuilt_old_week_is_introduced_with_its_own_monday(monkeypatch):
     from zoneinfo import ZoneInfo
 

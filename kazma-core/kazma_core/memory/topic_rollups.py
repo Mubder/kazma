@@ -193,6 +193,18 @@ def stretch_of(level: str, period_key: str, period_start: float, period_end: flo
                                                 zone).date() + _dt.timedelta(days=1)))
 
 
+def stored_project_days(period_start: float, period_end: float, zone: Any) -> tuple[_dt.date, _dt.date]:
+    """The first and last day of a project's stored stretch, at midday in *zone*.
+
+    What a project with no week parts is named from. The same reading as a
+    week that has no key."""
+    start = float(period_start or 0)
+    first = _dt.datetime.fromtimestamp(start + _MIDDAY_S, zone).date()
+    last = _dt.datetime.fromtimestamp(
+        max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S), zone).date()
+    return first, last
+
+
 def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "",
                  weeks: tuple[str, str] | None = None) -> str:
     """How recall's block and the roll-up prompts name a summary's stretch of
@@ -220,7 +232,7 @@ def rollup_label(level: str, period_start: float, period_end: float, period_key:
         if first_week is not None and last_week is not None:
             first, last = first_week, last_week + _dt.timedelta(days=6)
         else:
-            first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
+            first, last = stored_project_days(period_start, period_end, zone)
         return f"Project, {first.strftime('%b %Y')} to {last.strftime('%b %Y')}"
     return f"Week of {(_week_monday(period_key) or day(start + _MIDDAY_S)).strftime('%b %d, %Y')}"
 

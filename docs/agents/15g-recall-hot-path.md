@@ -39,7 +39,12 @@
     أسبوعين", "قبل ثلاث أسابيع", "السنة هذي" / "هذه السنة" / "هذا العام",
     "past 10 days", "the last 3 weeks", "آخر عشر أيام", "آخر ثلاث أسابيع",
     "الأيام العشرة الماضية", "الأسابيع الثلاثة الماضية", "بداية أغسطس" and
-    "بداية شهر أغسطس") is read in the operator's zone, and its words are never
+    "بداية شهر أغسطس") is read in the operator's zone. A counted stretch
+    includes today through now, as "this week" does. "the last 3 days of
+    August" / "آخر ٣ أيام من أغسطس" is that month's last days; a stretch
+    that is not of the month leaves the month as the period. "كم" and
+    "how many" are questions, not counts ("قبل كم يوم" is still a few days
+    ago). Its words are never
     content words (`recall._without_time_words`; every question-word reader
     in recall goes through it or `_search_words`, a gate). A word that only
     shares those letters ("the last 3 emails", "قبل ثلاث صفحات", "السنة

@@ -122,9 +122,13 @@ queued by the maintenance sweep with at most two weeks in flight.
   `KazmaFormat.weekOfKey` / `monthOfKey`, and a project from `span_keys` on
   `list_summaries` (its first and last part's week keys), in the page's
   language. It does not re-read `period_start` in the browser's zone: a June
-  written in Kuwait read "May" there. A project is filed from those same
-  week keys (`recall._project_weeks`; read at midday, a zone 13 hours away
-  moved it a day: the follow-up review's L2). A said period shorter than
+  written in Kuwait read "May" there. A project with no week part is named
+  from `span_months`, the months of its stored stretch read at midday
+  (`topic_rollups.stored_project_days`). A project is filed from those same
+  week keys (`topic_summaries.project_week_keys`, which `recall._project_weeks`
+  calls; read at midday, a zone 13 hours away moved it a day: the follow-up
+  review's L2). The week-key query is that one function
+  (`tests/test_static_gates.py`). A said period shorter than
   `_SAID_BY_MONTHS_S` (20 days: "What did we talk about last week?", "شنو
   تكلمنا عنه الأسبوع الماضي؟") is answered by its weekly summaries by share,
   not its whole month (O2), every topic of the week up to the listing's

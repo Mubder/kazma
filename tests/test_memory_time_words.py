@@ -162,6 +162,11 @@ def _dates(ask) -> tuple[str, str]:
             datetime.fromtimestamp(ask.end, UTC).date().isoformat())
 
 
+def _day_of(iso: str) -> float:
+    y, m, d = (int(p) for p in iso.split("-"))
+    return _day(y, m, d)
+
+
 @pytest.mark.parametrize("arabic", [
     "شنو سويت قبل ثلاث أسابيع؟",
     "ماذا فعلت قبل ثلاثة أسابيع؟",
@@ -200,10 +205,11 @@ def test_this_year_is_read_with_the_year_first_and_in_msa(arabic):
     ("What did we talk about in the last 3 weeks?", "شنو تكلمنا عنه ثلاث أسابيع اللي فاتت؟", "2026-09-04"),
     ("What did we talk about over the last two weeks?", "شنو تكلمنا عنه آخر أسبوعين؟", "2026-09-11"),
 ])
-def test_a_counted_stretch_ends_as_today_starts(english, arabic, start):
+def test_a_counted_stretch_includes_today(english, arabic, start):
+    """The stretch runs through now, as "this week" does, in both languages."""
     en, ar = _read(english), _read(arabic)
     assert en is not None and ar is not None
-    assert _dates(en) == _dates(ar) == (start, "2026-09-25")
+    assert (en.start, en.end) == (ar.start, ar.end) == (_day_of(start), NOW + 1)
     assert en.said is ar.said is True
 
 
@@ -264,6 +270,78 @@ def test_a_counted_stretch_says_the_days_it_covers(text, day, says):
     assert says_day(text, day, TOLD_ON) is says, (text, day)
 
 
+@pytest.mark.parametrize("question", [
+    "كم يوم فات من آخر مرة قلت لك عن السفر؟",
+    "كم شهر طاف على آخر موعد قلت لك عنه؟",
+    "كذا يوم فات من آخر مرة قلت لك؟",
+    "How many days since I told you about the trip?",
+    "How many days ago did I tell you?",
+])
+def test_a_question_word_is_not_a_counted_stretch(question):
+    """كم / كذا / "how many" ask how long, and are not the last 3 days.
+
+    كم still counts as a few after قبل ("قبل كم يوم")."""
+    ask = _read(question)
+    assert ask is None or not ask.period, question
+    assert says_day(question, "2026-09-25", "2026-09-25") is False, question
+    assert says_day("كم يوم فات وانا انتظر", "2026-11-28", "2026-11-28") is False
+    assert says_day("قبل كم يوم", "2026-05-28", TOLD_ON) is True
+
+
+@pytest.mark.parametrize(("english", "arabic"), [
+    ("What did I say in the last 3 days of August?", "شنو قلت لك آخر ٣ أيام من أغسطس؟"),
+    ("What did I say in the last 3 days of August?", "شنو قلت لك آخر ثلاث أيام من أغسطس؟"),
+    ("What did I say in the last 3 days of August?", "شنو قلت لك في الأيام الثلاثة الماضية من أغسطس؟"),
+    ("What did I say in the last 3 days of August?", "شنو قلت لك ثلاث أيام اللي فاتت من أغسطس؟"),
+])
+def test_the_last_days_of_a_named_month_are_that_months(english, arabic):
+    """A stretch tied to a month is that month's last days, in both languages."""
+    en, ar = _read(english), _read(arabic)
+    assert en is not None and ar is not None
+    assert (en.start, en.end) == (ar.start, ar.end) == (_day(2026, 8, 29), _day(2026, 9, 1))
+    assert says_day(english, "2026-08-29", "2026-09-25") is True
+    assert says_day(arabic, "2026-08-31", "2026-09-25") is True
+    assert says_day(english, "2026-08-28", "2026-09-25") is False
+    assert says_day(arabic, "2026-08-28", "2026-09-25") is False
+    assert says_day(english, "2026-09-25", "2026-09-25") is False
+    assert says_day(arabic, "2026-09-25", "2026-09-25") is False
+
+
+@pytest.mark.parametrize(("english", "arabic"), [
+    ("What did I say in August about the last 3 days?", "شنو قلت لك في أغسطس عن آخر ٣ أيام؟"),
+])
+def test_a_named_month_wins_when_the_stretch_is_not_of_it(english, arabic):
+    """On main, a named month was the period. A stretch that is not "of" that
+    month still leaves the month as the period."""
+    en, ar = _read(english), _read(arabic)
+    assert en is not None and ar is not None
+    august = (_day(2026, 8, 1), _day(2026, 9, 1))
+    assert (en.start, en.end) == (ar.start, ar.end) == august
+
+
+def test_a_counted_stretch_includes_today_through_now():
+    """Asked at 15:00, "past 10 days" ends at now, and says_day says today."""
+    now = datetime(2026, 11, 28, 15, tzinfo=UTC).timestamp()
+    questions = (
+        "What did I say in the past 10 days?",
+        "شنو قلت في آخر عشر أيام؟",
+        "شنو قلت في الأيام العشرة الماضية؟",
+        "What did I say in the last 3 weeks?",
+        "شنو قلت آخر ثلاث أسابيع؟",
+    )
+    for question in questions:
+        ask = read_time(question, now=now, zone=UTC)
+        assert ask is not None and ask.end == now + 1, question
+    ten = read_time("What did I say in the past 10 days?", now=now, zone=UTC)
+    assert ten is not None and ten.start == _day(2026, 11, 18)
+    ar = read_time("شنو قلت في آخر عشر أيام؟", now=now, zone=UTC)
+    assert ar is not None and (ar.start, ar.end) == (ten.start, ten.end)
+    assert says_day("I was sick the past 10 days", "2026-11-28", "2026-11-28") is True
+    assert says_day("كنت مريض آخر عشر أيام", "2026-11-28", "2026-11-28") is True
+    assert says_day("I was sick the past 10 days", "2026-11-18", "2026-11-28") is True
+    assert says_day("I was sick the past 10 days", "2026-11-17", "2026-11-28") is False
+
+
 def test_every_arabic_number_word_is_an_ago_and_every_this_year_phrase_is_read():
     """From source: each number word قبل can take, and each "this year"
     phrase says_day knows, is a period read_time reads. The old digit-only
@@ -285,6 +363,14 @@ def test_every_arabic_number_word_is_an_ago_and_every_this_year_phrase_is_read()
     assert "السنه هذي" not in old_year and "هذه السنه" not in old_year
     assert tw._SPAN_EN.search("past 10 days")
     assert tw._SPAN_EN.search("weekends") is None
+    for word in tw._AR_QUESTION_NUMBERS:
+        assert word in tw._AR_AGO.pattern, word
+        assert word not in tw._SPAN_AR_GONE.pattern, word
+        assert word not in tw._SPAN_AR_MSA.pattern, word
+        assert word not in tw._SPAN_AR_LAST.pattern, word
+    planted = re.compile(rf"(?:اخر\s+)?({tw._AR_NUMBER}|\d{{1,3}})\s+يوم\s+فات")
+    assert planted.search("كم يوم فات")
+    assert tw._SPAN_AR_GONE.search(" كم يوم فات") is None
     assert re.search(tw.TIME_AFTER_EN, "past 10 days")
     old_place = r"(?:last|this|past)\s+(?:week|month|year)"
     assert re.search(old_place, "past 10 days") is None

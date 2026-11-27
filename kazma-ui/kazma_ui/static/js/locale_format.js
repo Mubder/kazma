@@ -103,6 +103,18 @@
     return formatUtc(point, { month: 'long', year: 'numeric' });
   }
 
+  /* A project's label. Week keys win. With none, the months are the stored
+   * stretch read at midday on the server (span_months), not the instant
+   * re-read in the browser's zone. */
+  function projectMonths(spanKeys, spanMonths) {
+    var keys = spanKeys || [];
+    var from = monthOfKey(keys[0]);
+    var to = monthOfKey(keys[1], 'end');
+    if (from && to) return { from: from, to: to };
+    var months = spanMonths || [];
+    return { from: monthOfKey(months[0]), to: monthOfKey(months[1]) };
+  }
+
   /* "2 hours ago" / "in 3 days" / "yesterday", in the page's language. */
   function relative(value, now) {
     var d = toDate(value);
@@ -163,6 +175,7 @@
     time: time,
     weekOfKey: weekOfKey,
     monthOfKey: monthOfKey,
+    projectMonths: projectMonths,
     relative: relative,
     number: number,
     compact: compact,

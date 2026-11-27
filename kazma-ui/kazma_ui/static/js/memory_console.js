@@ -1868,9 +1868,9 @@
           return _mt('memory.console.month_of', 'Month of {month}', { month: monthOf(s.period_key) });
         }
         if (s.level === 'project') {
-          const keys = s.span_keys || [];
-          return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}',
-            { from: monthOf(keys[0]), to: monthOf(keys[1], 'end') });
+          const named = fmt && fmt.projectMonths
+            ? fmt.projectMonths(s.span_keys, s.span_months) : { from: '', to: '' };
+          return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}', named);
         }
         const when = fmt && fmt.weekOfKey ? fmt.weekOfKey(s.period_key) : '';
         return _mt('memory.console.week_of', 'Week of {date}', { date: when });
