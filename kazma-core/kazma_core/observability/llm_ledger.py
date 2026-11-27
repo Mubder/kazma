@@ -59,6 +59,7 @@ __all__ = [
     "query_recent",
     "record_llm_call",
     "spend_by_person",
+    "recorded_usage",
     "thread_usage",
     "usage_of",
     "turn_usage",
@@ -483,6 +484,59 @@ def turn_usage(turn_id: str, *, since: str = "") -> dict[str, Any]:
     except sqlite3.Error as exc:
         logger.debug("[llm-ledger] turn usage unreadable: %s", exc)
         return empty
+    return _usage(*row)
+
+
+def recorded_usage(
+    *, thread_id: str = "", turn_ids: list[str] | None = None, space: str | None = None,
+) -> dict[str, Any] | None:
+    """Tokens, cost and call count, read without creating or migrating the ledger.
+
+    ``None`` when the file is not there. ``NotReadableError`` when the file is
+    there but cannot be summed as it stands (``immutable=1``, so a row still
+    only in the WAL is not in this read). *space* the owner's id also matches
+    a row with an empty space (work from before Spaces, N19).
+    """
+    from pathlib import Path
+
+    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.paths import llm_calls_db
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    path = Path(llm_calls_db(create=False))
+    if not path.is_file():
+        return None
+    conn = connect_immutable(path)
+    try:
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_calls)")}
+        needed = {"thread_id", "turn_id", "total_tokens", "cost_usd", "priced", "prompt_tokens", "cached_tokens"}
+        if space is not None:
+            needed.add("space")
+        if not needed <= columns:
+            raise NotReadableError("llm_calls")
+        sql = f"SELECT {_SUMS} FROM llm_calls WHERE 1 = 1"
+        args: list[Any] = []
+        if thread_id:
+            sql += " AND thread_id = ?"
+            args.append(thread_id)
+        if turn_ids is not None:
+            if not turn_ids:
+                return _usage(0, 0, 0.0, 0)
+            sql += " AND turn_id IN (" + ", ".join("?" for _ in turn_ids) + ")"
+            args.extend(turn_ids)
+        if space is not None:
+            if space == OWNER_SPACE_ID:
+                sql += " AND (space = ? OR space = '' OR space IS NULL)"
+            else:
+                sql += " AND space = ?"
+            args.append(space)
+        row = conn.execute(sql, args).fetchone()
+    except NotReadableError:
+        raise
+    except sqlite3.Error as exc:
+        raise NotReadableError("llm_calls") from exc
+    finally:
+        conn.close()
     return _usage(*row)
 
 

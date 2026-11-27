@@ -25,17 +25,38 @@ import sqlite3
 import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["committed_and_closed", "write_transaction"]
+__all__ = ["NotReadableError", "committed_and_closed", "connect_immutable", "write_transaction"]
 
 #: One lock per connection: two groups on one connection wait for each other
 #: instead of the second failing with "cannot start a transaction within a
 #: transaction". Weak keys: a closed store's entry goes with its connection.
 _GROUP_LOCKS: weakref.WeakKeyDictionary[object, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+class NotReadableError(Exception):
+    """A store is on disk but cannot be read without changing it.
+
+    Not a :class:`sqlite3.Error`: a reader that treats database errors as
+    "nothing stored" must still be able to say the file is not readable.
+    """
+
+
+def connect_immutable(path: Path | str) -> sqlite3.Connection:
+    """Open *path* so the read cannot create ``-wal`` or ``-shm``.
+
+    ``mode=ro`` on a WAL database still creates those sidecars.
+    ``immutable=1`` does not, and it does not look at a WAL file, so a row
+    that has not been checkpointed yet is not in this read. The caller
+    closes the connection. This function does not run a schema step.
+    """
+    resolved = Path(path).resolve()
+    return sqlite3.connect(f"{resolved.as_uri()}?immutable=1", uri=True, timeout=5)
 
 
 @contextmanager

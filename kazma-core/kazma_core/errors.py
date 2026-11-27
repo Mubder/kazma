@@ -84,6 +84,26 @@ _REDACTED = "<redacted>"
 _REDACT_PATTERN = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
 #: The secrets alone, for a message whose path is the answer (below).
 _REDACT_SECRETS = re.compile("(" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+#: Arabic names of a credential. ``re.VERBOSE`` drops spaces, so a label of
+#: more than one word cannot live in ``_SECRET_FRAGMENTS``. The words are the
+#: same ones the English pattern knows: a password and a secret key.
+_ARABIC_CREDENTIAL_LABELS = (
+    "كلمة السر",
+    "كلمة المرور",
+    "الرمز السري",
+    "مفتاح سري",
+)
+_ARABIC_SECRET = re.compile(
+    "(?:" + "|".join(re.escape(label) for label in _ARABIC_CREDENTIAL_LABELS) + r")\s*[=:]\s*\S+",
+)
+
+
+def _mask_secret_text(text: str, pattern: re.Pattern[str], replacement: str) -> str:
+    """*pattern* (paths and English credential labels), then Arabic labels, then token shapes."""
+    from kazma_core.security.token_shapes import mask_tokens
+
+    stepped = _ARABIC_SECRET.sub(replacement, pattern.sub(replacement, str(text)))
+    return mask_tokens(stepped, replacement)
 
 
 class _Redactor:
@@ -94,9 +114,7 @@ class _Redactor:
         self._pattern = pattern
 
     def sub(self, replacement: str, text: str) -> str:
-        from kazma_core.security.token_shapes import mask_tokens
-
-        return mask_tokens(self._pattern.sub(replacement, str(text)), replacement)
+        return _mask_secret_text(text, self._pattern, replacement)
 
 
 _REDACT = _Redactor(_REDACT_PATTERN)
@@ -109,11 +127,10 @@ def redact_secrets(text: str) -> str:
     that would not start ("No such file: C:\\...\\npx.cmd") -- where
     :func:`validation_error`'s path redaction would remove the answer. A key
     is still never shown: an HTTP failure quotes its URL, query and all; a
-    token is found by its shape too (``security.token_shapes``).
+    token is found by its shape too (``security.token_shapes``). An Arabic
+    credential label is masked the same way as ``password`` or ``secret``.
     """
-    from kazma_core.security.token_shapes import mask_tokens
-
-    return mask_tokens(_REDACT_SECRETS.sub(_REDACTED, str(text)), _REDACTED)
+    return _mask_secret_text(text, _REDACT_SECRETS, _REDACTED)
 
 _MAX_VERBOSE_CHARS = 300
 

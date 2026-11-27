@@ -13,17 +13,20 @@ import argparse
 import asyncio
 import base64
 import binascii
+import hashlib
 import html
 import json
 import logging
 import sqlite3
 import sys
+from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,22 @@ _PUB_EN = "The public half of this install's receipt key. The private half stays
 _PUB_AR = "النصف العلني لمفتاح إيصالات هذا التثبيت. النصف الخاص يبقى في الخزنة."
 _NO_VAULT_EN = "not recorded. This install has no vault key, so a receipt cannot be signed."
 _NO_VAULT_AR = "غير مسجّل. لا مفتاح خزنة لهذا التثبيت، لذا لا يمكن توقيع إيصال."
+_NO_VAULT_CHECK_EN = (
+    "not recorded. This check was not given a public key, and this install's vault key is not set."
+)
+_NO_VAULT_CHECK_AR = "غير مسجّل. لم يُعطَ هذا الفحص مفتاحاً علنياً، ولا مفتاح خزنة لهذا التثبيت."
 _NO_SIGN_EN = "not recorded. This install has no signing key."
 _NO_SIGN_AR = "غير مسجّل. لا مفتاح توقيع لهذا التثبيت."
+_NO_PUB_EN = (
+    "not recorded. This check was not given a public key, and this install has no signing key."
+)
+_NO_PUB_AR = "غير مسجّل. لم يُعطَ هذا الفحص مفتاحاً علنياً، ولا مفتاح توقيع لهذا التثبيت."
+_BAD_PUB_EN = "not recorded. That public key could not be read."
+_BAD_PUB_AR = "غير مسجّل. تعذّر قراءة هذا المفتاح العلني."
+_CHECKED_OWN_EN = "Checked with this install's key."
+_CHECKED_OWN_AR = "فُحص بمفتاح هذا التثبيت."
+_KEY_BODY_EN = "This file was not signed by the key that was given."
+_KEY_BODY_AR = "لم يوقَّع هذا الملف بالمفتاح الذي أُعطي."
 _BAD_KEY_EN = "not recorded. This install's signing key does not open. It was not replaced."
 _BAD_KEY_AR = "غير مسجّل. مفتاح توقيع هذا التثبيت لا يُفتح. لم يُستبدل."
 _MISMATCH_EN = "This file was not signed by this install."
@@ -62,18 +79,30 @@ _UNLISTED_EN = "not recorded. This run is not in the current listing."
 _UNLISTED_AR = "غير مسجّل. هذا العمل ليس في القائمة الحالية."
 _JOURNAL_EN = "not recorded. This process has no complete turn journal for this run."
 _JOURNAL_AR = "غير مسجّل. لا سجل دورة كاملاً لهذا العمل في هذه العملية."
-_NO_EFFECTS_EN = "No effect receipt is stored for this thread."
-_NO_EFFECTS_AR = "لا إيصال أثر مخزّن لهذه المحادثة."
-_NO_APPROVALS_EN = "No approval is stored for this thread."
-_NO_APPROVALS_AR = "لا موافقة مخزّنة لهذه المحادثة."
-_NO_COMMITMENTS_EN = "No commitment check is stored for this thread."
-_NO_COMMITMENTS_AR = "لا فحص التزام مخزّن لهذه المحادثة."
-_LEDGER_EN = "not recorded. The chat's model ledger could not be read."
-_LEDGER_AR = "غير مسجّل. تعذّر قراءة سجل النموذج لهذه المحادثة."
+_NOT_READABLE_EN = "not recorded. This store is not readable without changing it."
+_NOT_READABLE_AR = "غير مسجّل. هذا السجل غير قابل للقراءة من غير تغييره."
+_OTHER_SPACE_EN = "not recorded. This run is in another space."
+_OTHER_SPACE_AR = "غير مسجّل. هذا العمل في مساحة أخرى."
+_NO_SPACE_AR = "يُعرض العمل الجاري داخل مساحة، وهذا العمل غير مربوط بمساحة بعد."
+_MULTI_AR = "يُعرض الإيصال لتثبيت واحد."
+_NO_TURN_SCOPE_EN = (
+    "not recorded. This command does not know the turn id, so it does not list the whole chat."
+)
+_NO_TURN_SCOPE_AR = "غير مسجّل. هذا الأمر لا يعرف معرّف الدورة، لذا لا يعرض المحادثة كلها."
+_LEDGER_MISSING_EN = "not recorded. The model ledger file is not there."
+_LEDGER_MISSING_AR = "غير مسجّل. ملف سجل النموذج غير موجود."
+_LEDGER_OFF_EN = "not recorded. The model ledger is switched off."
+_LEDGER_OFF_AR = "غير مسجّل. سجل النموذج مطفأ."
 _CHAT_LEDGER_EN = "The chat's model ledger, not one turn's total."
 _CHAT_LEDGER_AR = "سجل النموذج لهذه المحادثة، وليس مجموع دورة واحدة."
 _TURN_LEDGER_EN = "not recorded. This command does not know the turn id."
 _TURN_LEDGER_AR = "غير مسجّل. هذا الأمر لا يعرف معرّف الدورة."
+_STORE_PATH_EN = "That path is one of Kazma's own files."
+_STORE_PATH_AR = "هذا المسار أحد ملفات كاظمه."
+_TIME_KEYS = frozenset({
+    "started_at", "completed_at", "created_at", "claimed_at", "settled_at",
+    "ended_at", "progress_at", "updated_at", "request_at", "resolved_at", "expires_at",
+})
 _MEMORY_KEY_EN = (
     "not recorded. The memory record is keyed by a hash this command cannot rebuild from the run id."
 )
@@ -117,6 +146,65 @@ class _NoKeyError(Exception):
 
 class _BadKeyError(Exception):
     """A signing key is stored and does not open. It is left as it is."""
+
+
+class _StoppedError(Exception):
+    """The receipt is refused before any section is read."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self.lines = lines
+
+
+def _not_readable(sid: str) -> dict[str, Any]:
+    return _missing(sid, _NOT_READABLE_EN, _NOT_READABLE_AR)
+
+
+def _effect_empty() -> tuple[str, str]:
+    from kazma_core.agent.effect_journal import COMPLETED_RETENTION_DAYS
+
+    days = COMPLETED_RETENTION_DAYS
+    return (
+        "not recorded. No effect receipt is stored for this turn. "
+        f"Completed receipts are kept {days} days and then removed.",
+        "غير مسجّل. لا إيصال أثر مخزّن لهذه الدورة. "
+        f"تُحفظ الإيصالات المكتملة {days} يوماً ثم تُحذف.",
+    )
+
+
+def _approval_empty() -> tuple[str, str]:
+    from kazma_core.safety.hitl_gates import DECIDED_RETENTION_DAYS
+
+    days = DECIDED_RETENTION_DAYS
+    return (
+        "not recorded. No approval is stored for this turn. "
+        f"Settled approvals are kept {days} days and then removed.",
+        "غير مسجّل. لا موافقة مخزّنة لهذه الدورة. "
+        f"تُحفظ الموافقات المحسومة {days} يوماً ثم تُحذف.",
+    )
+
+
+def _commitment_empty() -> tuple[str, str]:
+    from kazma_core.safety.commitment.store import RETENTION_CRITICAL_DAYS, RETENTION_EPHEMERAL_DAYS
+
+    short, long = RETENTION_EPHEMERAL_DAYS, RETENTION_CRITICAL_DAYS
+    return (
+        "not recorded. No commitment check is stored for this turn. "
+        f"Ephemeral checks are kept {short} days and critical ones {long} days, then removed.",
+        "غير مسجّل. لا فحص التزام مخزّن لهذه الدورة. "
+        f"تُحفظ الفحوص العابرة {short} يوماً والحرجة {long} يوماً ثم تُحذف.",
+    )
+
+
+def _ledger_zero() -> tuple[str, str]:
+    from kazma_core.observability.llm_ledger import CALL_RETENTION_DAYS
+
+    days = CALL_RETENTION_DAYS
+    return (
+        "not recorded. A count of zero is not a record: "
+        f"rows are kept {days} days and then removed.",
+        "غير مسجّل. العدد صفر ليس سجلاً: "
+        f"تُحفظ الصفوف {days} يوماً ثم تُحذف.",
+    )
 
 
 def _word(status: str, lang: str) -> str:
@@ -168,10 +256,14 @@ def _read(label: str, fn: Any) -> Any:
         return None
 
 
-def _as_data(value: Any, source: str) -> str:
-    """Mask *value*, then show it as data. Empty stays empty. A failure is not the raw text."""
+def _plain(value: Any, source: str) -> str:
+    """Mask *value* for a person. Empty stays empty. A failure is not the raw text.
+
+    *source* is the field's name, logged when the value cannot be shown.
+    The model fence is not added: this file is for a person.
+    """
     from kazma_core.diagnostic_scope import DiagnosticWriteRefused
-    from kazma_core.safety.prompt_fence import format_untrusted_block
+    from kazma_core.security.approval_args import redact_text
     from kazma_core.security.config_mask import mask_deep
 
     try:
@@ -184,12 +276,42 @@ def _as_data(value: Any, source: str) -> str:
             )
         if not str(text).strip():
             return ""
-        fenced = format_untrusted_block(str(text), source=source)
+        return redact_text(str(text))
     except DiagnosticWriteRefused:
         raise
     except _READ_FAILURES:
+        logger.warning("[receipt] %s could not be shown", source)
         return _NOT_SHOWN
-    return fenced or _NOT_SHOWN
+
+
+def _as_data(value: Any, source: str) -> str:
+    """What a section prints for *value*. See :func:`_plain`."""
+    return _plain(value, source)
+
+
+def _summary(value: Any, vault: Any) -> dict[str, Any]:
+    """A masked digest of a commitment result or its evidence. Never the text."""
+    text = _plain(value, "commitment")
+    if vault is not None and text and text != _NOT_SHOWN:
+        text = vault.mask_stored_values(text)
+    if not text or text == _NOT_SHOWN:
+        return {"shown": "summary", "chars": 0, "sha256": ""}
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return {"shown": "summary", "chars": len(text), "sha256": digest}
+
+
+def _covered(value: Any, vault: Any) -> Any:
+    """Every string the receipt prints, masked by label and by stored value."""
+    from kazma_core.security.approval_args import redact_text
+
+    if isinstance(value, str):
+        text = redact_text(value)
+        return vault.mask_stored_values(text) if vault is not None else text
+    if isinstance(value, dict):
+        return {key: _covered(item, vault) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_covered(item, vault) for item in value]
+    return value
 
 
 def _show_id(run_id: str) -> str:
@@ -201,22 +323,15 @@ def _show_id(run_id: str) -> str:
     return _NOT_RECORDED_EN
 
 
-def _file(name: str) -> bool:
-    from kazma_core.paths import data_dir
-
-    return (data_dir(create=False) / name).is_file()
+def _present(path: str) -> bool:
+    return Path(path).is_file()
 
 
 def _ops_present() -> bool:
     """Whether the memory ops database is already on disk. Does not create it."""
-    import os
+    from kazma_core.paths import memory_ops_db
 
-    from kazma_core.paths import data_dir
-
-    env = os.environ.get("KAZMA_MEMORY_OPS_DB")
-    if env:
-        return Path(env).expanduser().is_file()
-    return (data_dir(create=False) / "memory_ops.db").is_file()
+    return _present(memory_ops_db(create=False))
 
 
 def _split(run_id: str) -> tuple[str | None, str | None]:
@@ -355,15 +470,62 @@ def _journal(thread: str | None) -> tuple[list, dict[str, Any]]:
     return list(frames), _found("turn_journal", items=items)
 
 
-def _effects(thread: str | None) -> tuple[dict[str, Any], list[str]]:
+def _own_turns(thread: str | None, turn_ids: list[str]) -> list[str]:
+    """Turn ids the journal carried. The thread id is not a turn id."""
+    return [turn for turn in turn_ids if turn and turn != thread]
+
+
+def _require_visible(thread: str | None, run: Any) -> str | None:
+    """The run's space when Spaces is enforced, else None (no filter).
+
+    A thread outside the bound space refuses the whole receipt. The thread
+    record is the authority; a thread with no record is the owner's (N19).
+    """
+    from kazma_core.db.sqlite_session import NotReadableError
+    from kazma_core.runs.spaces import space_of, visible_here
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    recorded = None
+    if thread:
+        from kazma_core.spaces.threads import stored_record
+
+        try:
+            record = stored_record(thread)
+        except NotReadableError as exc:
+            raise _StoppedError([_NOT_READABLE_EN, _NOT_READABLE_AR]) from exc
+        if record is not None:
+            recorded = record.space_id
+    if recorded is None:
+        recorded = space_of(getattr(run, "space", None) if run is not None else None)
+    if not visible_here(recorded):
+        raise _StoppedError([_OTHER_SPACE_EN, _OTHER_SPACE_AR])
+    return recorded
+
+
+def _effects(
+    thread: str | None, turn_ids: list[str], space: str | None,
+) -> tuple[dict[str, Any], list[str]]:
     if not thread:
         return _missing("effects", _NO_THREAD_EN, _NO_THREAD_AR), []
-    if not _file("tool_effects.db"):
+    if not turn_ids:
+        return _missing("effects", _NO_TURN_SCOPE_EN, _NO_TURN_SCOPE_AR), []
+    from kazma_core.db.sqlite_session import NotReadableError
+    from kazma_core.paths import tool_effects_db
+
+    if not _present(tool_effects_db(create=False)):
         return _missing("effects", _NOT_RECORDED_EN, _NOT_RECORDED_AR), []
     from kazma_core.agent.effect_journal import inspect_effects
     from kazma_core.security.config_mask import mask_deep
 
-    rows = _read("effects", lambda: inspect_effects(thread))
+    try:
+        rows = _read(
+            "effects",
+            lambda: inspect_effects(thread, turn_ids=turn_ids, space=space),
+        )
+    except NotReadableError:
+        return _not_readable("effects"), []
     if not isinstance(rows, list):
         return _missing("effects", _NOT_RECORDED_EN, _NOT_RECORDED_AR), []
     items = []
@@ -378,7 +540,8 @@ def _effects(thread: str | None) -> tuple[dict[str, Any], list[str]]:
         if state != "completed" or item.get("result_uncertain"):
             open_ids.append(str(item.get("effect_id") or _NOT_RECORDED_EN))
     if not items:
-        return _found("effects", detail_en=_NO_EFFECTS_EN, detail_ar=_NO_EFFECTS_AR), []
+        en, ar = _effect_empty()
+        return _missing("effects", en, ar), []
     return _found("effects", items=items), open_ids
 
 
@@ -408,13 +571,24 @@ def _approval(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _approvals(thread: str | None) -> dict[str, Any]:
+def _approvals(thread: str | None, turn_ids: list[str], space: str | None) -> dict[str, Any]:
     if not thread:
         return _missing("approvals", _NO_THREAD_EN, _NO_THREAD_AR)
+    if not turn_ids:
+        return _missing("approvals", _NO_TURN_SCOPE_EN, _NO_TURN_SCOPE_AR)
+    from kazma_core.db.sqlite_session import NotReadableError
     from kazma_core.safety.hitl_gates import thread_decisions
     from kazma_core.security.config_mask import mask_deep
 
-    rows = _read("approvals", lambda: thread_decisions(thread))
+    try:
+        rows = _read(
+            "approvals",
+            lambda: thread_decisions(thread, turn_ids=turn_ids, space=space),
+        )
+    except NotReadableError:
+        return _not_readable("approvals")
+    if rows is None:
+        return _missing("approvals", _NOT_RECORDED_EN, _NOT_RECORDED_AR)
     if not isinstance(rows, list):
         return _missing("approvals", _NOT_RECORDED_EN, _NOT_RECORDED_AR)
     items = []
@@ -424,11 +598,12 @@ def _approvals(thread: str | None) -> dict[str, Any]:
             if isinstance(masked, dict):
                 items.append(_approval(masked))
     if not items:
-        return _found("approvals", detail_en=_NO_APPROVALS_EN, detail_ar=_NO_APPROVALS_AR)
+        en, ar = _approval_empty()
+        return _missing("approvals", en, ar)
     return _found("approvals", items=items)
 
 
-def _commitment_item(row: Any) -> dict[str, Any]:
+def _commitment_item(row: Any, vault: Any) -> dict[str, Any]:
     return {
         "commitment_id": str(getattr(row, "commitment_id", "") or ""),
         "status": str(getattr(row, "status", "") or ""),
@@ -438,25 +613,39 @@ def _commitment_item(row: Any) -> dict[str, Any]:
         "args_digest": str(getattr(row, "args_digest", "") or ""),
         "goal_text": _as_data(getattr(row, "goal_text", ""), "commitment"),
         "slots": _as_data(getattr(row, "slots", {}), "commitment"),
-        "evidence": _as_data(getattr(row, "evidence", {}), "commitment"),
+        "evidence": _summary(getattr(row, "evidence", {}), vault),
         "conflicts": _as_data(getattr(row, "conflicts", []), "commitment"),
-        "result": _as_data(getattr(row, "result", {}), "commitment"),
+        "result": _summary(getattr(row, "result", {}), vault),
     }
 
 
-def _commitments(thread: str | None, tenant: str | None) -> dict[str, Any]:
+def _commitments(
+    thread: str | None, turn_ids: list[str], space: str | None, vault: Any,
+) -> dict[str, Any]:
     if not thread:
         return _missing("commitment", _NO_THREAD_EN, _NO_THREAD_AR)
+    if not turn_ids:
+        return _missing("commitment", _NO_TURN_SCOPE_EN, _NO_TURN_SCOPE_AR)
     if not _ops_present():
         return _missing("commitment", _NOT_RECORDED_EN, _NOT_RECORDED_AR)
+    from kazma_core.db.sqlite_session import NotReadableError
     from kazma_core.safety.commitment.store import list_by_thread
 
-    rows = _read("commitment", lambda: list_by_thread(thread, tenant_id=tenant))
+    try:
+        rows = _read(
+            "commitment",
+            lambda: list_by_thread(
+                thread, tenant_id=space, turn_ids=turn_ids, read_only=True,
+            ),
+        )
+    except NotReadableError:
+        return _not_readable("commitment")
     if not isinstance(rows, list):
         return _missing("commitment", _NOT_RECORDED_EN, _NOT_RECORDED_AR)
-    items = [_commitment_item(row) for row in rows]
+    items = [_commitment_item(row, vault) for row in rows]
     if not items:
-        return _found("commitment", detail_en=_NO_COMMITMENTS_EN, detail_ar=_NO_COMMITMENTS_AR)
+        en, ar = _commitment_empty()
+        return _missing("commitment", en, ar)
     return _found("commitment", items=items)
 
 
@@ -468,38 +657,61 @@ def _no_turn() -> dict[str, Any]:
     return {"status": "not_recorded", "en": _TURN_LEDGER_EN, "ar": _TURN_LEDGER_AR}
 
 
-def _llm(thread: str | None, turn_ids: list[str]) -> dict[str, Any]:
+def _llm(
+    thread: str | None, turn_ids: list[str], space: str | None, *, ledger_on: bool,
+) -> dict[str, Any]:
     if not thread:
         section = _missing("llm", _NO_THREAD_EN, _NO_THREAD_AR)
         section["turn"] = _no_turn()
         return section
-    if not _file("llm_calls.db"):
-        section = _missing("llm", _LEDGER_EN, _LEDGER_AR)
+    if not ledger_on:
+        section = _missing("llm", _LEDGER_OFF_EN, _LEDGER_OFF_AR)
         section["turn"] = _no_turn()
         return section
-    from kazma_core.observability.llm_ledger import thread_usage, turn_usage
+    from kazma_core.db.sqlite_session import NotReadableError
+    from kazma_core.paths import llm_calls_db
 
-    usage = _read("llm", lambda: thread_usage(thread))
+    if not _present(llm_calls_db(create=False)):
+        section = _missing("llm", _LEDGER_MISSING_EN, _LEDGER_MISSING_AR)
+        section["turn"] = _no_turn()
+        return section
+    from kazma_core.observability.llm_ledger import recorded_usage
+
+    try:
+        usage = _read("llm", lambda: recorded_usage(thread_id=thread, space=space))
+    except NotReadableError:
+        section = _not_readable("llm")
+        section["turn"] = _no_turn()
+        return section
     if not isinstance(usage, dict) or "calls" not in usage:
-        section = _missing("llm", _LEDGER_EN, _LEDGER_AR)
+        section = _missing("llm", _LEDGER_MISSING_EN, _LEDGER_MISSING_AR)
+        section["turn"] = _no_turn()
+        return section
+    if int(usage.get("calls") or 0) == 0:
+        en, ar = _ledger_zero()
+        section = _missing("llm", en, ar)
         section["turn"] = _no_turn()
         return section
     section = _found(
         "llm", detail_en=_CHAT_LEDGER_EN, detail_ar=_CHAT_LEDGER_AR,
         items=[{"ledger": "chat", **_usage(usage)}],
     )
-    own = [turn for turn in turn_ids if turn and turn != thread]
-    if not own:
+    if not turn_ids:
         section["turn"] = _no_turn()
         return section
-    turns = []
-    for turn_id in own:
-        one = _read("llm_turn", lambda turn_id=turn_id: turn_usage(turn_id))
-        if not isinstance(one, dict) or "calls" not in one:
-            section["turn"] = {"status": "not_recorded", "en": _NOT_RECORDED_EN, "ar": _NOT_RECORDED_AR}
-            return section
-        turns.append({"turn_id": turn_id, **_usage(one)})
-    section["turn"] = {"status": "recorded", "items": turns}
+    try:
+        one = _read(
+            "llm_turn",
+            lambda: recorded_usage(thread_id=thread, turn_ids=turn_ids, space=space),
+        )
+    except NotReadableError:
+        section["turn"] = {"status": "not_recorded", "en": _NOT_READABLE_EN, "ar": _NOT_READABLE_AR}
+        return section
+    if not isinstance(one, dict) or int(one.get("calls") or 0) == 0:
+        en, ar = _ledger_zero()
+        section["turn"] = {"status": "not_recorded", "en": en, "ar": ar}
+        return section
+    section["turn"] = {"status": "recorded", "items": [{"turn_id": turn_ids[0], **_usage(one)}]}
     return section
 
 
@@ -525,17 +737,24 @@ def _memory_item(key: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _memories(keys: list[str]) -> dict[str, Any]:
+def _memories(keys: list[str], space: str | None) -> dict[str, Any]:
     if not keys:
         return _missing("memories", _MEMORY_KEY_EN, _MEMORY_KEY_AR)
     if not _ops_present():
         return _missing("memories", _NOT_RECORDED_EN, _NOT_RECORDED_AR)
+    from kazma_core.db.sqlite_session import NotReadableError
     from kazma_core.memory.recall_records import shown_record
 
     items = []
     missing = False
     for key in keys:
-        row = _read("memories", lambda key=key: shown_record(key))
+        try:
+            row = _read(
+                "memories",
+                lambda key=key: shown_record(key, tenant_id=space, read_only=True),
+            )
+        except NotReadableError:
+            return _not_readable("memories")
         if not isinstance(row, dict):
             missing = True
             items.append({
@@ -573,19 +792,25 @@ def _unverified(
     return _found("unverified", items=items)
 
 
-def _body(run_id: str) -> dict[str, Any]:
+def _body(run_id: str, *, ledger_on: bool, vault: Any) -> dict[str, Any]:
     from kazma_core.security.config_mask import mask_deep
 
+    kind, native = _split(run_id)
+    if kind == "chat_turn" and native:
+        _require_visible(native, None)
     kind, native, run, supervision = _supervision(run_id)
     thread = _thread_of(kind, native, run)
-    tenant = getattr(run, "space", "") or None
+    if not (kind == "chat_turn" and native):
+        _require_visible(thread, run)
+    space = _require_visible(thread, run)
     frames, journal = _journal(thread)
-    keys, turn_ids = _frame_ids(frames)
-    effects, open_ids = _effects(thread)
-    approvals = _approvals(thread)
-    commitment = _commitments(thread, tenant if isinstance(tenant, str) else None)
-    llm = _llm(thread, turn_ids)
-    memories = _memories(keys)
+    keys, found_turns = _frame_ids(frames)
+    turn_ids = _own_turns(thread, found_turns)
+    effects, open_ids = _effects(thread, turn_ids, space)
+    approvals = _approvals(thread, turn_ids, space)
+    commitment = _commitments(thread, turn_ids, space, vault)
+    llm = _llm(thread, turn_ids, space, ledger_on=ledger_on)
+    memories = _memories(keys, space)
     sections = [supervision, journal, effects, approvals, commitment, llm, memories]
     kind_field = _kind_field(kind)
     sections.append(_unverified(sections, open_ids, llm, kind_field))
@@ -615,7 +840,12 @@ def _kind_line(kind: Any) -> str:
 
 
 def _text(body: dict[str, Any]) -> str:
-    lines = [_HEADER_EN, _HEADER_AR, "run: " + str(body.get("run_id", "")), _kind_line(body.get("kind"))]
+    lines = [_HEADER_EN, _HEADER_AR]
+    if body.get("issued_at"):
+        lines.append("issued_at: " + str(body["issued_at"]))
+    if body.get("key_id"):
+        lines.append("key_id: " + str(body["key_id"]))
+    lines.extend(["run: " + str(body.get("run_id", "")), _kind_line(body.get("kind"))])
     for section in body.get("sections") or []:
         if not isinstance(section, dict):
             continue
@@ -644,10 +874,40 @@ def _esc(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _display_time(value: Any) -> Any:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    if value <= 1_000_000_000:
+        return value
+    try:
+        return datetime.fromtimestamp(float(value), UTC).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return value
+
+
+def _display_item(item: Any) -> Any:
+    """HTML only: known timestamps as ISO. The signed JSON keeps the numbers."""
+    if not isinstance(item, dict):
+        return item
+    shown: dict[str, Any] = {}
+    for key, value in item.items():
+        if key in _TIME_KEYS:
+            shown[key] = _display_time(value)
+        elif isinstance(value, dict):
+            shown[key] = _display_item(value)
+        else:
+            shown[key] = value
+    return shown
+
+
 def _html_lang(body: dict[str, Any], lang: str) -> str:
     title_key = "title_en" if lang == "en" else "title_ar"
     detail_key = "detail_en" if lang == "en" else "detail_ar"
     parts = ["<h1>" + _esc(_HEADER_EN if lang == "en" else _HEADER_AR) + "</h1>"]
+    if body.get("issued_at"):
+        parts.append('<p dir="ltr">issued_at: ' + _esc(body.get("issued_at", "")) + "</p>")
+    if body.get("key_id"):
+        parts.append('<p dir="ltr">key_id: ' + _esc(body.get("key_id", "")) + "</p>")
     parts.append("<p>" + _esc(body.get("run_id", "")) + "</p>")
     kind = body.get("kind") if isinstance(body.get("kind"), dict) else {}
     if kind.get("status") == "recorded":
@@ -666,9 +926,9 @@ def _html_lang(body: dict[str, Any], lang: str) -> str:
         if isinstance(turn, dict):
             parts.append("<p>" + _esc(_word(str(turn.get("status", "")), lang)) + "</p>")
             for item in turn.get("items") or []:
-                parts.append("<pre>" + _esc(_item_line(item)) + "</pre>")
+                parts.append('<pre dir="ltr">' + _esc(_item_line(_display_item(item))) + "</pre>")
         for item in section.get("items") or []:
-            parts.append("<pre>" + _esc(_item_line(item)) + "</pre>")
+            parts.append('<pre dir="ltr">' + _esc(_item_line(_display_item(item))) + "</pre>")
     proves = body.get("proves") if isinstance(body.get("proves"), dict) else {}
     denies = body.get("does_not_prove") if isinstance(body.get("does_not_prove"), dict) else {}
     parts.append("<h2>" + _esc("What the signature proves" if lang == "en" else "ماذا يثبت التوقيع") + "</h2>")
@@ -680,7 +940,7 @@ def _html_lang(body: dict[str, Any], lang: str) -> str:
 def _html(body: dict[str, Any]) -> str:
     style = "body{font-family:sans-serif;margin:1.5rem}section{margin-bottom:2rem}pre{white-space:pre-wrap}"
     return (
-        "<!DOCTYPE html>\n<html>\n<head>\n"
+        '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta http-equiv="Content-Security-Policy" content="' + _esc(_CSP) + '">\n'
         "<title>" + _esc(_HEADER_EN) + "</title>\n"
@@ -795,31 +1055,81 @@ def _same_key(stated: str, ours: str) -> bool:
     return same_secret(stated, ours)
 
 
-def _verify_bytes(data: bytes) -> tuple[int, list[str]]:
+def _load_public(text: str) -> Ed25519PublicKey:
+    raw = base64.b64decode("".join(text.split()), validate=True)
+    if len(raw) != 32:
+        raise ValueError("not an Ed25519 public key")
+    return Ed25519PublicKey.from_public_bytes(raw)
+
+
+def _public_argument(spec: str) -> Ed25519PublicKey:
+    """A public key from a file, or from the text itself when it is not a file."""
+    try:
+        path = Path(spec)
+        if path.is_file():
+            spec = path.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return _load_public(spec)
+
+
+def _marked(payload: bytes, label: str) -> str:
+    """``label``'s value in the signed payload: a JSON member, or a line of text or HTML."""
+    text = payload.decode("utf-8")
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return ""
+        found = data.get(label) if isinstance(data, dict) else None
+        return found if isinstance(found, str) else ""
+    prefix = label + ": "
+    for line in text.splitlines():
+        if prefix in line:
+            return line.split(prefix, 1)[1].split("<", 1)[0].strip()
+    return ""
+
+
+def _verify_bytes(data: bytes, public: Ed25519PublicKey | None = None) -> tuple[int, list[str]]:
+    """Check *data*. *public* is the only key used, and the vault is not opened.
+
+    Without *public*, this install's key is used, and the answer says so.
+    The trailer is not a trust root: with *public* it is ignored.
+    """
     parsed = _split_file(data)
     if parsed is None:
         return 1, [_NOT_FILE_EN, _NOT_FILE_AR]
     signed, stated, sig_b64 = parsed
-    vault = _vault()
-    if vault is None:
-        return 1, [_NO_VAULT_EN, _NO_VAULT_AR]
-    try:
-        private = _installed_private(vault)
-    except _NoKeyError:
-        return 1, [_NO_SIGN_EN, _NO_SIGN_AR]
-    except _BadKeyError:
-        return 1, [_BAD_KEY_EN, _BAD_KEY_AR]
-    except (ValueError, UnicodeError, TypeError):
-        return 1, [_BAD_KEY_EN, _BAD_KEY_AR]
-    ours = _public_b64(private.public_key())
-    if not _same_key(stated, ours):
-        return 1, [_MISMATCH_EN, _MISMATCH_AR]
+    own = public is None
+    if public is None:
+        vault = _vault()
+        if vault is None:
+            return 1, [_NO_VAULT_CHECK_EN, _NO_VAULT_CHECK_AR]
+        try:
+            private = _installed_private(vault)
+        except _NoKeyError:
+            return 1, [_NO_PUB_EN, _NO_PUB_AR]
+        except _BadKeyError:
+            return 1, [_BAD_KEY_EN, _BAD_KEY_AR]
+        except (ValueError, UnicodeError, TypeError):
+            return 1, [_BAD_KEY_EN, _BAD_KEY_AR]
+        public = private.public_key()
+        if not _same_key(stated, _public_b64(public)):
+            return 1, [_MISMATCH_EN, _MISMATCH_AR]
     try:
         sig = base64.b64decode(sig_b64, validate=True)
-        private.public_key().verify(sig, signed)
+        public.verify(sig, signed)
     except (binascii.Error, ValueError, InvalidSignature):
         return 1, [_CHANGED_EN, _CHANGED_AR]
-    return 0, [_PROVES_EN, _PROVES_AR, _DOES_NOT_EN, _DOES_NOT_AR]
+    if not _same_key(_marked(signed, "key_id"), _public_b64(public)):
+        return 1, [_KEY_BODY_EN, _KEY_BODY_AR]
+    if not _marked(signed, "issued_at"):
+        return 1, [_NOT_FILE_EN, _NOT_FILE_AR]
+    lines = [_PROVES_EN, _PROVES_AR, _DOES_NOT_EN, _DOES_NOT_AR]
+    if own:
+        lines = [_CHECKED_OWN_EN, _CHECKED_OWN_AR, *lines]
+    return 0, lines
 
 
 def _say(lines: list[str], *, err: bool = False) -> None:
@@ -832,22 +1142,61 @@ def _write_out(path: str, blob: bytes) -> int:
     from kazma_core.diagnostic_scope import DiagnosticWriteRefused
     from kazma_core.errors import described_error
     from kazma_core.security.file_access import write_private
+    from kazma_core.store_registry import is_kazma_store
 
+    if is_kazma_store(path):
+        _say([_STORE_PATH_EN, _STORE_PATH_AR], err=True)
+        return 1
     try:
         write_private(Path(path), blob)
     except DiagnosticWriteRefused:
         raise
     except OSError as exc:
         info = described_error("The receipt could not be written", exc)
-        _say([info.text, "تعذّر كتابة الإيصال."], err=True)
+        _say([str(info), "تعذّر كتابة الإيصال."], err=True)
         return 1
     _say([_WROTE_EN, _WROTE_AR])
     return 0
 
 
+def _ledger_on() -> bool:
+    """The model-ledger switch. Read outside the diagnostic: inside it, a
+    refused settings write is swallowed and the switch looks on."""
+    from kazma_core.agent.nonstop import get_nonstop_config
+
+    return bool(get_nonstop_config().ledger_enabled)
+
+
+def _caller_scope() -> Any:
+    """Prime the Spaces switch the way the rest of Kazma does.
+
+    When it is on and this command bound nothing, bind the install owner for
+    this command only. A scope already bound (a test, a later caller) is kept.
+    """
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import (
+        OWNER_ACCOUNT_ID,
+        OWNER_SPACE_ID,
+        bind_scope,
+        current_scope,
+        spaces_enforced,
+    )
+
+    identity.prime_enforcement()
+    if spaces_enforced() and current_scope() is None:
+        return bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID)
+    return nullcontext()
+
+
 def _emit(args: argparse.Namespace) -> int:
     from kazma_core.diagnostic_scope import read_only_diagnostic
+    from kazma_core.runs.spaces import NO_SPACE_REFUSAL, runs_refusal
 
+    reason = runs_refusal("A receipt is shown for one install.")
+    if reason:
+        arabic = _NO_SPACE_AR if reason == NO_SPACE_REFUSAL else _MULTI_AR
+        _say([reason, arabic], err=True)
+        return 1
     vault = _vault()
     if vault is None:
         _say([_NO_VAULT_EN, _NO_VAULT_AR])
@@ -863,8 +1212,16 @@ def _emit(args: argparse.Namespace) -> int:
     except (ValueError, UnicodeError, TypeError):
         _say([_BAD_KEY_EN, _BAD_KEY_AR])
         return 1
-    with read_only_diagnostic("kazma receipt"):
-        body = _body(args.run_id)
+    ledger_on = _ledger_on()
+    try:
+        with read_only_diagnostic("kazma receipt"):
+            body = _body(args.run_id, ledger_on=ledger_on, vault=vault)
+            body = _covered(body, vault)
+    except _StoppedError as stopped:
+        _say(stopped.lines, err=True)
+        return 1
+    body["issued_at"] = datetime.now(UTC).isoformat()
+    body["key_id"] = _public_b64(private.public_key())
     kind = "json" if args.json else "html" if args.html else "text"
     try:
         blob = _sign(_render(body, kind).encode("utf-8"), private)
@@ -872,7 +1229,7 @@ def _emit(args: argparse.Namespace) -> int:
         from kazma_core.errors import described_error
 
         info = described_error("The receipt could not be signed", exc)
-        _say([info.text, "تعذّر توقيع الإيصال."], err=True)
+        _say([str(info), "تعذّر توقيع الإيصال."], err=True)
         return 1
     if args.out:
         return _write_out(args.out, blob)
@@ -923,11 +1280,16 @@ def run(argv: list[str] | None = None) -> int:
         return _print_public_key()
     if not args.run_id:
         parser.error("a run id is required")
-    return _emit(args)
+    with _caller_scope():
+        return _emit(args)
 
 
 def run_verify(argv: list[str] | None = None) -> int:
-    """``kazma verify-receipt``. Exit 0 only when this install's key signed the file."""
+    """``kazma verify-receipt``. Exit 0 only when the given key signed the file.
+
+    ``--public-key`` checks with that key alone and does not open the vault.
+    Without it, this install's key is used, and the answer says so.
+    """
     from kazma_core.errors import described_error
 
     from kazma_cli.main import _print_utf8
@@ -935,16 +1297,27 @@ def run_verify(argv: list[str] | None = None) -> int:
     _print_utf8()
     parser = argparse.ArgumentParser(
         prog="kazma verify-receipt",
-        description="Check a receipt with this install's key. Does not read the run again.",
+        description="Check a receipt. --public-key uses only that key and does not open the vault.",
     )
     parser.add_argument("file")
+    parser.add_argument(
+        "--public-key", metavar="FILE_OR_TEXT",
+        help="verify with this Ed25519 public key (a file, or the key text) and do not open the vault",
+    )
     args = parser.parse_args(argv)
     try:
         data = Path(args.file).read_bytes()
     except OSError as exc:
         info = described_error("The receipt could not be read", exc)
-        _say([info.text, "تعذّر قراءة الإيصال."], err=True)
+        _say([str(info), "تعذّر قراءة الإيصال."], err=True)
         return 1
-    code, lines = _verify_bytes(data)
+    public = None
+    if args.public_key:
+        try:
+            public = _public_argument(args.public_key)
+        except (OSError, ValueError, binascii.Error, TypeError):
+            _say([_BAD_PUB_EN, _BAD_PUB_AR], err=True)
+            return 1
+    code, lines = _verify_bytes(data, public)
     _say(lines)
     return code

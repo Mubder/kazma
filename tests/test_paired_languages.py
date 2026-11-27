@@ -485,6 +485,24 @@ def _names_person(case: tuple[str, str]) -> bool:
     return _Said(case[0]).names(case[1], person=True) is not None
 
 
+def _credential_masked(text: str) -> bool:
+    """A credential label hides the value in either language. True when it did."""
+    from kazma_core.errors import _REDACT, redact_secrets
+
+    secret = "arpw-AR99" if "arpw-AR99" in text else "envplain-EE11"
+    for masked in (redact_secrets(text), _REDACT.sub("<redacted>", text)):
+        if secret in masked or "<redacted>" not in masked:
+            return False
+    return True
+
+
+def _plain_sentence_unchanged(text: str) -> bool:
+    """A sentence with no credential label is left as it was."""
+    from kazma_core.errors import _REDACT, redact_secrets
+
+    return redact_secrets(text) == text and _REDACT.sub("<redacted>", text) == text
+
+
 PAIRS: list[Pair] = [
     Pair("lesson_correction", (M + "skills/lesson_signal.py",),
          "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
@@ -815,6 +833,16 @@ PAIRS: list[Pair] = [
          ("Room 7 is booked now.", "room_7"), ("غرفة 7 محجوزة", "غرفة_7"), _names_subject, True),
     Pair("held_another_digit", (M + "memory/held_facts.py",),
          ("Room 7 is booked now.", "room_1"), ("غرفة 7 محجوزة", "غرفة_1"), _names_subject, False),
+    Pair("credential_label_password", (M + "errors.py",),
+         "password: envplain-EE11", "كلمة السر: arpw-AR99", _credential_masked, True),
+    Pair("credential_label_api_key", (M + "errors.py",),
+         "OPENAI_API_KEY=envplain-EE11", "كلمة المرور: arpw-AR99", _credential_masked, True),
+    Pair("credential_label_secret", (M + "errors.py",),
+         "secret: envplain-EE11", "الرمز السري: arpw-AR99", _credential_masked, True),
+    Pair("credential_label_secret_key", (M + "errors.py",),
+         "api_key: envplain-EE11", "مفتاح سري: arpw-AR99", _credential_masked, True),
+    Pair("credential_label_plain_sentence", (M + "errors.py",),
+         "The room is ready for the meeting.", "الغرفة جاهزة للاجتماع.", _plain_sentence_unchanged, True),
 ]
 
 

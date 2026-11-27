@@ -400,8 +400,18 @@ def list_pending_soul(tenant_id: str | None = None) -> list[Commitment]:
     return [_row_to_commitment(r) for r in rows]
 
 
-def list_by_thread(thread_id: str, *, status: str | None = None,
-                   tenant_id: str | None = None) -> list[Commitment]:
+def list_by_thread(
+    thread_id: str, *, status: str | None = None, tenant_id: str | None = None,
+    turn_ids: list[str] | None = None, read_only: bool = False,
+) -> list[Commitment]:
+    """The thread's commitments.
+
+    *read_only* opens the file immutable: no database is created and no
+    schema step runs. *tenant_id* None then does not filter by space. The
+    writing form still resolves an empty tenant to the space bound now.
+    """
+    if read_only:
+        return _list_recorded(thread_id, tenant_id=tenant_id, turn_ids=turn_ids)
     tenant_id = _space(tenant_id)
     ensure_commitment_schema()
     with _connect() as conn:
@@ -418,6 +428,59 @@ def list_by_thread(thread_id: str, *, status: str | None = None,
                 (thread_id, tenant_id),
             ).fetchall()
     return [_row_to_commitment(r) for r in rows]
+
+
+def _list_recorded(
+    thread_id: str, *, tenant_id: str | None = None, turn_ids: list[str] | None = None,
+) -> list[Commitment]:
+    """The thread's commitments, read without creating the database or its schema.
+
+    An absent file is an empty list. A file that is there but has no
+    ``commitments`` table raises ``NotReadableError``: this read does not migrate.
+    *tenant_id* None does not filter by space. The owner's id also matches a
+    row stored with an empty tenant (work from before Spaces, N19).
+    """
+    from pathlib import Path
+
+    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.paths import memory_ops_db
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    path = Path(memory_ops_db(create=False))
+    if not path.is_file():
+        return []
+    conn = connect_immutable(path)
+    try:
+        conn.row_factory = sqlite3.Row
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(commitments)")}
+        needed = {"commitment_id", "thread_id", "turn_id", "tenant_id", "goal_text", "slots_json",
+                  "evidence_json", "conflicts_json", "result_json"}
+        if not needed <= columns:
+            raise NotReadableError("commitments")
+        where = "thread_id = ?"
+        args: list[Any] = [thread_id]
+        if turn_ids is not None:
+            if not turn_ids:
+                return []
+            where += " AND turn_id IN (" + ", ".join("?" for _ in turn_ids) + ")"
+            args.extend(turn_ids)
+        if tenant_id is not None:
+            if tenant_id == OWNER_SPACE_ID:
+                where += " AND (tenant_id = ? OR tenant_id = '' OR tenant_id IS NULL)"
+            else:
+                where += " AND tenant_id = ?"
+            args.append(tenant_id)
+        rows = conn.execute(
+            "SELECT * FROM commitments WHERE " + where + " ORDER BY created_at DESC",
+            args,
+        ).fetchall()
+        return [_row_to_commitment(r) for r in rows]
+    except NotReadableError:
+        raise
+    except sqlite3.Error as exc:
+        raise NotReadableError("commitments") from exc
+    finally:
+        conn.close()
 
 
 # ── TTL / GC (plan §3.9 — binding) ─────────────────────────────────────────

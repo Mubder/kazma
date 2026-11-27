@@ -80,6 +80,14 @@ class _EffectJournal:
                 raise sqlite3.OperationalError("Effect receipts require WAL support")
             conn.execute("PRAGMA synchronous=FULL")
             conn.executescript(_SCHEMA)
+            from kazma_core.db.sqlite_columns import add_missing_columns
+
+            # The turn and the space are stamped on the write. A read never
+            # adds them: a file that lacks them is not readable as one turn.
+            add_missing_columns(conn, "tool_effects", (
+                ("turn_id", "TEXT NOT NULL DEFAULT ''"),
+                ("space", "TEXT NOT NULL DEFAULT ''"),
+            ))
             ready = True
             return conn
         finally:
@@ -108,14 +116,17 @@ class _EffectJournal:
                     "DELETE FROM tool_effects WHERE state = 'completed' AND thread_id = ?", (thread_id,))
                 return int(cur.rowcount or 0)
 
-    def begin(self, effect_id: str, request_hash: str, thread_id: str, tool: str) -> dict[str, Any] | None:
+    def begin(
+        self, effect_id: str, request_hash: str, thread_id: str, tool: str,
+        *, turn_id: str = "", space: str = "",
+    ) -> dict[str, Any] | None:
         with closing(self._connect()) as conn:
             with conn:
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO tool_effects "
-                    "(effect_id, request_hash, thread_id, tool, state, started_at) "
-                    "VALUES (?, ?, ?, ?, 'started', ?)",
-                    (effect_id, request_hash, thread_id, tool, time.time()),
+                    "(effect_id, request_hash, thread_id, tool, state, started_at, turn_id, space) "
+                    "VALUES (?, ?, ?, ?, 'started', ?, ?, ?)",
+                    (effect_id, request_hash, thread_id, tool, time.time(), turn_id or "", space or ""),
                 )
                 if cur.rowcount == 1:
                     return None
@@ -151,20 +162,59 @@ class _EffectJournal:
                         "The effect result could not be committed; verify its target before retrying."
                     )
 
-    def inspect(self, thread_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        """Read receipt metadata without exposing results or changing state."""
+    def inspect(
+        self, thread_id: str, *, limit: int = 200,
+        turn_ids: list[str] | None = None, space: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read receipt metadata without exposing results or changing state.
+
+        ``immutable=1``: no ``-wal`` or ``-shm``, and no schema step. *turn_ids*
+        or *space* on a file that has no such column raises
+        :class:`~kazma_core.db.sqlite_session.NotReadableError`. With neither, an
+        older file is read as it stands.
+        """
         if not self.path.exists():
             return []
-        uri = self.path.resolve().as_uri() + "?mode=ro"
-        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+        from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+        from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+        conn = connect_immutable(self.path)
+        try:
             conn.row_factory = sqlite3.Row
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(tool_effects)")}
+            if "effect_id" not in columns:
+                raise NotReadableError("tool_effects")
+            where = "thread_id = ?"
+            args: list[Any] = [thread_id]
+            if turn_ids is not None:
+                if "turn_id" not in columns:
+                    raise NotReadableError("tool_effects")
+                if not turn_ids:
+                    return []
+                where += " AND turn_id IN (" + ", ".join("?" for _ in turn_ids) + ")"
+                args.extend(turn_ids)
+            if space is not None:
+                if "space" not in columns:
+                    raise NotReadableError("tool_effects")
+                if space == OWNER_SPACE_ID:
+                    where += " AND (space = ? OR space = '' OR space IS NULL)"
+                else:
+                    where += " AND space = ?"
+                args.append(space)
+            args.append(min(1000, max(1, limit)))
             rows = conn.execute(
                 "SELECT effect_id, thread_id, tool, state, started_at, completed_at, "
                 "json_extract(result_json, '$.effect_uncertain') AS result_uncertain "
-                "FROM tool_effects WHERE thread_id = ? ORDER BY started_at DESC LIMIT ?",
-                (thread_id, min(1000, max(1, limit))),
+                "FROM tool_effects WHERE " + where + " ORDER BY started_at DESC LIMIT ?",
+                args,
             ).fetchall()
             return [dict(row) for row in rows]
+        except NotReadableError:
+            raise
+        except sqlite3.Error as exc:
+            raise NotReadableError("tool_effects") from exc
+        finally:
+            conn.close()
 
 
 async def execute_operation(
@@ -193,7 +243,6 @@ async def execute_effect(
     executor: Any, state: dict[str, Any], call: dict[str, Any], arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """Dispatch reads normally; fence checkpoint replays of mutating tools."""
-    from kazma_core.paths import data_dir
     from kazma_core.safety.side_effects import is_read_only
 
     name = str(call.get("name") or "")
@@ -204,7 +253,10 @@ async def execute_effect(
     if not identity:
         return await executor.execute(name, arguments)
     try:
-        journal = _EffectJournal((await asyncio.to_thread(data_dir)) / "tool_effects.db")
+        from kazma_core.observability.correlation import current_turn_id
+        from kazma_core.paths import tool_effects_db
+
+        journal = _EffectJournal(await asyncio.to_thread(tool_effects_db))
         from kazma_core.workspace.binding import resolve_active_root
 
         root = await asyncio.to_thread(resolve_active_root)
@@ -212,8 +264,13 @@ async def execute_effect(
             {"arguments": arguments, "workspace": str(root)},
             sort_keys=True, ensure_ascii=False, allow_nan=False,
         ).encode()).hexdigest()
-        cached = await asyncio.to_thread(journal.begin, identity, request_hash,
-                                         str(state.get("thread_id") or ""), name)
+        # The turn id is a ContextVar: read it here, not in the worker thread.
+        turn_id = current_turn_id()
+        cached = await asyncio.to_thread(
+            journal.begin, identity, request_hash,
+            str(state.get("thread_id") or ""), name,
+            turn_id=turn_id, space=space_of_state(state),
+        )
     except EffectUncertain:
         raise
     except (sqlite3.Error, OSError, TypeError, ValueError, OverflowError) as exc:
@@ -260,9 +317,11 @@ COMPLETED_RETENTION_DAYS = 90
 
 def prune_completed_receipts(*, days: int = COMPLETED_RETENTION_DAYS) -> int:
     """The maintenance sweep's prune of the install's receipts."""
-    from kazma_core.paths import data_dir
+    from pathlib import Path
 
-    path = data_dir() / "tool_effects.db"
+    from kazma_core.paths import tool_effects_db
+
+    path = Path(tool_effects_db(create=False))
     if not path.exists():
         return 0
     return _EffectJournal(path).prune_completed(days=days)
@@ -271,20 +330,27 @@ def prune_completed_receipts(*, days: int = COMPLETED_RETENTION_DAYS) -> int:
 def forget_thread_receipts(thread_id: str) -> int:
     """Remove the completed receipts of a chat that ended (its thread never
     runs again). Blocking."""
-    from kazma_core.paths import data_dir
+    from kazma_core.paths import tool_effects_db
 
-    return _EffectJournal(data_dir() / "tool_effects.db").forget_thread(thread_id)
+    return _EffectJournal(tool_effects_db(create=False)).forget_thread(thread_id)
 
 
-def inspect_effects(thread_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+def inspect_effects(
+    thread_id: str, *, limit: int = 200,
+    turn_ids: list[str] | None = None, space: str | None = None,
+) -> list[dict[str, Any]]:
     """Receipt metadata for one thread: no tool results, and no change of state.
 
     The same read :meth:`_EffectJournal.inspect` does. An absent journal file
     is an empty list (the file is created by the first effect, not by a read).
+    *turn_ids* and *space* narrow that read; a file that cannot be narrowed
+    without a migration raises ``NotReadableError``.
     """
-    from kazma_core.paths import data_dir
+    from kazma_core.paths import tool_effects_db
 
-    return _EffectJournal(data_dir() / "tool_effects.db").inspect(thread_id, limit=limit)
+    return _EffectJournal(tool_effects_db(create=False)).inspect(
+        thread_id, limit=limit, turn_ids=turn_ids, space=space,
+    )
 
 
 def main() -> int:

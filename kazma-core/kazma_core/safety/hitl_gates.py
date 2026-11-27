@@ -225,9 +225,9 @@ _write_lock = threading.Lock()
 def _db_path() -> str:
     if _db_path_override:
         return _db_path_override
-    from kazma_core.paths import data_dir
+    from kazma_core.paths import hitl_gates_db
 
-    return str(data_dir() / "hitl_gates.db")
+    return hitl_gates_db()
 
 
 def set_db_path_for_tests(path: str | None) -> None:
@@ -945,46 +945,74 @@ def display_gates(thread_id: str) -> list[GateRow]:
         conn.close()
 
 
-def thread_decisions(thread_id: str) -> list[dict[str, Any]] | None:
+def thread_decisions(
+    thread_id: str, *, turn_ids: list[str] | None = None, space: str | None = None,
+) -> list[dict[str, Any]] | None:
     """Every approval row for one thread, oldest first, including settled ones.
 
     ``live_gates`` and ``display_gates`` leave settled decisions out. The
     decision and the actor are who decided (§30). ``None`` when the registry
-    file is not there or cannot be read: a missing file is not an empty
-    history. Does not create the database. Arguments, payloads and who asked
-    are not returned; the message is the row's own text, already redacted
-    when it was stored.
+    file is not there: a missing file is not an empty history. Does not
+    create the database and does not migrate it (``immutable=1``). A file
+    that cannot be read as it stands raises ``NotReadableError``. *turn_ids* and
+    *space* (the row's ``tenant_id``) narrow the read. Arguments, payloads
+    and who asked are not returned; the message is the row's own text,
+    already redacted when it was stored.
     """
     if not str(thread_id or "").strip():
         return None
     from pathlib import Path
 
+    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
     from kazma_core.diagnostic_scope import DiagnosticWriteRefused
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     if _db_path_override:
         path = Path(_db_path_override)
     else:
-        from kazma_core.paths import data_dir
+        from kazma_core.paths import hitl_gates_db
 
-        path = data_dir(create=False) / "hitl_gates.db"
+        path = Path(hitl_gates_db(create=False))
     if not path.is_file():
         return None
-    from contextlib import closing
-
-    uri = path.resolve().as_uri() + "?mode=ro"
     try:
-        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+        conn = connect_immutable(path)
+        try:
             conn.row_factory = sqlite3.Row
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(hitl_gates)")}
+            if "gate_id" not in columns:
+                raise NotReadableError("hitl_gates")
+            where = "thread_id = ?"
+            args: list[Any] = [thread_id]
+            if turn_ids is not None:
+                if "turn_id" not in columns:
+                    raise NotReadableError("hitl_gates")
+                if not turn_ids:
+                    return []
+                where += " AND turn_id IN (" + ", ".join("?" for _ in turn_ids) + ")"
+                args.extend(turn_ids)
+            if space is not None:
+                if "tenant_id" not in columns:
+                    raise NotReadableError("hitl_gates")
+                if space == OWNER_SPACE_ID:
+                    where += " AND (tenant_id = ? OR tenant_id = '' OR tenant_id IS NULL)"
+                else:
+                    where += " AND tenant_id = ?"
+                args.append(space)
             rows = conn.execute(
-                "SELECT * FROM hitl_gates WHERE thread_id = ? ORDER BY created_at ASC",
-                (thread_id,),
+                "SELECT * FROM hitl_gates WHERE " + where + " ORDER BY created_at ASC",
+                args,
             ).fetchall()
             gates = [_row_to_gate(row) for row in rows]
+        finally:
+            conn.close()
     except DiagnosticWriteRefused:
         raise
-    except (sqlite3.Error, OSError, ValueError, TypeError, LookupError, UnicodeError):
-        logger.warning("[HitlGates] a thread's decisions could not be read", exc_info=True)
-        return None
+    except NotReadableError:
+        raise
+    except (sqlite3.Error, OSError, ValueError, TypeError, LookupError, UnicodeError) as exc:
+        logger.warning("[HitlGates] a thread's decisions could not be read (%s)", type(exc).__name__)
+        raise NotReadableError("hitl_gates") from exc
     return [
         {
             "gate_id": gate.gate_id,

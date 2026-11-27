@@ -258,7 +258,7 @@ def main() -> None:
         print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")
         print("  mcp        Serve Kazma's tools over MCP (stdio), HITL-gated")
         print("  receipt    A signed receipt of one run (receipt <run-id>; --json or --html; --public-key)")
-        print("  verify-receipt  Check that receipt with this install's key")
+        print("  verify-receipt  Check a receipt (--public-key FILE, or this install's key)")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: KAZMA_PORT, see kazma setup port)")
