@@ -378,6 +378,28 @@ an install with one account behaves as before.
   `tests/_document_space_cases.py`, run with Spaces enforced, the real router
   behind the real tenant middleware, engines stubbed) and lowers
   `PENDING_BASELINE` in the same change.
+- **The soak with many spaces** (S4-09, `scripts/spaces_soak.py`, harness
+  test `tests/test_spaces_soak_harness.py`). A throwaway install made the
+  product's way (`preconditions.apply`, `switch_on`, `people.create_person`,
+  `create_shared_space`, a chat link each), the owner among its people;
+  every cycle a process of its own (a real restart), doing real work in
+  every space through the product's routers behind the real tenant
+  middleware: a chat turn whose stub model calls tools as
+  `graph_tool_worker` runs an approved call (`execute_effect` over the
+  registry's `execute`: its space and feature doors), a library, a
+  document, swarm work where the owner is a member. Each row carries a
+  marker the ledger knows the space of. After every cycle and every restart
+  the check reads every SQLite file (or Kazma's Postgres tables) and the
+  space folders whole and tells each marked row its space -- its space
+  column, a swarm task's metadata, its thread's record, a chunk's library
+  (`_row_space`; a store whose rows are told another way adds it there) --
+  then every member's read paths, each non-member's, a call naming no space,
+  and reads with nothing bound; every marker of the recent cycles must be
+  found in its own space's rows and reads (an empty store fails:
+  `--control-no-work`). Its processes drop `PYTEST_*` (test mode moves the
+  chat store). The harness's controls: rows planted readable in another
+  space and with no space, one per store; a write filed under the wrong
+  space (`--plant-wrong-space`).
 - Gates: `tests/test_identity_store.py`, `tests/test_no_space_no_data.py`,
   `tests/test_sign_in_is_an_account.py`, `tests/test_web_request_space.py`,
   `tests/test_turn_scope_bound.py`, `tests/js/test_space_scope.js`, each

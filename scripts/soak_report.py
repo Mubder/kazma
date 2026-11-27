@@ -9,8 +9,8 @@ when that process loaded these helpers), so a reader can tell a run still
 going from one that stopped without its final report -- a closed window, a
 reboot, Ctrl+C. The drill VM's document soak (2026-11-08) stopped that way,
 and its report said "running" with nothing to check it against.
-The memory, document, swarm, scheduled, time-travel and knowledge soaks
-share these helpers, so a reader finds the same fields in every report.
+The memory, document, swarm, scheduled, time-travel, knowledge and spaces
+soaks share these helpers, so a reader finds the same fields in every report.
 
 Standard library only: a harness imports it before it imports Kazma.
 """
