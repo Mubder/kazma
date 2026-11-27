@@ -770,7 +770,7 @@ def test_a_tables_policy_reads_whole_through_a_dict_row_cursor(rs: Any, db: dict
     dicts: the two ``pg_get_expr`` columns of ``_policies`` came back as one,
     and a table that already held its policy raised IndexError (found by the
     armed suite, a store made in a schema of its own)."""
-    from psycopg.rows import dict_row
+    dict_row = psycopg.rows.dict_row  # the module's guarded import: no bare one in a test
 
     table = "kazma_chat_sessions"
     with psycopg.connect(db["app"], autocommit=True) as conn:

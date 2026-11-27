@@ -29,6 +29,8 @@ from kazma_core.documents.models import (
     Provenance,
 )
 
+from tests._as_request import in_space
+
 __all__ = ["Seeded", "seed_document", "seeded_service"]
 
 
@@ -53,7 +55,13 @@ def seed_document(
     svc: DocumentIngestionService, *, tenant_id: str, owner: str, marker: str, title: str = "",
 ) -> Seeded:
     """A ready text document of *tenant_id*, owned by *owner*, whose one
-    paragraph is *marker*."""
+    paragraph is *marker*: seeded as *owner*'s upload request, in that space
+    (with the second lock armed, nothing unbound reaches the database)."""
+    with in_space(tenant_id, owner):
+        return _seeded(svc, tenant_id=tenant_id, owner=owner, marker=marker, title=title)
+
+
+def _seeded(svc: DocumentIngestionService, *, tenant_id: str, owner: str, marker: str, title: str) -> Seeded:
     body = marker.encode("utf-8")
     sha = hashlib.sha256(body).hexdigest()
     svc.storage.for_space(tenant_id).put_stream(io.BytesIO(body), kind="originals", max_bytes=1 << 20)
