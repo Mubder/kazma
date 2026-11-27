@@ -214,7 +214,13 @@ class PostgresPool:
     def _space_half(self) -> Any:
         """The pool that signs in as the space role (the address's own
         options kept, the role last: ``row_security.space_conninfo``), as
-        large as the install's (review M2)."""
+        large as the install's (review M2). Closed, it makes no half of its
+        own: a space's write to a closed pool fails as the install's does
+        (S4-01 step 5; the checkpointer's pool, step 4 review L3)."""
+        if self._pool.closed:
+            from psycopg_pool import PoolClosed  # type: ignore
+
+            raise PoolClosed("the shared pool is closed")
         with self._space_lock:
             if self._space_pool is None:
                 from psycopg_pool import ConnectionPool  # type: ignore
@@ -236,9 +242,12 @@ class PostgresPool:
 
     @contextmanager
     def _space_checkout(self, space: str, timeout: float | None) -> Generator[Any, None, None]:
+        # Before the try: a closed pool raises PoolClosed as the install's
+        # checkout does, and is no failure of the space half's to say.
+        half = self._space_half()
         start = _availability.now()
         try:
-            with self._space_half().connection(timeout=timeout) as conn:
+            with half.connection(timeout=timeout) as conn:
                 row_security.begin_space(conn, space)
                 with row_security.holding(space):
                     yield conn

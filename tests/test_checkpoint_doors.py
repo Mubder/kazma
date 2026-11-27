@@ -303,3 +303,61 @@ def test_a_closed_checkpointer_pool_makes_no_space_half() -> None:
     with pytest.raises(PoolClosed):
         asyncio.run(pool._space_half())
     assert pool._kazma_space_half is None
+
+
+def test_a_closed_shared_pool_makes_no_space_half() -> None:
+    """The same for the shared pool (S4-01 step 5, found by the armed suite):
+    closed before any space checkout, its first one made a half and wrote
+    through it, so a store holding a pool the process had closed (a reset, a
+    new address, a stop) still wrote, armed, where the install's checkout
+    raised PoolClosed."""
+    PoolClosed = pytest.importorskip("psycopg_pool").PoolClosed  # noqa: N806 - see the test above
+    from kazma_core.db.postgres_pool import PostgresPool
+
+    pool = PostgresPool("postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1)
+    pool.close()
+    with pytest.raises(PoolClosed):
+        pool._space_half()
+    with pytest.raises(PoolClosed), pool._space_checkout("sa", timeout=1):
+        pass
+    assert pool._space_pool is None, "no half was made"
+
+
+def _halves_that_open_when_closed(sources: dict[str, str]) -> list[str]:
+    """Every ``_space_half`` of the product that does not first refuse a
+    closed pool: each pool with a space half asks ``.closed`` and raises
+    ``PoolClosed`` before it makes one."""
+    found: list[str] = []
+    for rel, source in sources.items():
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_space_half"):
+                continue
+            own = _own_nodes(node)
+            asks = any(isinstance(n, ast.Attribute) and n.attr == "closed" for n in own)
+            raises = any(isinstance(n, ast.Raise) and "PoolClosed" in ast.unparse(n) for n in own)
+            if not (asks and raises):
+                found.append(f"{rel}:{node.lineno}")
+    return found
+
+
+def test_every_space_half_refuses_a_closed_pool() -> None:
+    sources = _product()
+    assert sum(source.count("def _space_half") for source in sources.values()) >= 2, "both halves are read"
+    assert _halves_that_open_when_closed(sources) == []
+
+
+def test_the_closed_pool_gate_sees_a_half_that_opens() -> None:
+    planted = {"kazma-core/kazma_core/planted.py": (
+        "class P:\n"
+        "    def _space_half(self):\n"
+        "        if self._half is None:\n"
+        "            self._half = make()\n"
+        "        return self._half\n")}
+    assert _halves_that_open_when_closed(planted) == ["kazma-core/kazma_core/planted.py:2"]
+    guarded = {"kazma-core/kazma_core/ok.py": (
+        "class P:\n"
+        "    def _space_half(self):\n"
+        "        if self._pool.closed:\n"
+        "            raise PoolClosed('closed')\n"
+        "        return make()\n")}
+    assert _halves_that_open_when_closed(guarded) == []
