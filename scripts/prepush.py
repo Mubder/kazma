@@ -560,10 +560,14 @@ def docker_context() -> str:
 
 
 def locked_requirements() -> str:
-    """The Tests job's locked set (ci.yml's install step), with hashes."""
-    done = subprocess.run(["uv", "export", "--locked", "--no-emit-project", "--no-header", "--format",
-                           "requirements-txt", "--extra", "test", "--group", "build", "--group", "ci-light",
-                           "--python", sys.executable, "-q"], cwd=REPO, capture_output=True)
+    """The Tests job's locked set (ci.yml's install step), with hashes.
+
+    ``--color never``: a shell that forces colour (FORCE_COLOR, an agent's
+    terminal) put an ANSI code into the exported file, and the image build
+    refused its line 4 (2026-11-27)."""
+    done = subprocess.run(["uv", "export", "--color", "never", "--locked", "--no-emit-project", "--no-header",
+                           "--format", "requirements-txt", "--extra", "test", "--group", "build",
+                           "--group", "ci-light", "--python", sys.executable, "-q"], cwd=REPO, capture_output=True)
     if done.returncode:
         raise RuntimeError(f"uv export: {done.stderr.decode(errors='replace').strip()}")
     return done.stdout.decode("utf-8").replace("\r\n", "\n")

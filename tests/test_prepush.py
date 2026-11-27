@@ -492,3 +492,22 @@ def test_control_the_first_docker_that_starts_is_kept(monkeypatch, tmp_path):
 def test_bandit_runs_as_a_module_and_other_tools_as_named():
     assert prepush.locked_tool("scan", ["bandit", "-r", "x"])[-5:] == ["python", "-m", "bandit", "-r", "x"]
     assert prepush.locked_tool("lint", ["ruff", "check"])[-2:] == ["ruff", "check"]
+
+
+def test_the_locked_export_never_carries_colour(monkeypatch):
+    """A shell that forces colour put an ANSI code into the exported
+    requirements, and the Linux image refused it (2026-11-27)."""
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = list(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=b"pytest==8.3.5 \\n    --hash=sha256:00\n", stderr=b"")
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setattr(prepush.subprocess, "run", run)
+    out = prepush.locked_requirements()
+    argv = seen["argv"]
+    assert argv[:2] == ["uv", "export"]
+    # The call before named no colour setting: index() raised there (the control).
+    assert argv[argv.index("--color") + 1] == "never"
+    assert "\x1b[" not in out
