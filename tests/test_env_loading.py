@@ -339,6 +339,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "install's .env would point its captures, restores, forgets and "
         "injected faults at that install's databases"
     ),
+    "scripts/spaces_soak.py": (
+        "soaks Spaces on a throwaway install in a private temporary data folder "
+        "(or a Postgres it is told by an environment variable's name); an install's "
+        ".env would point its people, spaces and every kind of work at that install"
+    ),
     "scripts/knowledge_soak.py": (
         "measures and soaks the Knowledge Library on private temporary SQLite "
         "stores; an install's .env would point its crawls, deletes and model "

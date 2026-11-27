@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Spaces: a soak with many spaces (S4-09, 2026-11-27)
+
+- `scripts/spaces_soak.py` runs a throwaway install with Spaces on, its
+  owner, several people and shared spaces, through cycles of real work --
+  chat turns that store, recall, book and publish; libraries; documents;
+  swarm tasks -- each cycle a restart. After every cycle and every restart
+  it reads every store and every person's pages and checks that nothing of
+  one space shows in another, that a row never loses its space, and that
+  nothing written is missing. Its report is written as it runs and names
+  each problem with the store, the row and both spaces.
+- Not run long yet: the hours-long run is the evidence the outside review
+  of Spaces will read.
+
 ## Spaces: Kazma's own database has one answer (2026-11-27)
 
 - Memory's copies on Postgres (the mirror and pgvector) now know Kazma's own
