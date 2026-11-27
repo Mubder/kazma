@@ -972,6 +972,9 @@ DECLARED: dict[str, str] = {
     M + "runs/notify.py": "each incident wording as an (English, Arabic) pair; runs_listing pair",
     M + "tone_adapter.py": "Arabic honorifics: Arabic content by design",
     M + "web_acquire/monitor.py": "each alert title as an (English, Arabic) pair; tests/test_acquisition_monitor.py",
+    M + "windows_trust.py": "each phrase about Windows' file check and each part's name as an en/ar pair "
+                            "(WORDS, Part.name, Part.feature): nothing decided by Arabic text; "
+                            "tests/test_windows_trust.py checks every pair is whole",
     M + "web_acquire/operations.py": "each status word in both languages (an en and an ar table)",
     M + "x_api/_text/regexp/valid_cctld.py": "a vendored list of internet country domains",
     M + "x_api/_text/regexp/valid_gtld.py": "a vendored list of internet top-level domains",

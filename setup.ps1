@@ -409,6 +409,92 @@ if (Test-Path "pyproject.toml" -PathType Leaf) {
     exit 1
 }
 
+# Windows' file check (Smart App Control) judges the interpreter's own files:
+# python.org's Python is signed by the Python Software Foundation, the builds
+# uv downloads are not (measured 2026-11-26: python.org 3.14 has no unsigned
+# interpreter file outside Tcl/Tk, which Kazma never loads; uv's 3.12 build
+# 41 of 49). A new environment is made from a python.org Python, the newest
+# there is: 3.14 (measured, and the live install's), then 3.13. python.org
+# ships no patched Windows build of 3.12 after 3.12.10 or of 3.11 after
+# 3.11.9 (security fixes are source-only), so they miss the 2025 tarfile
+# fixes Kazma's filter="data" extraction relies on: they are taken only when
+# nothing newer is here (review M-b, 2026-11-27).
+# docs/plans/WINDOWS_TRUST_INVENTORY.md
+$PythonWingetId = "Python.Python.3.14"
+# The version winget installs, pinned (winget checks the installer's SHA-256
+# against its manifest for that version).
+$PythonWingetVersion = "3.14.10"
+
+function Find-SignedPython {
+    $found = [System.Collections.Generic.List[string]]::new()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        # python.org's install manager installs a version `py -X.Y` asks for
+        # unless told not to: a probe must never install anything.
+        $savedAuto = $env:PYTHON_MANAGER_AUTOMATIC_INSTALL
+        $env:PYTHON_MANAGER_AUTOMATIC_INSTALL = "false"
+        try {
+            foreach ($version in @("3.14", "3.13", "3.12", "3.11")) {
+                $exe = Invoke-Native -StdoutOnly { py "-$version" -c "import sys; print(sys.executable)" }
+                if ($LASTEXITCODE -eq 0 -and $exe) { $found.Add("$exe".Trim()) }
+            }
+        } finally {
+            $env:PYTHON_MANAGER_AUTOMATIC_INSTALL = $savedAuto
+        }
+    }
+    foreach ($root in @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles")) {
+        foreach ($name in @("Python314", "Python313", "Python312", "Python311")) {
+            $found.Add((Join-Path $root "$name\python.exe"))
+        }
+    }
+    # The newest signed one wherever it was found (a 3.12 the launcher knows
+    # never wins over a 3.14 in a folder it does not).
+    $best = $null
+    $bestVersion = $null
+    foreach ($exe in $found) {
+        if (-not $exe -or -not (Test-Path $exe -PathType Leaf)) { continue }
+        $version = Invoke-Native -StdoutOnly { & $exe -I -c "import sys; print('%d.%d.%d' % sys.version_info[:3])" }
+        if ($LASTEXITCODE -ne 0 -or -not ("$version".Trim() -as [version])) { continue }
+        $v = [version]"$version".Trim()
+        if ($v -lt [version]"3.11.5" -or $v -ge [version]"3.15") { continue }
+        if ($bestVersion -and $v -le $bestVersion) { continue }
+        $sig = Get-AuthenticodeSignature -FilePath $exe
+        if ($sig.Status -eq "Valid" -and "$($sig.SignerCertificate.Subject)" -match "Python Software Foundation") {
+            $best = $exe
+            $bestVersion = $v
+        }
+    }
+    return $best
+}
+
+# No python.org Python here: install the pinned one with winget, only with
+# the owner's yes (review M-c, 2026-11-27). -Yes installs; a person at the
+# terminal is asked once; with nobody to ask, nothing is installed and setup
+# says so (uv then chooses the Python). A failed install says winget's exit
+# code and its last line. Returns the signed Python, or $null.
+function Install-SignedPython {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $null }
+    $what = "Python $PythonWingetVersion from python.org (signed by the Python Software Foundation)"
+    if (-not $Yes) {
+        if (-not $Interactive) {
+            Log-Info "No python.org Python here. $what is installed only with -Yes; uv chooses the Python this time"
+            return $null
+        }
+        $answer = Read-Host "Install $what for this user with winget? It accepts the Python license for you [Y/n]"
+        if ("$answer".Trim() -and "$answer".Trim() -notmatch '^(?i:y|yes)$') {
+            Log-Info "Python is not installed: uv chooses the Python"
+            return $null
+        }
+    }
+    Log-Info "Installing $what"
+    $output = @(Invoke-Native { winget install --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements --scope user --id $PythonWingetId --version $PythonWingetVersion })
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        $last = @($output | Where-Object { "$_".Trim() } | Select-Object -Last 1)
+        Log-Warn "winget could not install $what (exit code $code): $($last -join '')"
+    }
+    return Find-SignedPython
+}
+
 # ── 2. The Sync Handshake ────────────────────────────────────────────────────
 
 Log-Header "2. Sync Handshake (uv sync)"
@@ -432,6 +518,21 @@ if ($existingPython) {
 }
 $syncArgs = @("--inexact")
 foreach ($x in $extras) { $syncArgs += @("--extra", $x) }
+# A new environment: from a signed python.org Python (Find-SignedPython above),
+# installed for this user with winget, with the owner's yes, when there is none
+# (Install-SignedPython). An environment that is there keeps its interpreter.
+if (-not (Test-Path ".venv")) {
+    $signedPython = Find-SignedPython
+    if (-not $signedPython) {
+        $signedPython = Install-SignedPython
+    }
+    if ($signedPython) {
+        $syncArgs += @("--python", $signedPython)
+        Log-Ok "Python: $signedPython (signed by the Python Software Foundation)"
+    } else {
+        Log-Info "No python.org Python here: uv chooses the Python"
+    }
+}
 Log-Info "Installing Kazma's base packages"
 Invoke-Native { uv sync @syncArgs } | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {
@@ -584,7 +685,6 @@ if ($installExit -eq 0) { Log-Header "5. Setup Complete" }
 elseif ($installExit -eq 3) { Log-Header "5. Restart Windows, then run .\setup.cmd again to finish" }
 else { Log-Header "5. Setup Stopped Short (run .\setup.cmd again to finish)" }
 Write-Host ""
-$ScriptsDir = Split-Path $VenvPython
 Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
 # The port the install kept (KAZMA_PORT in .env); 9090 when none is set.
 $KazmaPort = "9090"
@@ -592,8 +692,10 @@ $PortLine = Select-String -Path ".env" -Pattern '^\s*KAZMA_PORT\s*=\s*(\d+)' -Er
 if ($PortLine) { $KazmaPort = $PortLine.Matches[0].Groups[1].Value }
 Log-Info "Kazma:          runs as a service when that part is installed (http://127.0.0.1:$KazmaPort)"
 Log-Info "Port:           $VenvPython -m kazma_cli setup port <N> changes it"
-Log-Info "Without it:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve"
-Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
+# Python itself, never the venv's console-script launchers: pip makes those on
+# this PC and nothing signs them (Windows' file check, docs/plans/WINDOWS_TRUST_PLAN.md).
+Log-Info "Without it:     $VenvPython -m kazma_cli serve"
+Log-Info "Run TUI:        $VenvPython -m kazma_tui"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
 Log-Info "Parts:          $VenvPython -m kazma_cli setup install --list"
 Log-Info "Everything:     .\setup.cmd -Mode full"

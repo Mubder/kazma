@@ -226,6 +226,7 @@ class SecurityHardeningRunner:
         "check_service_exposure",
         "check_secret_file_access",
         "check_searxng_secret",
+        "check_windows_file_check",
     ]
 
     def __init__(self, project_root: str | Path | None = None) -> None:
@@ -734,6 +735,28 @@ class SecurityHardeningRunner:
             severity="medium",
             message="No SearXNG of Kazma's runs on the placeholder secret key" + note,
             recommendation="Keep SEARXNG_SECRET in .env (setup writes one)",
+        )
+
+    async def check_windows_file_check(self) -> HardeningCheck:
+        """Windows' file check (Smart App Control): its setting and each of
+        Kazma's native parts (``kazma_core.windows_trust``). Windows checking
+        files is a protection Kazma works with, so this is information, never
+        a finding: a part Windows did not allow shows the signed alternative
+        Kazma uses, or the feature that waits for a signed version (that one
+        is the ops alert ``windows.feature_waits``, not a security failure)."""
+        return await asyncio.to_thread(self._windows_file_check)
+
+    def _windows_file_check(self) -> HardeningCheck:
+        from kazma_core.windows_trust import check, lines
+
+        shown = [text for _status, text in lines(check())]
+        return HardeningCheck(
+            name="check_windows_file_check",
+            passed=True,
+            severity="info",
+            message=" ".join(shown) if shown else "Windows' file check does not apply on this system",
+            recommendation="Nothing to do: Kazma works with Windows' file check and uses signed parts "
+                           "where they exist",
         )
 
     async def check_secret_file_access(self) -> HardeningCheck:

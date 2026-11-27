@@ -24,6 +24,12 @@ OK", kept out of memory, the chat deleted) and no ERROR/CRITICAL line since
 the boot. A failed check reverts what `origin/main` gained (the live pull is
 a merge, so never the live HEAD range) on `main` here, pushes, pulls the
 revert into the live install, reloads and pages the owner naming the check
-(`--no-revert` pages only). Gate: `tests/test_deploy_live.py` (real git
-repositories, a stub server; a live checkout with its own commit).
+(`--no-revert` pages only). A reload that exits 4 (`RELOAD_WAITS_EXIT`: the
+guard kept the running server, §71) is read from the guard's state
+(`reload_preflight`): Windows' file check refused a file the new code needs
+(`windows_check`) -> the deploy waits, is paged and is never reverted (the
+code is not at fault, and the revert's own reload would wait the same way);
+the new code itself failed, or no record says -> reverted as any failed
+check. Gate: `tests/test_deploy_live.py` (real git repositories, a stub
+server; a live checkout with its own commit; exit 4 both ways).
 

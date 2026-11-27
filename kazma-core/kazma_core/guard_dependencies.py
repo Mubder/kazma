@@ -211,16 +211,16 @@ def _endpoints() -> tuple[list[Endpoint], set[str]]:
 
 
 def _docker(args: list[str]) -> subprocess.CompletedProcess[str] | None:
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_command
     from kazma_core.security.child_env import tool_child_env
 
-    docker = find_docker_cli()
-    if not docker:
+    docker = docker_command(args, env=tool_child_env())
+    if docker is None:
         return None
     try:
         out = subprocess.run(
-            [docker, *args], capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=_DOCKER_TIMEOUT_S, env=tool_child_env(), check=False,
+            docker.argv, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=_DOCKER_TIMEOUT_S, env=docker.env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

@@ -195,7 +195,7 @@ async def reserve(job, root, directory):
     def change(table):
         jobs = crawl_jobs._read()
         _recount(table, root, rows, jobs)
-        import psutil
+        from kazma_core import process_start
         previous = table.get(key)
         if previous and _live(previous, jobs) and previous.get('claim') != job.token:
             raise AcquisitionError(FetchErrorCode.LIMIT, 'Research output has another live storage owner.')
@@ -207,7 +207,7 @@ async def reserve(job, root, directory):
                 f"{_mib(settled)} and {running} running research job(s) reserve {_mib(running_bytes)}; "
                 f"this job needs {_mib(_RESERVATION)}. Remove settled reports before starting more work."))
         table[key] = dict(path=str(directory), root=str(root), bytes=_RESERVATION,
-            active=True, claim=job.token, job_id=job.job_id, owner=[os.getpid(), psutil.Process().create_time()])
+            active=True, claim=job.token, job_id=job.job_id, owner=process_start.own_identity())
     await call(mutate, 'artifacts', change, entries=256)
 
 

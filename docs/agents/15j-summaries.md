@@ -108,7 +108,16 @@ queued by the maintenance sweep with at most two weeks in flight.
   "What did we talk about back in June?", "شنو تكلمنا عنه في يونيو؟") is
   answered by the period's month roll-ups by the share of it each holds
   (`_months_said_in`; by meaning June measured 0.08 against the floor of
-  0.21), recorded in the benchmark's trace against a cut of nothing.
+  0.21), recorded in the benchmark's trace against a cut of nothing. A
+  summary's stretch is taken from its key in the operator's zone
+  (`topic_rollups.stretch_of`, recall's `_spans`; a stretch without a key is
+  read at midday), never as stored: a month a server wrote in its own local
+  time, compared as stored, answered a June question with July as well in
+  UTC and May in Kiritimati (W6 step 5's follow-up review, L-a; gate: the
+  June question in EN and AR in four zones, the stored stretch as control).
+  Weeks and months are named and filed from their keys too (`rollup_label`,
+  `_week_month`, `_month_settled`; a gate reads every place that dates a
+  stored stretch from source).
   Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
   from it: through a turn and through a weekly summary; a roll-up that names
   no source, and a store without the re-read, as controls),

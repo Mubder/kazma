@@ -81,10 +81,15 @@ COMPONENTS: tuple[Component, ...] = (
         "PDFs are read by the simpler built-in readers (weaker on Arabic and tables)",
         express=True, extras=("document-platform",)),
     Component(
-        "tests", "Kazma's test suite (pytest, ruff)",
+        "tests", "Kazma's test suite (pytest)",
         "you and the agent can run Kazma's tests on this install",
         "Kazma's tests cannot run here",
-        express=True, extras=("dev",)),
+        # The ``test`` extra, not ``dev`` (2026-11-26): what running the tests
+        # needs. ``dev`` added mypy, locust and pre-commit, which no test and
+        # no running Kazma imports: 340 of the 699 unsigned native files an
+        # Express install on Windows carried (mypy alone 238), each one more
+        # file Windows' file check must judge (AGENTS section 71).
+        express=True, extras=("test",)),
     Component(
         "code_index", "Code structure (tree-sitter)",
         "the code index understands Python and JavaScript structure",
@@ -197,7 +202,8 @@ COMPONENTS: tuple[Component, ...] = (
 EXTRA_ALIASES: dict[str, str] = {
     "tui": "textual and python-bidi are base dependencies: the TUI is always installed",
     "document": "its libraries are base dependencies",
-    "test": "part of dev (the tests part)",
+    "dev": ("the tools for working on Kazma itself (ruff, mypy, locust, pre-commit; the test extra with "
+            "them): a checkout's setup.ps1 and setup.sh sync it, and no install part needs it"),
     "convert": "part of document-platform (the documents part)",
     "all": "every extra at once (the Full install)",
 }

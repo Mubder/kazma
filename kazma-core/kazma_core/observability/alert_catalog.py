@@ -324,6 +324,10 @@ CATALOG: tuple[_Entry, ...] = (
          "تنبيه أمني لإحدى الاعتماديات يخص هذا التثبيت"),
     _ops("security.service_exposed", "warn", "A service of Kazma's is reachable beyond this machine",
          "إحدى خدمات كاظمه متاحة خارج هذا الجهاز"),
+    # Windows' file check (kazma_core.windows_trust): only when no signed alternative kept a
+    # feature working; a fallback that worked is an INFO line, never an alert.
+    _ops("windows.feature_waits", "warn", "Kazma could not keep a feature working on this PC",
+         "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", page=_SYSTEM),
     _ops("guard.gone", "critical", "Kazma is running without its guard", "يعمل كاظمه دون حارسه",
          condition="guard_gone", owner=False),
     _ops("resilience.firing_ledger", "warn", "The weekly report of what fired", "التقرير الأسبوعي لما عمل"),
@@ -340,6 +344,8 @@ CATALOG: tuple[_Entry, ...] = (
     _guard("guard.crash_loop", "critical", "Kazma is crash-looping", "كاظمه يتعطل مرارًا"),
     _guard("guard.operator_reload", "info", "Kazma is restarting for an operator reload",
            "يُعاد تشغيل كاظمه بطلب المشغّل"),
+    _guard("guard.reload_waits", "info", "An update waits; Kazma keeps running",
+           "تحديث ينتظر، وكاظمه يواصل العمل"),
     _guard("guard.port_still_held", "error", "A restart did not take effect", "لم تنجح إعادة التشغيل"),
     _guard("guard.refused_to_start", "error", "Kazma's guard did not start", "لم يبدأ حارس كاظمه"),
     _guard("guard.internal_error", "error", "Kazma's guard hit an error in its own code",
@@ -371,6 +377,10 @@ CATALOG: tuple[_Entry, ...] = (
     _guard("deps.engine_down", "warn", "Docker does not answer", "Docker لا يستجيب",
            closed_by="deps.engine_up", condition="docker_away"),
     _guard("deps.engine_up", "success", "Docker is back", "عاد Docker"),
+    # The docker CLI Windows' file check does not allow, and no other installed: a feature
+    # waits (kazma_core.windows_trust's words); never an engine outage (AGENTS section 71).
+    _guard("deps.docker_cli_waits", "warn", "Kazma could not keep a feature working on this PC",
+           "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", page=_SYSTEM),
     _guard("deps.container_start_failed", "warn", "A container Kazma needs will not start",
            "حاوية يحتاجها كاظمه لا تبدأ", closed_by="deps.container_recovered"),
     _guard("deps.container_recovered", "success", "A container Kazma needs runs again",

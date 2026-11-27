@@ -39,6 +39,8 @@ const sidebars = {
         'guide/running-work',
         'guide/spaces',
         'guide/security-and-safety',
+        'guide/windows-smart-app-control',
+        'guide/windows-smart-app-control-ar',
         'guide/commitment-layer',
         'guide/task-ledger',
         'guide/arabic-cultural-features',

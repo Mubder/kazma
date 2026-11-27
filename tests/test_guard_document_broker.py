@@ -17,6 +17,7 @@ operation. ``test_document_broker_guard_docker.py`` runs the real broker.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -299,6 +300,234 @@ def test_changed_code_restarts_the_broker_at_the_next_spawn(monkeypatch, tmp_pat
     assert len(h.procs) == 2 and "--image" in h.procs[1].cmd
     assert h.procs[1].cmd[h.procs[1].cmd.index("--image") + 1] == "kazma-document-worker:other"
     assert "broker.code_changed" in h.events()
+
+
+@pytest.fixture
+def engine_pc(monkeypatch):
+    """The guard's own docker_cli (loaded by path) on a Windows PC: Kazma's
+    distro registered or not (``state["registered"]``), a Windows
+    ``kazma-engine`` context or not (``state["context"]``). Every name the
+    choice writes is registered first, so it is put back."""
+    module = guard._docker_cli_module()
+    for name in ("DOCKER_CONTEXT", "DOCKER_HOST", "KAZMA_DOCKER_BIN", "KAZMA_DOCKER_ROUTE",
+                 guard._ENGINE_BY_CHOICE_ENV):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("KAZMA_GUARD_START_DEPENDENCIES", "auto")
+    state = {"registered": True, "context": False}
+    monkeypatch.setattr(module, "_on_windows", lambda: True)
+    monkeypatch.setattr(module, "_context_exists",
+                        lambda name: state["context"] and name == module.KAZMA_CONTEXT)
+    monkeypatch.setattr(module, "wsl_distro_location",
+                        lambda name: (Path("C:/engine"), "ext4.vhdx") if state["registered"] else None)
+    monkeypatch.setattr(module, "_choice_applied", False)
+    monkeypatch.setattr(module, "_engine_choice", "")
+    monkeypatch.setattr(module, "_applied", None)
+    monkeypatch.setattr(module, "_applied_said", "the docker CLI's current context")
+    return state
+
+
+def _record(engine: str | None) -> None:
+    path = guard._deps_record_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"version": 1, "containers": [], "updated": time.time()}
+    if engine:
+        data["engine"] = engine
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _broker_on(h, engine: str | None) -> None:
+    _record(engine)
+    h.g.deps.apply_engine()
+    h.b.before_spawn()
+    h.run_for(3)
+    assert len(h.procs) == 1
+
+
+@pytest.mark.parametrize("before, after", [
+    pytest.param(None, "kazma", id="none-to-kazma"),        # a fresh install's first broker
+    pytest.param("kazma", "desktop", id="kazma-to-desktop"),
+    pytest.param("kazma", None, id="kazma-to-none"),
+])
+def test_a_choice_carried_only_by_the_export_restarts_the_broker(monkeypatch, tmp_path, engine_pc,
+                                                                  before, after):
+    """Review M-a2 (2026-11-27), through the guard's real apply_engine: with
+    no Windows docker context the choice reaches the broker only in
+    KAZMA_DOCKER_ENGINE_BY_CHOICE; comparing the context alone never
+    restarted it."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, before)
+    _record(after)
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2, "the broker was not started again on the new engine"
+    assert h.procs[1].kwargs["env"].get(guard._ENGINE_BY_CHOICE_ENV) == ("kazma" if after == "kazma" else None)
+    assert "broker.engine_changed" in h.events()
+    for _ in range(50):
+        h.g.deps.apply_engine()
+    assert len(h.procs) == 2, "the same record restarts nothing (no loop)"
+
+
+def test_control_a_context_carries_the_choice(monkeypatch, tmp_path, engine_pc):
+    engine_pc["context"] = True
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    _record("kazma")
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2  # as before M-a2: the context changed
+    assert h.procs[1].kwargs["env"].get("DOCKER_CONTEXT") == "kazma-engine"
+
+
+def test_kazmas_engine_registered_while_the_guard_runs_restarts_the_broker(monkeypatch, tmp_path, engine_pc):
+    """Review L-f (2026-11-27): choice "kazma", no Windows context, the
+    distro registered while the guard runs (`kazma setup engine` with a kept
+    disk): only the export changes, and apply_engine returned early on the
+    unchanged (engine, context), so the broker kept the CLI's context."""
+    engine_pc["registered"] = False
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, "kazma")
+    assert h.procs[0].kwargs["env"].get(guard._ENGINE_BY_CHOICE_ENV) is None
+    engine_pc["registered"] = True
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2
+    assert h.procs[1].kwargs["env"].get(guard._ENGINE_BY_CHOICE_ENV) == "kazma"
+
+
+def _log_records(event: str) -> list[dict]:
+    lines = Path(os.environ["KAZMA_GUARD_LOG"]).read_text(encoding="utf-8").splitlines()
+    return [rec for rec in map(json.loads, lines) if rec.get("event") == event]
+
+
+def test_an_engine_change_waits_for_the_jobs_running(monkeypatch, tmp_path, engine_pc):
+    """Review delta 3 (2026-11-27): a new engine stopped the broker with its
+    jobs. It now waits, asked again at each apply, until the broker reports
+    none active."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    jobs = {"active": 2}
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: {"ready": True, **jobs})
+    _record("kazma")
+    for _ in range(3):
+        h.g.deps.apply_engine()
+    assert len(h.procs) == 1, "the broker was stopped with jobs running"
+    assert len(_log_records("broker.engine_change_waits")) == 1, "the wait is said once"
+    jobs["active"] = 0
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2
+    assert _log_records("broker.engine_changed")[-1]["stopped_jobs"] == 0
+
+
+def test_the_wait_is_bounded_and_says_what_it_stopped(monkeypatch, tmp_path, engine_pc):
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: {"ready": True, "active": 1})
+    _record("kazma")
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 1
+    h.clock.now += guard.BROKER_ENGINE_CHANGE_WAIT_S + 1
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2, "past the bound the new engine is taken"
+    changed = _log_records("broker.engine_changed")[-1]
+    assert changed["stopped_jobs"] == 1 and changed["waited_s"] >= guard.BROKER_ENGINE_CHANGE_WAIT_S
+
+
+def test_a_missed_status_keeps_the_wait_and_its_count_is_unknown(monkeypatch, tmp_path, engine_pc):
+    """Review delta 4 (2026-11-27): one status that did not answer ended the
+    wait at once, and the log said 0 jobs were stopped, a count it did not
+    know."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    status = {"answer": {"ready": True, "active": 2}}
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: status["answer"])
+    _record("kazma")
+    h.g.deps.apply_engine()
+    status["answer"] = None
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 1, "one missed status ended the wait"
+    h.clock.now += guard.BROKER_ENGINE_CHANGE_WAIT_S + 1
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2, "still bounded: past the wait the new engine is taken"
+    changed = _log_records("broker.engine_changed")[-1]
+    assert changed["stopped_jobs"] == "unknown" and changed["answered"] is False
+
+
+def test_control_a_broker_that_never_answered_is_restarted_at_once(monkeypatch, tmp_path, engine_pc):
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: None)
+    _record("kazma")
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2
+    assert _log_records("broker.engine_changed")[-1]["stopped_jobs"] == "unknown"
+    assert not _log_records("broker.engine_change_waits")
+
+
+def test_a_wait_that_ends_without_a_restart_is_said(monkeypatch, tmp_path, engine_pc):
+    """Review delta 4: the record went back to the broker's engine mid-wait;
+    one line said the wait began, then nothing."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: {"ready": True, "active": 1})
+    _record("kazma")
+    h.g.deps.apply_engine()
+    _record(None)
+    for _ in range(5):
+        h.g.deps.apply_engine()
+    assert len(h.procs) == 1, "nothing to restart: the broker runs on the engine chosen"
+    ended = _log_records("broker.engine_change_wait_ended")
+    assert len(ended) == 1 and ended[0]["restarted"] is False, ended
+    assert not _log_records("broker.engine_changed")
+
+
+def test_control_fifty_applies_of_the_same_record_restart_nothing(monkeypatch, tmp_path, engine_pc):
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, "kazma")
+    for _ in range(50):
+        h.g.deps.apply_engine()
+    assert len(h.procs) == 1
+    assert not _log_records("broker.engine_change_wait_ended"), "no wait, nothing to say"
+
+
+def _env_names_read(source: str) -> set[str]:
+    """The environment names a module reads: ``os.environ.get(X)``,
+    ``os.getenv(X)``, ``os.environ[X]``, X a literal or a module constant."""
+    tree = ast.parse(source)
+    consts = {target.id: node.value.value for node in tree.body if isinstance(node, ast.Assign)
+              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+              for target in node.targets if isinstance(target, ast.Name)}
+
+    def value(expr: ast.AST) -> str | None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            return expr.value
+        return consts.get(expr.id) if isinstance(expr, ast.Name) else None
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and ast.unparse(node.func) in ("os.environ.get", "os.getenv"):
+            name = value(node.args[0])
+        elif (isinstance(node, ast.Subscript) and ast.unparse(node.value) == "os.environ"
+              and isinstance(node.ctx, ast.Load)):
+            name = value(node.slice)
+        else:
+            continue
+        if name:
+            names.add(name.upper())
+    return names
+
+
+def test_the_broker_keeps_every_variable_its_docker_module_reads():
+    """Review L-9 (2026-11-27): the broker runs ``docker_cli.py`` (by path)
+    in the environment ``_BROKER_ENV_KEEP`` lets through; a variable it reads
+    and the guard drops (KAZMA_DOCKER_ROUTE before L4, the engine choice's
+    export before M-a) silently changes the broker's route."""
+    source = (ROOT / "kazma-core" / "kazma_core" / "docker_cli.py").read_text(encoding="utf-8")
+    read = _env_names_read(source)
+    assert {"DOCKER_CONTEXT", "KAZMA_DOCKER_ROUTE", "KAZMA_DOCKER_ENGINE_BY_CHOICE"} <= read
+    assert sorted(read - set(guard._BROKER_ENV_KEEP)) == []
+
+
+def test_control_a_planted_variable_the_broker_drops_is_found():
+    planted = 'import os\n_X = "KAZMA_PLANTED_NAME"\nos.environ.get(_X)\nos.environ["OTHER_PLANTED"]\n'
+    assert _env_names_read(planted) - set(guard._BROKER_ENV_KEEP) == {"KAZMA_PLANTED_NAME", "OTHER_PLANTED"}
 
 
 def test_a_broker_tick_that_fails_never_reaches_the_guard(monkeypatch, tmp_path):

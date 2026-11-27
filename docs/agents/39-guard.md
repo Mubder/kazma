@@ -20,6 +20,14 @@ code) and Kazma ran with nobody supervising it.
   server itself only for a guard from before this change -- never a server
   that booted after the request -- and withdraws a request it could not
   apply.
+- **A reload checks the new code first** (2026-11-26, §71): before the
+  running server stops, `run_reload_preflight` runs a child with the
+  server's python in its folder (psycopg and its client library, the app,
+  the docker CLI). A failed or unfinished check keeps the server
+  (`reload_action` `kept_running`, one `guard.reload_waits` card per
+  reason; `--reload` exits 4, "the update waits"). Live that day a
+  reload swapped a working server for one Windows would not let load its
+  database library: read-only for thirty minutes. `--skip-check` skips it.
 - **Deliberate stops are graceful.** Reload, pause and the guard's own
   shutdown send CTRL_BREAK (Windows) / SIGTERM (POSIX) to the child's
   process group and wait `KAZMA_GUARD_GRACEFUL_STOP_S` (60) before the
@@ -44,7 +52,17 @@ code) and Kazma ran with nobody supervising it.
   `time.sleep` raises), and the logger never raises.
 - **A recorded PID is verified before it is reaped:** creation time recorded
   at spawn, a python image otherwise. A PID left by a dead guard can belong
-  to anything by now.
+  to anything by now. On Linux the stamp (`child_stamp`, the broker's
+  `stamp`: boot id and start ticks, `_process_start_stamp`) is compared
+  first, exactly: the creation time there moves with the wall clock, and a
+  WSL2 VM drifting a second every 30 s turned an orphan recorded minutes
+  earlier into "pid reused", not reaped (2026-11-27). The stamp counts only
+  for the pid it was recorded for (`child_stamp_pid`, the broker's
+  `stamp_pid`): a guard from before the stamps merges its child's pid and
+  time and leaves the earlier stamp behind. The stamp is
+  `kazma_core.process_start`'s (§35), checked by `tests/test_process_start.py`;
+  the guard reads `/proc` only in `_process_started_at` and
+  `_process_start_stamp`.
 - **The server says when its guard is gone.** The maintenance cadence runs
   `observability/supervisor_watch.check_supervisor`: with
   `KAZMA_GUARD_STATE_FILE` set (the guard started this server) and no

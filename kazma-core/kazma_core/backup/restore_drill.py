@@ -451,9 +451,15 @@ def _run_pg_restore(
 
     One function so the third caller cannot repeat it.
     """
-    if prefix and "docker" in prefix[0].lower():
+    from kazma_core.docker_cli import carry_env, is_docker_exec
+
+    if is_docker_exec(prefix):
+        cmd = [*prefix, *args]
+        # A value taken by name (-e PGPASSWORD) reaches the engine's distro
+        # on the wsl.exe route (WSLENV), never on the command line.
+        kw["env"] = carry_env(cmd, kw.get("env"))
         with dump.open("rb") as fh:
-            return subprocess.run([*prefix, *args], stdin=fh, **kw)
+            return subprocess.run(cmd, stdin=fh, **kw)
     return subprocess.run([*prefix, *args, str(dump)], **kw)
 
 

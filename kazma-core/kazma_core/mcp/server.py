@@ -50,9 +50,11 @@ Run it::
 
     kazma mcp
 
-Claude Desktop / any MCP client config::
+Claude Desktop / any MCP client config (this install's Python, never the
+``kazma`` launcher, which nothing signs on Windows; ``kazma mcp --help``
+prints the exact line)::
 
-    {"mcpServers": {"kazma": {"command": "kazma", "args": ["mcp"]}}}
+    {"mcpServers": {"kazma": {"command": "<python>", "args": ["-m", "kazma_cli", "mcp"]}}}
 """
 
 from __future__ import annotations
@@ -527,6 +529,14 @@ async def serve_stdio(
             sys.stdout = saved_stdout
 
 
+def _client_config() -> str:
+    """The MCP client config for this install: its Python running ``-m
+    kazma_cli mcp``, never the console-script launcher (on Windows it is made
+    on the PC and nothing signs it: Windows' file check, AGENTS section 71)."""
+    return json.dumps({"mcpServers": {"kazma": {"command": sys.executable,
+                                                "args": ["-m", "kazma_cli", "mcp"]}}})
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``kazma mcp``."""
     argv = list(argv if argv is not None else sys.argv[1:])
@@ -536,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
             "Serve Kazma's tools over the Model Context Protocol (stdio), with\n"
             "the human-in-the-loop gate in front of the dangerous ones.\n\n"
             "Client config:\n"
-            '  {"mcpServers": {"kazma": {"command": "kazma", "args": ["mcp"]}}}\n\n'
+            f"  {_client_config()}\n\n"
             "Options:\n"
             "  --space ID  Act in this space (once Spaces is on: the admin's own\n"
             "              spaces only; default: your personal space)\n\n"

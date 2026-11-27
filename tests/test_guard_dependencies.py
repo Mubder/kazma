@@ -131,6 +131,9 @@ class _Harness:
         self.docker = _Docker()
         monkeypatch.setattr(guard, "_run_command", self.docker)
         monkeypatch.setattr(guard, "_docker_cli", lambda: "docker-fake")
+        # The Windows CLI route (Docker Desktop, or Kazma's engine with
+        # KAZMA_DOCKER_ROUTE=cli); the wsl.exe route has tests of its own.
+        monkeypatch.setattr(guard, "_docker_route_argv", lambda args: None)
         self.images = {"explorer.exe", "svchost.exe"}
         monkeypatch.setattr(guard, "_running_images", lambda: set(self.images))
         self.launches: list[str] = []
@@ -867,12 +870,20 @@ def test_the_mode_names(value, monkeypatch):
 
 
 def _engine_contexts(monkeypatch) -> list[str]:
-    """The guard's pin, without this machine's docker contexts."""
+    """The guard's pin, without this machine's docker contexts: it sets
+    DOCKER_CONTEXT as docker_cli.apply_engine_choice does (registered with
+    monkeypatch, so it is put back)."""
     pinned: list[str] = []
+    monkeypatch.setenv("DOCKER_CONTEXT", "")
+    monkeypatch.delenv("DOCKER_CONTEXT")
 
     def apply(engine):
         context = {"kazma": "kazma-engine", "desktop": "desktop-linux"}.get(engine)
         pinned.append(context or "")
+        if context:
+            os.environ["DOCKER_CONTEXT"] = context
+        else:
+            os.environ.pop("DOCKER_CONTEXT", None)
         return context
 
     monkeypatch.setattr(guard, "_apply_docker_engine", apply)
@@ -943,18 +954,37 @@ def test_a_task_that_cannot_run_and_the_guard_holds_the_engine_up(monkeypatch, a
     assert h.launches == []
 
 
+def _running_broker(monkeypatch, h) -> list[tuple]:
+    """The guard's real broker, "running" (a stand-in process): the engine
+    pair of each restart its real ``engine_changed`` makes."""
+    broker = h.g.broker
+    restarts: list[tuple] = []
+    broker.proc = SimpleNamespace(poll=lambda: None)
+    broker.docker_engine = guard._broker_engine(os.environ)
+
+    def start():
+        broker.docker_engine = guard._broker_engine(os.environ)
+        restarts.append(broker.docker_engine)
+
+    monkeypatch.setattr(broker, "stop", lambda why: None)
+    monkeypatch.setattr(broker, "_start", start)
+    return restarts
+
+
 def test_a_new_choice_restarts_the_document_broker(monkeypatch):
     _engine_contexts(monkeypatch)
     h = _Harness(monkeypatch, containers=None)
     h.write_record(["kazma-searxng"], engine="desktop")
-    restarted: list[int] = []
-    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(2)
+    restarted = _running_broker(monkeypatch, h)
     h.run(2)
     assert restarted == [], "the first choice the guard reads is no change"
     h.write_record(["kazma-searxng"], engine="kazma")
     h.run(65)
-    assert restarted == [1]
+    assert restarted == [("kazma-engine", None)]
     assert h.deps.context == "kazma-engine"
+    h.run(50 * 60)
+    assert len(restarted) == 1, "an unchanged record restarts nothing (no loop)"
 
 
 def test_a_choice_that_arrives_after_no_choice_restarts_the_broker(monkeypatch):
@@ -965,13 +995,13 @@ def test_a_choice_that_arrives_after_no_choice_restarts_the_broker(monkeypatch):
     _engine_contexts(monkeypatch)
     h = _Harness(monkeypatch, containers=None)
     h.write_record(["kazma-searxng"])
-    restarted: list[int] = []
-    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(2)
+    restarted = _running_broker(monkeypatch, h)
     h.run(130)
     assert h.events().count("deps.engine_choice") == 1, "said once, not at every check"
     h.write_record(["kazma-searxng"], engine="kazma")
     h.run(65)
-    assert restarted == [1]
+    assert restarted == [("kazma-engine", None)]
     assert h.deps.context == "kazma-engine"
 
 
@@ -995,3 +1025,165 @@ def test_the_server_records_the_choice_for_the_guard(monkeypatch, tmp_path):
     gd._publish_dependencies()
     assert json.loads(path.read_text(encoding="utf-8"))["engine"] == "kazma", \
         "written even while Docker does not answer: the guard must follow it"
+
+
+# ── a docker CLI Windows refuses is not an engine that is down (2026-11-26) ──
+#
+# Live 2026-11-26 from 10:56 UTC: Windows' Application Control began refusing
+# Kazma's engine's docker.exe. Every `docker version` the guard ran failed to
+# start, the guard read the engine as down although it answered, and ran the
+# KazmaEngine task and `systemctl restart docker` in it again and again (the
+# audit's F12). A refused CLI is now a calm wait: nothing is started or
+# restarted for it, and one card names the feature.
+
+_REFUSAL = "WinError 4551: An Application Control policy has blocked this file"
+
+
+def _refusing_cli(h, monkeypatch, refused: set[str]) -> None:
+    """``_run_command`` cannot start a CLI in *refused* (Windows refuses it)."""
+    fake = h.docker
+
+    def run(cmd, timeout):
+        if str(cmd[0]) in refused:
+            fake.calls.append([str(c) for c in cmd])
+            return None
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    monkeypatch.setattr(guard, "_docker_cli_refusal", lambda cli: _REFUSAL if cli in refused else None)
+
+
+def test_a_docker_cli_windows_refuses_is_a_calm_wait_never_an_engine_restart(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    _refusing_cli(h, monkeypatch, {"docker-fake"})
+    picks = iter(["docker-fake"])
+    monkeypatch.setattr(guard, "_docker_cli", lambda: next(picks, None))
+    monkeypatch.setattr(guard, "_refused_docker_clis", lambda: ["docker-fake"])
+    h.run(900)
+    assert not [c for c in h.docker.calls if c[0] in ("schtasks", "wsl.exe")], \
+        "the engine was restarted for a CLI Windows refused"
+    assert h.launches == []
+    assert h.deps.state == "cli_refused"
+    assert "deps.engine_down" not in h.events() and "deps.cli_refused" in h.events()
+    assert not h.pages_titled("Docker does not answer")
+    cards = h.pages_titled("Kazma could not keep a feature working")
+    assert len(cards) == 1 and "Running code and containers" in cards[0]
+    assert "Nothing is wrong" in cards[0] or "nothing is wrong" in cards[0]
+    assert h.deps.restart_note() == ""
+
+
+def test_control_the_same_guard_restarts_an_engine_that_is_really_down(monkeypatch):
+    """The CLI starts and the engine does not answer: the KazmaEngine task
+    runs and Docker is restarted in it, as before."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    _refusing_cli(h, monkeypatch, set())
+    h.docker.engine = False
+    h.run(140)
+    assert [c[:4] for c in h.docker.calls if c[0] == "schtasks"] == [["schtasks", "/Run", "/TN", "KazmaEngine"]]
+    assert "deps.engine_down" in h.events() and "deps.cli_refused" not in h.events()
+
+
+def test_a_refused_cli_gives_way_to_one_windows_allows(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    _refusing_cli(h, monkeypatch, {"docker-fake"})
+    picks = iter(["docker-fake", "docker-desktop-signed"])
+    monkeypatch.setattr(guard, "_docker_cli", lambda: next(picks, "docker-desktop-signed"))
+    h.run(30)
+    assert h.deps.state == "ok" and h.deps.cli == "docker-desktop-signed"
+    assert "deps.cli_replaced" in h.events()
+    assert not [c for c in h.docker.calls if c[0] in ("schtasks", "wsl.exe")]
+    assert not h.pages
+
+
+# ── Kazma's engine through wsl.exe: no Windows docker CLI at all ─────────
+
+_WSL_PREFIX = ["wsl.exe", "-d", "kazma-engine", "-u", "root", "--exec", "docker"]
+
+
+def test_kazmas_engine_through_wsl_needs_no_windows_cli(monkeypatch):
+    """The distro's own docker answers through Microsoft's wsl.exe: the guard
+    asks, inspects and starts containers that way, and never looks a Windows
+    docker.exe up, so none Windows could refuse is in the way."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    fake = h.docker
+    seen: list[list[str]] = []
+    extras: list[dict | None] = []
+
+    def run(cmd, timeout, env_extra=None):
+        cmd = [str(c) for c in cmd]
+        seen.append(cmd)
+        extras.append(env_extra)
+        if cmd[:7] == _WSL_PREFIX:
+            return fake(["docker-in-distro", *cmd[7:]], timeout)
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    monkeypatch.setattr(guard, "_docker_route_argv", lambda args: [*_WSL_PREFIX, *args])
+    monkeypatch.setattr(guard, "_docker_cli", lambda: pytest.fail("a Windows docker CLI was looked up"))
+    h.run(30)
+    assert h.deps.state == "ok"
+    assert seen and all(c[:7] == _WSL_PREFIX for c in seen)
+    # Each routed call runs with what the route adds (review L-b): wsl.exe's
+    # own messages in UTF-8.
+    assert extras and all(extra == {"WSL_UTF8": "1"} for extra in extras), extras
+
+
+def test_control_the_windows_cli_runs_with_nothing_added(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    extras: list[dict | None] = []
+    fake = h.docker
+
+    def run(cmd, timeout, env_extra=None):
+        extras.append(env_extra)
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    h.run(30)
+    assert extras and all(extra is None for extra in extras)
+
+
+def test_a_wsl_call_that_times_out_is_never_read_as_a_refused_cli(monkeypatch):
+    """Review L3 (2026-11-26): a Windows CLI chosen on an earlier tick and
+    refused since, then a wsl.exe ``version`` that times out: the engine does
+    not answer. It was read as a refused CLI (a forced ``deps.docker_cli_waits``
+    card with untrue words, no restart that tick)."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.deps.cli = "docker-fake"
+    fake = h.docker
+
+    def run(cmd, timeout, env_extra=None):
+        cmd = [str(c) for c in cmd]
+        if cmd[:7] == _WSL_PREFIX:
+            fake.calls.append(cmd)
+            return None  # timed out
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    monkeypatch.setattr(guard, "_docker_route_argv", lambda args: [*_WSL_PREFIX, *args])
+    monkeypatch.setattr(guard, "_docker_cli_refusal", lambda cli: _REFUSAL)
+    monkeypatch.setattr(guard, "_refused_docker_clis", lambda: ["docker-fake"])
+    h.run(30)
+    assert "deps.cli_refused" not in h.events()
+    assert h.deps.state != "cli_refused"
+    assert not h.pages_titled("Kazma could not keep a feature working")
+
+
+def test_control_without_the_route_the_windows_cli_is_asked(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.run(30)
+    assert h.deps.state == "ok" and h.deps.cli == "docker-fake"
+    assert all(c[0] == "docker-fake" for c in h.docker.calls if c[0] not in ("whoami",))

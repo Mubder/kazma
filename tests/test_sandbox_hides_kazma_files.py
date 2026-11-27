@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 import pytest
+from kazma_core.docker_cli import DockerCommand  # the jail's docker call, by the one route
 from kazma_core.ide.workspace_scope import workspace_path_scope
 
 SECRETS = (".env", ".env.local", "restic.pass")
@@ -123,7 +124,7 @@ async def _container_command(monkeypatch, workspace: Path) -> list[str]:
         seen.append(list(cmd))
         return _Proc()
 
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(["docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec._fw, "_get_workspace", lambda: workspace)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _exec)
     script = workspace.parent / "snippet.py"
@@ -181,21 +182,22 @@ def test_a_path_with_a_comma_is_quoted_for_docker():
 
 
 def _docker_with_image() -> tuple[str, str] | None:
-    from kazma_core.tools.code_exec import DEFAULT_DOCKER_IMAGE, _docker_cli
+    from kazma_core.tools.code_exec import DEFAULT_DOCKER_IMAGE, _docker_command
 
-    docker = _docker_cli()
-    if not docker:
+    docker = _docker_command(["image", "inspect", DEFAULT_DOCKER_IMAGE])
+    if docker is None:
         return None
     try:
-        probe = subprocess.run(  # noqa: S603 - fixed argv, the docker CLI
-            [docker, "image", "inspect", DEFAULT_DOCKER_IMAGE],
+        probe = subprocess.run(  # noqa: S603 - fixed argv, docker by the one route
+            docker.argv,
             capture_output=True,
             timeout=20,
             check=False,
+            env=docker.env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return (docker, DEFAULT_DOCKER_IMAGE) if probe.returncode == 0 else None
+    return (docker.argv[0], DEFAULT_DOCKER_IMAGE) if probe.returncode == 0 else None
 
 
 @pytest.mark.real_docker
@@ -339,7 +341,17 @@ def test_the_old_suffix_rule_missed_the_copies():
 #: Docker Desktop: the same folders, as the engine names them, never a new
 #: one Kazma chose.
 MOUNT_BUILDERS = {("kazma-core/kazma_core/tools/code_exec.py", "_workspace_mounts"),
-                  ("kazma-core/kazma_core/engine_move.py", "_mount_args")}
+                  ("kazma-core/kazma_core/engine_move.py", "_mount_args"),
+                  # Builds no mount: gives an existing -v/--mount source as the
+                  # engine's distro names it, for the wsl.exe route (2026-11-26).
+                  ("kazma-core/kazma_core/docker_cli.py", "_cross"),
+                  # Builds no mount either: names docker's own path options
+                  # (-v/--volume/--mount ...) whose values _cross translates.
+                  ("kazma-core/kazma_core/docker_cli.py", "_cross_args"),
+                  # Builds no mount: docker's option grammar (which options
+                  # take a value), read to find where a program begins and
+                  # which short word ends in -v (review L-g, 2026-11-27).
+                  ("kazma-core/kazma_core/docker_cli.py", "_run_value_options")}
 _MOUNT_MARKERS = ("type=bind", "--volume")
 
 

@@ -164,7 +164,7 @@ def test_a_rerun_syncs_the_extras_the_install_already_has(monkeypatch):
 
     monkeypatch.setattr(config_store, "get_config_store", no_store)
     present = update.extras_in_this_environment()
-    assert "dev" in present, present  # pytest is installed here
+    assert "test" in present, present  # the suite's extra is installed here
 
 
 def test_the_dev_and_all_extras_hold_the_suite():

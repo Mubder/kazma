@@ -322,6 +322,8 @@ def _undone(store: Path, done: Path, how: str) -> None:
         held["written_with"]["merge"]["errors"] = 1
     elif how == "weeks_left":
         held["written_with"]["summaries"]["weeks_left"] = 1
+    elif how == "no_question_time":
+        held["written_with"].pop("at")
     done.write_text(json.dumps(held), encoding="utf-8")
     conn = sqlite3.connect(str(store))
     try:
@@ -329,6 +331,10 @@ def _undone(store: Path, done: Path, how: str) -> None:
             conn.execute("UPDATE memory_summary_periods SET status = 'queued'")
         elif how == "summary_to_rebuild":
             conn.execute("UPDATE memory_summaries SET status = 'rebuild'")
+        elif how == "only_summaries_gone":
+            # the done markers kept (the final review's L3)
+            conn.execute("DELETE FROM memory_summary_sources")
+            conn.execute("DELETE FROM memory_summaries")
         elif how == "summaries_gone":
             # the done file still says no week is left (the delta review's E)
             conn.execute("DELETE FROM memory_summary_sources")
@@ -347,7 +353,7 @@ def _undone(store: Path, done: Path, how: str) -> None:
 
 
 @pytest.mark.parametrize("how", ["merge_errors", "weeks_left", "week_queued", "summary_to_rebuild", "twin_left",
-                                 "summaries_gone"])
+                                 "summaries_gone", "only_summaries_gone", "no_question_time"])
 def test_a_store_left_unfinished_refuses_the_run(scripts, made, monkeypatch, how):
     """The step 5 review, M2: the refusal reads the store itself and each
     step's own counts, not only that the done file names the step."""
@@ -478,3 +484,57 @@ async def _one_question_reason(written, data, facts, folder, cached):
     facts_with = written.facts_written_with(facts, "written_q")
     with written.as_the_active_model(cached):
         return await written.write_question(_item(), facts, folder, cached.config.model, facts_with, sweeps=1)
+
+
+def _weeks_store(path: Path, *, with_month: bool) -> None:
+    """A store with two May 2026 weekly summaries (W19, W20), and their
+    month's roll-up or not."""
+    import datetime as dt
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(str(path))
+    ensure_primary_schema(conn)
+    for key, day in (("2026-W19", 4), ("2026-W20", 11)):
+        start = dt.datetime(2026, 5, day, tzinfo=dt.UTC).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', 't', 's', 'active', 0, 0, '{}')",
+            (f"sum_{key}", key, start, start + 7 * 86400))
+    if with_month:
+        from kazma_core.memory import topic_rollups
+
+        rid = topic_rollups._rollup_id("default", "month", "2026-05")
+        start = dt.datetime(2026, 5, 1, tzinfo=dt.UTC).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', '2026-05', ?, ?, 'month', 't', 's', 'active', 0, 0, '{}')",
+            (rid, start, start + 31 * 86400))
+        conn.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, ?)",
+                         [(rid, "sum_2026-W19"), (rid, "sum_2026-W20")])
+    conn.commit()
+    conn.close()
+
+
+def test_a_store_whose_month_roll_up_is_gone_is_refused(scripts, tmp_path):
+    """The follow-up review's L-c: the product's own roll-up planning, run on
+    a throwaway copy at the question's time, sees a month it would write
+    again; the store itself is not changed."""
+    written, _turn = scripts
+    store = tmp_path / "gone.db"
+    _weeks_store(store, with_month=False)
+    before = store.read_bytes()
+    steps = {"merge": {}, "summaries": {}, "at": "2026/07/20 (Mon) 10:00"}
+    assert written.bench.rollups_due(store, written.bench.parse_date(steps["at"]))["months"] == 1
+    assert "a roll-up the store lacks at the question's time" in written.bench.store_unfinished(store, steps)
+    assert store.read_bytes() == before
+
+
+def test_control_a_store_with_its_month_roll_up_has_none_due(scripts, tmp_path):
+    written, _turn = scripts
+    store = tmp_path / "held.db"
+    _weeks_store(store, with_month=True)
+    assert written.bench.rollups_due(store, written.bench.parse_date("2026/07/20 (Mon) 10:00")) == \
+        {"months": 0, "projects": 0}

@@ -173,7 +173,7 @@ def _own_cli_installed_check() -> bool:
     with Docker Desktop. On the owner's PC (2026-11-14) the check took Docker
     Desktop's for Kazma's, so setup never installed its own, and uninstalling
     Docker Desktop would have cut Kazma off from its engine."""
-    return (bin_dir() / "docker.exe").is_file() and (_plugins_dir() / "docker-compose.exe").is_file()
+    return (bin_dir() / "docker.exe").is_file() and compose_plugin().is_file()
 
 
 def _client_dir() -> Path:
@@ -271,13 +271,23 @@ def _distros(run: Runner, *, running: bool = False) -> list[str] | None:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _docker(run: Runner, *args: str, timeout: float = 30) -> tuple[int, str]:
-    from kazma_core.docker_cli import find_docker_cli
+def _docker_reachable() -> bool:
+    """A way to ask Kazma's engine exists (``docker_cli.docker_command``)."""
+    from kazma_core.docker_cli import docker_command
 
-    cli = find_docker_cli()
-    if not cli:
+    return docker_command(["version"], context=CONTEXT) is not None
+
+
+def _docker(run: Runner, *args: str, timeout: float = 30) -> tuple[int, str]:
+    """``docker <args>`` on Kazma's engine by the one route
+    (``docker_cli.docker_command``: the distro's own docker through wsl.exe,
+    else the Windows CLI with the kazma-engine context)."""
+    from kazma_core.docker_cli import docker_command
+
+    cmd = docker_command(list(args), context=CONTEXT)
+    if cmd is None:
         return 127, "the docker CLI is not installed"
-    return _out(run, [cli, "--context", CONTEXT, *args], timeout=timeout)
+    return _out(run, cmd.argv, timeout=timeout, env=cmd.env)
 
 
 # ── checking ──────────────────────────────────────────────────────────────
@@ -299,7 +309,7 @@ class EngineCheck:
 
 def check(run: Runner = subprocess.run) -> EngineCheck:
     """What of Kazma's engine is on this machine (Windows)."""
-    from kazma_core.docker_cli import engine_installed, find_docker_cli
+    from kazma_core.docker_cli import engine_installed
 
     missing: list[str] = []
     distros = _distros(run)
@@ -321,7 +331,7 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     # too): Kazma's own copy missing is the "cli" step's, never a reason to
     # set up a Docker that answers again.
     code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
-                  if not {"distro", "context"} & set(missing) and find_docker_cli() else (1, ""))
+                  if not {"distro", "context"} & set(missing) and _docker_reachable() else (1, ""))
     waiting: list[str] = []
     if code == 0 and text.strip():
         version = text.strip().splitlines()[-1]
@@ -449,6 +459,37 @@ def _service_state(run: Runner) -> str | None:
         if key.strip() == "STATE" and value.split():
             return value.split()[-1]
     return None
+
+
+def shutdown_service_program() -> Path:
+    """The shutdown service's program, which setup builds on this machine."""
+    return _shutdown_service_dir() / "kazma-engine-shutdown.exe"
+
+
+def compose_plugin() -> Path:
+    """The Docker Compose plugin Kazma's engine setup installs."""
+    return _plugins_dir() / "docker-compose.exe"
+
+
+def shutdown_service_refusal(run: Runner = subprocess.run) -> int | None:
+    """Windows' error when the shutdown service is stopped because Windows
+    refused its program (``WIN32_EXIT_CODE`` of ``sc.exe query``), else None:
+    running, not installed, or stopped for another reason. Read only: nothing
+    is started (:mod:`kazma_core.windows_trust`)."""
+    from kazma_core.windows_policy import REFUSAL_CODES
+
+    code, text = _out(run, ["sc.exe", "query", SHUTDOWN_SERVICE])
+    if code != 0:
+        return None
+    state, exit_code = "", None
+    for line in text.splitlines():
+        key, _, value = line.partition(":")
+        words = value.split()
+        if key.strip() == "STATE" and words:
+            state = words[-1]
+        elif key.strip() == "WIN32_EXIT_CODE" and words and words[0].isdigit():
+            exit_code = int(words[0])
+    return exit_code if state == "STOPPED" and exit_code in REFUSAL_CODES else None
 
 
 def _service_command_line(run: Runner) -> str | None:
@@ -772,7 +813,7 @@ def _action_cli(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[b
     os.replace(tmp, bin_dir() / "docker.exe")
     compose = _fetch(DOWNLOADS["compose"], downloads, opener=opener)
     _plugins_dir().mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(compose, _plugins_dir() / "docker-compose.exe")
+    shutil.copyfile(compose, compose_plugin())
     _on_user_path(run, bin_dir())
     return True, f"docker.exe in {bin_dir()}, compose plugin in {_plugins_dir()}"
 
@@ -859,7 +900,7 @@ def _action_task(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[
 def _service_command() -> str:
     """The service's command line: its program and how long it may hold a
     shutdown for the engine's stop."""
-    exe = _shutdown_service_dir() / "kazma-engine-shutdown.exe"
+    exe = shutdown_service_program()
     return f'"{exe}" --budget {SHUTDOWN_BUDGET_S} --kazma-budget {SHUTDOWN_KAZMA_BUDGET_S}'
 
 
@@ -1114,7 +1155,7 @@ def remove(run: Runner = subprocess.run, log: Callable[[str], None] | None = Non
         _out(run, [cli, "context", "rm", "-f", CONTEXT])
     shutil.rmtree(_client_dir(), ignore_errors=True)
     shutil.rmtree(bin_dir(), ignore_errors=True)
-    plugin = _plugins_dir() / "docker-compose.exe"
+    plugin = compose_plugin()
     # The compose plugin setup put there, never one the owner installed.
     if plugin.is_file() and _sha256(plugin) == DOWNLOADS["compose"].sha256:
         plugin.unlink(missing_ok=True)
