@@ -58,6 +58,8 @@ class _EndedTurn:
     title: str = ""
     space: str = ""
     asker: str = ""
+    #: What became of the approval it waited on (``hitl_gates.CHAT_GONE_FATES``).
+    approval: str = ""
 
 
 #: thread_id -> the turn its chat's going away ended, newest last. Memory,
@@ -68,15 +70,18 @@ _ended_lock = threading.Lock()
 
 
 def record_ended(thread_id: str, *, reason: str, title: str = "", space: str = "", asker: str = "",
-                 at: float | None = None) -> None:
+                 at: float | None = None, approval: str = "") -> None:
     """The turn of *thread_id* ended because its chat went away (*reason*, a
-    ``chat_runs_end.REASONS`` code): listed cancelled, with why, from now on
-    for the registry's window. From any thread."""
+    ``chat_runs_end.REASONS`` code): listed cancelled, with why and what
+    became of the approval it waited on (*approval*, a
+    ``hitl_gates.CHAT_GONE_FATES`` code), from now on for the registry's
+    window. From any thread."""
     if not thread_id:
         return
     with _ended_lock:
         _ended[thread_id] = _EndedTurn(at=time.time() if at is None else at, reason=reason,
-                                      title=" ".join(str(title or "").split())[:90], space=space, asker=asker)
+                                      title=" ".join(str(title or "").split())[:90], space=space, asker=asker,
+                                      approval=approval)
         _ended.move_to_end(thread_id)
         while len(_ended) > _ENDED_KEPT:
             _ended.popitem(last=False)
@@ -201,7 +206,7 @@ class _ChatTurnAdapter:
                 run_id=f"chat_turn:{tid}", kind="chat_turn", native_id=tid,
                 title=end.title or tid[:12], state=RunState(self.STATE_MAP["ended"]),
                 native_state="ended", started_at=end.at, progress_at=end.at, ended_at=end.at,
-                version=f"ended:{int(end.at)}", link="/chat", ended_reason=end.reason,
+                version=f"ended:{int(end.at)}", link="/chat", ended_reason=end.reason, ended_gate=end.approval,
                 space=end.space, asker=end.asker,
             ))
         return runs

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## A chat that goes away never runs an approved call, and says what became of it (2026-11-27)
+
+- **No call runs for a chat that is gone.** An Approve that won the race
+  with a delete still ran its call on the deleted chat. Every drive that
+  carries out a decision (the chat page's Approve, the approval watchdog, a
+  chat app's button) now starts only while its chat is there, decided in one
+  step against the delete; a click that lost is told the chat went away.
+- **The record says what really happened.** An approved card whose chat went
+  away before its action started keeps your Approve and says the action did
+  not run; one whose action had started says whether it ran is not known. A
+  denial stays a denial and an expiry an expiry: neither reads "while its
+  approved call ran" any more, and the daily digest no longer counts them as
+  approvals that could not resume. Running work says it in English and
+  Arabic, and a late tap on a chat app's card is told the same.
+- **An archived chat says why its cut turn is gone.** A request a restart
+  cut off now ends when its chat is archived, and the chat says so in your
+  language; un-archiving it used to show nothing, and the next restart could
+  bring the request back. A chat archived before a restart gets the same.
+
 ## Spaces: Kazma's own database has one answer (2026-11-27)
 
 - Memory's copies on Postgres (the mirror and pgvector) now know Kazma's own

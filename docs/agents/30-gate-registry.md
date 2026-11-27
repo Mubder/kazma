@@ -137,6 +137,38 @@ loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
 between the read and the write. Only the chat's own mechanisms (`graph`,
 `semantic`). Gate: `tests/test_chat_gone_ends_runs.py` (claimed and resuming
 through the delete route; the race; two ends at once).
+**And no call runs for a chat that is gone; the record says what became of
+it** (the review of ec538d779, 2026-11-27). An Approve that won the race ran
+its call on the deleted chat (the end read `pending`, the claim landed, the
+end's write missed; or the delete landed between the decision and its drive),
+and a claimed gate the end took was `settled`/`approve` though its call never
+ran. Now: (1) every drive that carries out a recorded decision -- the approve
+route, the approval watchdog, a chat app's button -- asks
+`chat_runs_end.begin_drive` in the same step as it starts (no await between),
+and an end marks its thread going away and takes each gate's token
+(`_take`) before its write: one lock decides each gate, so either the drive
+started first (the end cancels a registered drive; the row is `error`, fate
+`cut`: it may have run) or the end did (no drive starts, the decider answers
+409 `chat_gone` / tells the chat, and the call is recorded as not run);
+(2) the end reads a gate again when a person's answer moved it meanwhile and
+ends it from there (`_end_one`); (3) `end_gate` keeps the person's decision
+and actor, writes `ended_reason` (why the chat went away, a column added by
+`add_missing_columns`) and words the row per decision
+(`hitl_gates.chat_gone_fate`: `not_needed`, `not_run`, `cut`, `denied`,
+`expired`; catalog `runs.gate_fate.<fate>` in EN and AR): only a driven
+approval is an `error`; an ended Deny or expiry is `settled` -- it was never
+a failed resume. Readers ask `ended_fate`: the daily digest counts
+`not_run` / `cut` apart from approvals (never `approve` for a call that did
+not run), a denial as a denial and an expiry as an expiry; a chat app's late
+tap is told what became of the call. Gates:
+`tests/test_chat_gone_race_lows.py` -- the real approve route with the delete
+in the step before its drive, the Approve landing inside the end for every
+way a chat goes away (the old one-write end as the control), every function
+that records a decision and starts its drive enumerated from the source and
+held to `begin_drive` first (planted controls: no token, an await between),
+and a gone chat's gates ending only through `end_gate` (planted control).
+`/abort` (Stop) still settles every live gate `aborted`, overwriting a
+person's decision: Stop is no chat going away, and it is declared there.
 
 **E2. An approval that expires is said for what it is, in the chat it was
 asked in** (2026-10-18). Live on Telegram: the watchdog auto-denied a

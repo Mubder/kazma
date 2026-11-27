@@ -648,6 +648,10 @@ DECLARED: dict[tuple[str, str, str], str] = {
         "approvals panel and with /hitl, and the watchdog expires it",
     ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_handle_hitl_resume_here",
      "gateway.GatewayManager.send"): _CHAT_REPLY,
+    ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_say_chat_gone",
+     "gateway.GatewayManager.send"):
+        _CHAT_REPLY + "; the decision's gate is ended by its chat's going away either way (the record says "
+        "its call did not run)",
     ("kazma-gateway/kazma_gateway/agent_handler/session_commands.py", "try_session_command._reply",
      "gateway.GatewayManager.send"): _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/commands.py", "_try_model_command",

@@ -1247,7 +1247,7 @@ def register_misc_routes(self: Any) -> None:
                 # or spawning execution. A registry outage leaves the pause.
                 from kazma_ui.hitl_decision import record_gate_decision
 
-                await record_gate_decision(
+                _recorded_iid = await record_gate_decision(
                     thread_id,
                     decision="approved" if approved else "denied",
                     actor=actor,
@@ -1265,6 +1265,26 @@ def register_misc_routes(self: Any) -> None:
                 )
                 if isinstance(resume_cmd.resume, dict) and "scope" in resume_cmd.resume:
                     resume_cmd.resume["scope"] = scope
+                # Carried out only while its chat is there, in the same step
+                # as the drive is registered (chat_runs_end.begin_drive): a
+                # chat deleted or archived since took the gate, and its record
+                # says the call did not run. Before, the drive started anyway
+                # and ran the approved call on a deleted chat (review L1).
+                from kazma_ui.chat_runs_end import begin_drive
+
+                if not begin_drive(thread_id, _recorded_iid, _live_iid):
+                    logger.warning("[HITL] thread=%s: its chat went away before the %s was carried out; "
+                                   "nothing runs", thread_id[:12], "approval" if approved else "denial")
+                    from kazma_ui.i18n import current_language
+                    from kazma_ui.i18n import t as _t
+
+                    return _JSONResponse(
+                        {"ok": False, "reason": "chat_gone", "thread_id": thread_id, "running": False,
+                         "interrupt_id": _recorded_iid or _live_iid, "hitl_state": "settled",
+                         "error": _t(f"runs.gate_fate.{'not_run' if approved else 'denied'}",
+                                     current_language())},
+                        status_code=409,
+                    )
                 _resume_inflight.add(thread_id)
                 # The resumed turn is its asker's, whoever answered (S2-05):
                 # an approver or the admin pressing for someone never runs

@@ -76,6 +76,9 @@ __all__ = [
     "fail_gate",
     "supersede_gate",
     "end_gate",
+    "CHAT_GONE_FATES",
+    "chat_gone_fate",
+    "ended_fate",
     "set_db_path_for_tests",
     "gate_for",
     "live_gates",
@@ -174,6 +177,11 @@ class GateRow:
     decision: str = ""        # approve | deny | yolo | option:<id> | orphaned…
     actor: str = ""
     supersedes: str = ""
+    #: Why something other than the gate's own work ended it: its chat went
+    #: away (a ``kazma_ui.chat_runs_end.REASONS`` code, :func:`end_gate`).
+    #: The decision a person recorded stays in ``decision``; this says it was
+    #: not carried out to its end (:func:`chat_gone_fate`).
+    ended_reason: str = ""
     created_at: float = field(default_factory=time.time)
     claimed_at: float | None = None
     settled_at: float | None = None
@@ -270,6 +278,7 @@ CREATE TABLE IF NOT EXISTS hitl_gates (
   decision     TEXT NOT NULL DEFAULT '',
   actor        TEXT NOT NULL DEFAULT '',
   supersedes   TEXT NOT NULL DEFAULT '',
+  ended_reason TEXT NOT NULL DEFAULT '',
   created_at   REAL NOT NULL,
   claimed_at   REAL,
   settled_at   REAL,
@@ -297,6 +306,7 @@ def ensure_gate_schema() -> None:
             add_missing_columns(conn, "hitl_gates", [
                 ("args_digest", "TEXT NOT NULL DEFAULT ''"),
                 ("asker", "TEXT NOT NULL DEFAULT ''"),
+                ("ended_reason", "TEXT NOT NULL DEFAULT ''"),
             ])
             conn.commit()
             _redact_stored_rows(conn)
@@ -470,6 +480,7 @@ def _row_to_gate(r: sqlite3.Row) -> GateRow:
         decision=r["decision"],
         actor=r["actor"],
         supersedes=r["supersedes"],
+        ended_reason=r["ended_reason"],
         created_at=r["created_at"],
         claimed_at=r["claimed_at"],
         settled_at=r["settled_at"],
@@ -694,7 +705,7 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
 # (values are always bound parameters); a whitelist keeps a future caller from
 # ever turning a payload key into SQL.
 _CAS_COLUMNS = frozenset(
-    {"decision", "actor", "claimed_at", "settled_at", "message", "supersedes"}
+    {"decision", "actor", "claimed_at", "settled_at", "message", "supersedes", "ended_reason"}
 )
 
 
@@ -882,30 +893,67 @@ def supersede_gate(gate_id: str, new_gate_id: str) -> GateRow | None:
     return row
 
 
-def end_gate(gate_id: str, from_state: str, *, outcome: str = "", message: str = "") -> GateRow | None:
+#: What became of a gate's call when its chat went away (:func:`end_gate`),
+#: by the decision on record; each is worded in the UI's catalog
+#: (``runs.gate_fate.<fate>``) and counted by the daily digest:
+#:
+#: * ``not_needed`` -- nobody had answered it; its call did not run;
+#: * ``not_run`` -- approved, and taken before its call started: it did not run;
+#: * ``cut`` -- approved, and its call's drive had started: it may have run;
+#: * ``denied`` -- denied: its call did not run (whatever carried the denial
+#:   on was cut, which is no failure of the denial);
+#: * ``expired`` -- nobody answered in time (the watchdog's deny): it did not run.
+CHAT_GONE_FATES = ("not_needed", "not_run", "cut", "denied", "expired")
+
+
+def chat_gone_fate(state: str, decision: str, actor: str, *, drove: bool) -> str:
+    """What became of a gate in *state* (a live one) when its chat went away
+    (:data:`CHAT_GONE_FATES`): by the decision on record, and *drove* --
+    whether the drive that carries the decision out had started
+    (``kazma_ui.chat_runs_end.begin_drive``). No I/O."""
+    if state == "pending":
+        return "not_needed"
+    if expired_unanswered(actor):
+        return "expired"
+    if str(decision or "").lower().startswith("deny"):
+        return "denied"
+    return "cut" if drove else "not_run"
+
+
+def end_gate(gate_id: str, from_state: str, *, outcome: str = "", reason: str = "", drove: bool = False,
+             words: dict[str, str] | None = None) -> GateRow | None:
     """End a live gate whose chat went away (``kazma_ui.chat_runs_end``), in
     ONE compare-and-set from exactly *from_state*, so a decision a person
-    records meanwhile is never overwritten (D2):
+    records meanwhile is never overwritten (D2). What its call became
+    (:func:`chat_gone_fate`) decides the row:
 
     * ``pending`` -> ``settled`` with *outcome* as its decision (nobody
       decided it);
-    * ``claimed`` -> ``settled``, keeping the decision a person recorded;
-    * ``resuming`` -> ``error``, keeping the decision: its call may have run
-      when the drive was cut (*message* says so).
+    * a recorded decision is KEPT in ``decision`` (and ``actor``), and the
+      row is ``settled`` -- unless the approved call's drive had started
+      (*drove*): then ``error``, as its call may have run (``cut``).
 
-    None when the row was not in *from_state* -- another writer moved it
-    first, and what it wrote stands."""
-    to_state = {"pending": "settled", "claimed": "settled", "resuming": "error"}.get(from_state)
-    if to_state is None:
+    *reason* (why the chat went away) is kept in ``ended_reason``, so no
+    reader takes an approval whose call never ran for one that did; the row's
+    message is ``words[fate]`` (the fate in words). None when the row was not
+    in *from_state* -- another writer moved it first, and what it wrote
+    stands (the caller reads it again)."""
+    if from_state not in ("pending", "claimed", "resuming"):
         raise ValueError(f"end_gate: not a live state {from_state!r}")
     ensure_gate_schema()
-    sets: dict[str, Any] = {"settled_at": time.time()}
-    if from_state == "pending" and outcome:
-        sets["decision"] = outcome
-    if to_state == "error" and message:
-        sets["message"] = _masked_message(message)
     conn = _connect()
     try:
+        held = _get(conn, gate_id)
+        if held is None or held.state != from_state:
+            return None
+        fate = chat_gone_fate(from_state, held.decision, held.actor, drove=drove)
+        to_state = "error" if fate == "cut" else "settled"
+        sets: dict[str, Any] = {"settled_at": time.time(), "ended_reason": reason}
+        if from_state == "pending" and outcome:
+            sets["decision"] = outcome
+        said = (words or {}).get(fate, "")
+        if said:
+            sets["message"] = _masked_message(said)
         row = _get(conn, gate_id) if _cas(conn, gate_id, from_state, to_state, sets) else None
     finally:
         conn.close()
@@ -1018,26 +1066,54 @@ def gate_outcomes_since(since: float) -> dict[str, int]:
     counted. Keys: ``error`` (the answer's resume failed), ``timeout`` (the
     row's state, or a question nobody answered that the watchdog settled as
     ``deny``: :func:`expired_unanswered`), the recorded decision
-    (``approve``, ``deny``, ``orphaned`` ...), else ``waiting``.
+    (``approve``, ``deny``, ``orphaned`` ...), else ``waiting``. An approved
+    question whose chat went away (``ended_reason``, :func:`end_gate`) is
+    ``not_run`` (taken before its call started) or ``cut`` (its call may
+    have run) -- never ``approve`` for a call that did not run, and never a
+    failed resume; a denied or expired one is counted as denied or expired.
     """
     ensure_gate_schema()
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT state, decision, actor FROM hitl_gates "
+            "SELECT state, decision, actor, ended_reason FROM hitl_gates "
             "WHERE created_at >= ? AND state != 'superseded'",
             (since,),
         ).fetchall()
     finally:
         conn.close()
     counts: dict[str, int] = {}
-    for state, decision, actor in rows:
-        if state in ("error", "timeout") or expired_unanswered(actor):
+    for state, decision, actor, ended_reason in rows:
+        fate = ended_fate(state, decision, actor, ended_reason)
+        if fate:
+            outcome = _DIGEST_KEY.get(fate) or decision or fate
+        elif state in ("error", "timeout") or expired_unanswered(actor):
             outcome = "timeout" if state != "error" else "error"
         else:
             outcome = decision or "waiting"
         counts[outcome] = counts.get(outcome, 0) + 1
     return counts
+
+
+#: The digest's key for each fate (``not_needed`` keeps its decision:
+#: ``not_needed`` or ``cleared``).
+_DIGEST_KEY = {"expired": "timeout", "denied": "deny", "cut": "cut", "not_run": "not_run"}
+
+
+def ended_fate(state: str, decision: str, actor: str, ended_reason: str) -> str:
+    """What became of the call of a gate its chat's going away ended
+    (:data:`CHAT_GONE_FATES`), read from the row :func:`end_gate` left; ""
+    for a gate that is live or ended another way. No I/O."""
+    if not ended_reason or state in LIVE_STATES:
+        return ""
+    low = str(decision or "").lower()
+    if not low or low in ("not_needed", "cleared"):
+        return "not_needed"
+    if expired_unanswered(actor):
+        return "expired"
+    if low.startswith("deny"):
+        return "denied"
+    return "cut" if state == "error" else "not_run"
 
 
 #: Who settles a question nobody answered in time (kazma_ui.hitl_timeout).

@@ -235,8 +235,16 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # chat's opener whom a resume with nothing bound would run as -- a
         # chat app's resume too (the second review: it ran unbound). Nothing
         # is bound on an install that does not enforce Spaces.
+        # Carried out only while its chat is there, in the same step as the
+        # drive is registered (chat_runs_end.begin_drive): a chat that went
+        # away since took the gate (expired, not run), and nothing continues.
+        from kazma_ui.chat_runs_end import begin_drive
         from kazma_ui.hitl_answerers import as_the_asker
 
+        if not begin_drive(thread_id, _iid, _intr_id):
+            logger.info("[HITL-WD] thread=%s: its chat went away before the expiry was carried out; "
+                        "nothing continues", str(thread_id)[:12])
+            return
         if route is not None and _chat_app_resumer is not None:
             with as_the_asker(whose):
                 task = asyncio.create_task(

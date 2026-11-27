@@ -12,6 +12,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يُعاد تشغيل Kazma. سيظهر الرد كاملًا في هذه المحادثة عند عودته.",
         "en": "Kazma is restarting. The full answer will appear in this chat when it is back.",
     },
+    # A turn a restart cut, ended when its chat was archived
+    # (kazma_ui/chat_runs_end.py _say_cut_turn_ended): said in the chat, so
+    # un-archiving it shows why the turn is not offered to continue.
+    "chat.cut_turn_archived": {
+        "ar": "قطعت إعادة تشغيل Kazma هذا الطلب، وانتهى عند أرشفة المحادثة فلن يُستأنف. "
+              "أرسل الطلب مرة أخرى إن كنت لا تزال تريده.",
+        "en": "A restart of Kazma cut this request off, and it ended when the chat was archived, so it "
+              "does not continue. Send the request again if you still want it.",
+    },
     "chat.actions": {
         "ar": "إجراءات",
         "en": "Actions",

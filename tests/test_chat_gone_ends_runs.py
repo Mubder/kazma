@@ -507,19 +507,27 @@ def test_a_space_erased_leaves_other_spaces_turns(store) -> None:
 # ── the review of f9a455918 ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("resuming", [False, True], ids=["claimed", "resuming"])
-def test_a_delete_racing_an_approve_keeps_the_persons_decision(store, web, resuming) -> None:
-    """F1: a gate a person answered keeps their decision; one whose drive was
-    cut mid-resume is an error with it (its call may have run) -- never
-    "no longer needed" (D2)."""
+@pytest.mark.parametrize(("resuming", "drove"), [(False, False), (True, False), (True, True)],
+                         ids=["claimed", "resuming", "resuming-driven"])
+def test_a_delete_racing_an_approve_keeps_the_persons_decision(store, web, resuming, drove) -> None:
+    """F1: a gate a person answered keeps their decision -- never "no longer
+    needed" (D2). One whose drive had started is an error with it (its call
+    may have run); one whose drive never started is settled, its call
+    recorded as not run (the review of ec538d779, L1:
+    tests/test_chat_gone_race_lows.py)."""
+    from kazma_ui.chat_runs_end import begin_drive
+
     chat = _waiting_chat(store)
     hitl_gates.claim_gate(chat.gate_id, "approve", "owner")
     if resuming:
         hitl_gates.mark_resuming(chat.gate_id)
+    if drove:
+        assert begin_drive(chat.thread_id, chat.gate_id)
     assert web.client.delete(f"/api/chat/sessions/{chat.session_id}").json() == {"status": "ok"}
     gate = hitl_gates.gate_for(chat.gate_id)
     assert gate is not None and gate.decision == "approve" and gate.actor == "owner", gate
-    assert gate.state == ("error" if resuming else "settled"), gate
+    assert gate.state == ("error" if drove else "settled"), gate
+    assert gate.ended_reason == "chat_deleted"
     assert hitl_gates.live_gates(chat.thread_id) == []
 
 
