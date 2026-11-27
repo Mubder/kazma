@@ -4,9 +4,10 @@
 
 - **One heading, in English and Arabic**: `docs/brand/heading.json` holds the
   line Kazma uses on both READMEs, the GitHub About, kazma.ai and social bios
-  (each under 160 characters), its short form and the lede taken from the
-  website. A test checks the READMEs carry it word for word and that it names
-  every chat app the gateway ships.
+  (each at most 160 characters; on Instagram, 150, leave out "Open-source"),
+  its short form and the lede taken from the website. The heading names any
+  model too. A test checks the READMEs carry it word for word and that it
+  names every chat app the gateway ships.
 - **WhatsApp in the README**: live since 16 Nov, but the README's head, its
   channel row, its diagram and the package table still listed Telegram,
   Discord and Slack only. They now name WhatsApp, read from the gateway's

@@ -8,7 +8,7 @@
   # Kazma
 
   <!-- kazma-heading:en (docs/brand/heading.json) -->
-  **Open-source, self-hosted AI agent that remembers you and asks before it acts. English and Arabic as equals, on web, WhatsApp, Telegram, Discord and Slack.**
+  **Open-source, self-hosted AI agent that remembers you & asks before it acts. English & Arabic as equals. Any model. Web, WhatsApp, Telegram, Discord & Slack.**
 
   Research, write and code. Run your mail and calendar, and draft, schedule and
   post on X. In English, Arabic, or both at once. Use any model, even a local
