@@ -37,6 +37,8 @@ import uuid
 import pytest
 from kazma_core.memory import state_backend as sb
 
+from tests._as_request import in_space, not_armed, tests_own
+
 # real_docker: pg_dump/pg_restore through ``docker exec`` when KAZMA_DB_CONTAINER names one.
 pytestmark = [pytest.mark.postgres, pytest.mark.real_docker]
 
@@ -59,6 +61,12 @@ def drill(tmp_path, monkeypatch):
     dsn = os.environ.get("KAZMA_DATABASE_URL") or ""
     if not dsn:
         pytest.skip("no Postgres configured")
+    # The drill rolls the shared tables back while the process runs. A
+    # restore takes the space role's rights on them (measured, S4-01 review
+    # point 4), so an armed process pushes nothing to them until a whole
+    # apply runs again: what an armed install does about a restore it finds
+    # is step 6's. This drill is the unarmed RPO and RTO.
+    not_armed(monkeypatch)
     try:
         from kazma_core.migration.pg_bridge import PgToolNotFound, resolve_pg_dump, resolve_pg_restore
 
@@ -95,15 +103,16 @@ def drill(tmp_path, monkeypatch):
     yield conn, backend, tenant, dsn, tmp_path
     dual_write._reset_mirror()
     conn.close()
-    pg = backend._connect()
-    try:
-        cur = pg.cursor()
-        cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
-        cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (tenant,))
-        pg.commit()
-    finally:
-        pg.close()
-        backend.close()
+    with tests_own():  # the test's own rows
+        pg = backend._connect()
+        try:
+            cur = pg.cursor()
+            cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
+            cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (tenant,))
+            pg.commit()
+        finally:
+            pg.close()
+            backend.close()
 
 
 def _write(tenant: str, i: int) -> str:
@@ -117,13 +126,14 @@ def _write(tenant: str, i: int) -> str:
 
 
 def _mirror_ids(backend, tenant: str) -> dict[str, str]:
-    pg = backend._connect()
-    try:
-        cur = pg.cursor()
-        cur.execute("SELECT id, tier FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
-        return {str(r[0]): str(r[1]) for r in cur.fetchall()}
-    finally:
-        pg.close()
+    with tests_own():  # the test's check of the mirror's rows
+        pg = backend._connect()
+        try:
+            cur = pg.cursor()
+            cur.execute("SELECT id, tier FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
+            return {str(r[0]): str(r[1]) for r in cur.fetchall()}
+        finally:
+            pg.close()
 
 
 def _scenario(drill, monkeypatch, *, probe: bool = True) -> dict:
@@ -154,8 +164,9 @@ def _scenario(drill, monkeypatch, *, probe: bool = True) -> dict:
     stats = sb.sync_state_mirror(conn)
     rto = time.monotonic() - started
     mirror = _mirror_ids(backend, tenant)
-    newest = recall(f"{_word(TURNS - 1)} plan", tenant_id=tenant)
-    gone = recall(f"{_word(1)} plan", tenant_id=tenant)
+    with in_space(tenant):  # each question is that tenant's turn
+        newest = recall(f"{_word(TURNS - 1)} plan", tenant_id=tenant)
+        gone = recall(f"{_word(1)} plan", tenant_id=tenant)
     return {
         "rolled_back": len(rolled_back),
         "missing": sorted(set(before + after) - set(mirror)),

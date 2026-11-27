@@ -16,15 +16,26 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Iterator
 
 import pytest
 
 from kazma_ui.session_manager import SessionManager
 from kazma_ui.session_spool import SessionSpool, merge_spooled, spool_path_for
 
+from tests._as_request import as_owner
+
 # Verified against a real Postgres; the CI Postgres job runs every test
 # carrying this marker (scripts/postgres_suite.py).
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_request() -> Iterator[None]:
+    """Each test is the owner's chat, saved and read as the chat page does: in
+    the owner's space, as the tenant middleware binds it (S4-01 step 5)."""
+    with as_owner():
+        yield
 
 ANSWER = "the finished answer the user must not lose"
 

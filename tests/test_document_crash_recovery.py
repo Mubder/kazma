@@ -36,6 +36,8 @@ from kazma_core.documents.jobs import DocumentJobState
 from kazma_core.documents.storage import SpaceStorage
 from kazma_core.documents.worker import DocumentWorker
 
+from tests._as_request import in_space, own
+
 #: Exit code of a child killed on purpose (anything else is a test bug).
 _KILLED = 137
 
@@ -99,10 +101,11 @@ def _service(root, backend_name: str) -> DocumentIngestionService:
 
 
 def _upload(svc, tenant: str, content: bytes, *, key: str | None, document_id=None):
-    return svc.ingest_stream(
-        io.BytesIO(content), filename="note.txt", tenant_id=tenant, actor_id="alice",
-        workspace_id="w", idempotency_key=key, document_id=document_id,
-    )
+    with in_space(tenant, "alice"):  # the upload request, in alice's space
+        return svc.ingest_stream(
+            io.BytesIO(content), filename="note.txt", tenant_id=tenant, actor_id="alice",
+            workspace_id="w", idempotency_key=key, document_id=document_id,
+        )
 
 
 def _kill_after(target, method: str) -> None:
@@ -196,28 +199,28 @@ def test_an_intake_killed_at_any_stage_is_recovered(tmp_path, backend, stage, ke
 
     svc = _service(tmp_path, backend.name)
     try:
-        snapshot = svc.admissions.snapshot(tenant_id=tenant)
+        snapshot = own(svc.admissions).snapshot(tenant_id=tenant)
         assert snapshot["pending"] == 0
         assert snapshot["stranded"] == 0
-        documents = svc.repository.list_documents(tenant_id=tenant)
+        documents = own(svc.repository).list_documents(tenant_id=tenant)
         if stage == "job":
             # Publication completed: the job is the proof, nothing is undone,
             # and the interrupted intake job is resumed as at a worker start.
             assert len(documents) == 1
-            assert svc.jobs.queue_stats(tenant_id=tenant).non_terminal == 1
+            assert own(svc.jobs).queue_stats(tenant_id=tenant).non_terminal == 1
             assert svc.recover_interrupted_intake() >= 1
-            [job_id] = svc.jobs.document_job_ids(tenant_id=tenant, document_id=documents[0].id)
-            assert svc.jobs.get(tenant_id=tenant, job_id=job_id).state is DocumentJobState.READY_TO_PARSE
+            [job_id] = own(svc.jobs).document_job_ids(tenant_id=tenant, document_id=documents[0].id)
+            assert own(svc.jobs).get(tenant_id=tenant, job_id=job_id).state is DocumentJobState.READY_TO_PARSE
         else:
             assert documents == []
-            assert svc.jobs.queue_stats(tenant_id=tenant).non_terminal == 0
+            assert own(svc.jobs).queue_stats(tenant_id=tenant).non_terminal == 0
         retry = _upload(svc, tenant, content, key=key)
         assert retry.job_id
         expected = 2 if (stage == "job" and not keyed) else 1
-        assert len(svc.repository.list_documents(tenant_id=tenant)) == expected
+        assert len(own(svc.repository).list_documents(tenant_id=tenant)) == expected
         if keyed and stage == "job":
             assert retry.reused
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0
     finally:
         svc.close()
 
@@ -237,14 +240,14 @@ def test_a_new_version_killed_midway_leaves_the_document_on_its_old_version(tmp_
 
     svc = _service(tmp_path, backend.name)
     try:
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0
-        [document] = svc.repository.list_documents(tenant_id=tenant)
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0
+        [document] = own(svc.repository).list_documents(tenant_id=tenant)
         assert str(document.id) == str(first.document_id)
         assert str(document.current_version_id) == str(first.version_id)
-        assert [str(v.id) for v in svc.repository.list_versions(
+        assert [str(v.id) for v in own(svc.repository).list_versions(
             tenant_id=tenant, document_id=document.id)] == [str(first.version_id)]
         second = _upload(svc, tenant, second_body, key="v2", document_id=str(first.document_id))
-        refreshed = svc.repository.get_document(tenant_id=tenant, document_id=document.id)
+        refreshed = own(svc.repository).get_document(tenant_id=tenant, document_id=document.id)
         assert str(refreshed.current_version_id) == str(second.version_id)
     finally:
         svc.close()
@@ -263,8 +266,8 @@ def test_an_owner_that_cannot_be_proven_dead_is_never_taken_over(tmp_path, backe
     ) == _KILLED
     svc = _service(tmp_path, backend.name)
     try:
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0  # recovered as dead
-        assert svc.repository.list_documents(tenant_id=tenant) == []
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0  # recovered as dead
+        assert own(svc.repository).list_documents(tenant_id=tenant) == []
         # Pretend the next intake's owner lives on another host.
         assert _run_child(
             _intake_child, tmp_path, backend.name, tenant, "document", "k2", b"other " + tenant.encode(), None
@@ -282,10 +285,10 @@ def test_an_owner_that_cannot_be_proven_dead_is_never_taken_over(tmp_path, backe
 
     svc = _service(tmp_path, backend.name)
     try:
-        snapshot = svc.admissions.snapshot(tenant_id=tenant)
+        snapshot = own(svc.admissions).snapshot(tenant_id=tenant)
         assert snapshot["pending"] == 1
         assert snapshot["stranded"] == 1
-        assert len(svc.repository.list_documents(tenant_id=tenant)) == 1  # its document is kept
+        assert len(own(svc.repository).list_documents(tenant_id=tenant)) == 1  # its document is kept
         readiness = svc.readiness()
         assert readiness["stranded_intake_reservations"] >= 1
         assert "document_intake_reservations_stranded" in readiness["degraded_reasons"]
@@ -305,15 +308,15 @@ def test_without_recovery_a_dead_intake_stays_held(tmp_path, backend, monkeypatc
     monkeypatch.setattr(DocumentIngestionService, "_recover_stranded_intakes", lambda self: 0)
     svc = _service(tmp_path, backend.name)
     try:
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 1
-        assert len(svc.repository.list_documents(tenant_id=tenant)) == 1
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 1
+        assert len(own(svc.repository).list_documents(tenant_id=tenant)) == 1
     finally:
         monkeypatch.undo()
         svc.close()
     svc = _service(tmp_path, backend.name)  # the next start with recovery on
     try:
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0
-        assert svc.repository.list_documents(tenant_id=tenant) == []
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0
+        assert own(svc.repository).list_documents(tenant_id=tenant) == []
     finally:
         svc.close()
 
@@ -352,23 +355,23 @@ async def test_a_worker_killed_inside_a_stage_is_recovered_by_lease_expiry(tmp_p
 
     svc = _service(tmp_path, backend.name)
     try:
-        crashed = svc.jobs.get(tenant_id=tenant, job_id=result.job_id)
+        crashed = own(svc.jobs).get(tenant_id=tenant, job_id=result.job_id)
         assert crashed.state is state and crashed.lease_owner == "doomed-worker"
         clock = {"now": datetime.now(UTC) + timedelta(hours=1)}
         monkeypatch.setattr(svc.jobs, "_clock", lambda: clock["now"])
         assert svc.jobs.recover_expired_leases(tenant_id=tenant) == 1
-        waiting = svc.jobs.get(tenant_id=tenant, job_id=result.job_id)
+        waiting = own(svc.jobs).get(tenant_id=tenant, job_id=result.job_id)
         assert waiting.state is DocumentJobState.RETRY_WAIT
         assert waiting.stage == state.value  # resumes at the stage that died
         clock["now"] += timedelta(hours=1)
         await _drive(svc, tenant)
-        job = svc.jobs.get(tenant_id=tenant, job_id=result.job_id)
+        job = own(svc.jobs).get(tenant_id=tenant, job_id=result.job_id)
         assert job.state is DocumentJobState.READY, (job.state, job.error_code)
         # No duplicate effects: one document, one version, one job.
-        assert len(svc.repository.list_documents(tenant_id=tenant)) == 1
-        assert len(svc.repository.list_versions(tenant_id=tenant, document_id=result.document_id)) == 1
-        assert svc.jobs.document_job_ids(tenant_id=tenant, document_id=result.document_id) == [result.job_id]
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0
+        assert len(own(svc.repository).list_documents(tenant_id=tenant)) == 1
+        assert len(own(svc.repository).list_versions(tenant_id=tenant, document_id=result.document_id)) == 1
+        assert own(svc.jobs).document_job_ids(tenant_id=tenant, document_id=result.document_id) == [result.job_id]
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0
     finally:
         svc.close()
 
@@ -388,11 +391,11 @@ async def test_a_running_service_recovers_another_process_intake(tmp_path, backe
             _intake_child, tmp_path, backend.name, tenant, "document", "live", b"live " + tenant.encode(), None
         ) == _KILLED
         for _ in range(100):
-            if svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0:
+            if own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0:
                 break
             await asyncio.sleep(0.1)
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 0
-        assert svc.repository.list_documents(tenant_id=tenant) == []
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 0
+        assert own(svc.repository).list_documents(tenant_id=tenant) == []
     finally:
         await svc.stop_workers()
         svc.close()
@@ -414,8 +417,8 @@ async def test_without_the_sweep_the_other_process_intake_stays_held(tmp_path, b
             _intake_child, tmp_path, backend.name, tenant, "document", "held", b"held " + tenant.encode(), None
         ) == _KILLED
         # The child has exited; with the sweep idled nothing else recovers it.
-        assert svc.admissions.snapshot(tenant_id=tenant)["pending"] == 1
-        assert len(svc.repository.list_documents(tenant_id=tenant)) == 1
+        assert own(svc.admissions).snapshot(tenant_id=tenant)["pending"] == 1
+        assert len(own(svc.repository).list_documents(tenant_id=tenant)) == 1
     finally:
         await svc.stop_workers()
         svc._recover_stranded_intakes()  # leave the shared database clean

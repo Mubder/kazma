@@ -16,15 +16,26 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 
 from kazma_core.db.pg_helpers import json_dumps, strip_nul
 from kazma_core.db.postgres_pool import _without_nul
 
 import pytest
 
+from tests._as_request import as_owner
+
 # Verified against a real Postgres; the CI Postgres job runs every test
 # carrying this marker (scripts/postgres_suite.py).
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_request() -> Iterator[None]:
+    """Each test is the owner's request, as the chat page's and the swarm page's are: in
+    the owner's space, as the tenant middleware binds it (S4-01 step 5)."""
+    with as_owner():
+        yield
 
 NUL = chr(0)
 REPLACEMENT = chr(0xFFFD)

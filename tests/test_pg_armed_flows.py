@@ -43,6 +43,11 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
 
     from tests.test_pg_app_role import _every_store_set_up
 
+    # As a start: the stores' schema, then the rules, then arming. In an armed
+    # run (tests/_second_lock_armed.py) the setup's writes would otherwise go
+    # through a space door before this test's rules are back in place (the
+    # last test's teardown took the space role's rights).
+    monkeypatch.setattr(row_security, "_armed", False)
     _every_store_set_up(dsn)
     monkeypatch.setattr(row_security, "_in_place", row_security.in_place())  # given back after the test
     done = row_security.apply(dsn, vector_table="")

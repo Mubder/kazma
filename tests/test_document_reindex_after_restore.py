@@ -39,6 +39,8 @@ from kazma_core.stores.knowledge import KnowledgeStore
 from kazma_core.stores.knowledge_index import KnowledgeIndex
 from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
 
+from tests._as_request import in_space, own
+
 _BODY = b"Quarterly turbine inspection checklist for the northern plant.\n"
 _WORD = "turbine"
 
@@ -113,10 +115,11 @@ async def _drive(svc, tenant: str) -> None:
 
 
 def _ready(svc, tenant: str, body: bytes = _BODY, document_id=None):
-    result = svc.ingest_stream(io.BytesIO(body), filename="checklist.txt", tenant_id=tenant,
-                               actor_id="alice", workspace_id="w", document_id=document_id)
-    asyncio.run(_drive(svc, tenant))
-    status = svc.job_status(tenant_id=tenant, job_id=result.job_id, actor_id=SYSTEM_ACTOR)
+    with in_space(tenant, "alice"):  # the upload request, in alice's space
+        result = svc.ingest_stream(io.BytesIO(body), filename="checklist.txt", tenant_id=tenant,
+                                   actor_id="alice", workspace_id="w", document_id=document_id)
+    asyncio.run(_drive(svc, tenant))  # the worker: claims as the install, works in the job's space
+    status = own(svc).job_status(tenant_id=tenant, job_id=result.job_id, actor_id=SYSTEM_ACTOR)
     assert status["state"] == "ready", status
     return result
 
@@ -136,10 +139,11 @@ def _indexed_then_restored(tmp_path, backend, *, with_library: bool = True):
                       _library_store(tmp_path / "source-settings.db", tenant))
     try:
         doc = _ready(source, tenant)
-        source.index_document(tenant_id=tenant, actor_id="alice",
-                              document_id=doc.document_id, library_id="docs")
+        with in_space(tenant, "alice"):  # alice's request: index it into her library
+            source.index_document(tenant_id=tenant, actor_id="alice",
+                                  document_id=doc.document_id, library_id="docs")
         assert _hits(source, tenant, doc.document_id)
-        version = source.repository.get_document(
+        version = own(source.repository).get_document(
             tenant_id=tenant, document_id=DocumentId(doc.document_id)
         ).current_version_id
     finally:
@@ -163,7 +167,7 @@ def test_a_restored_store_is_searchable_again_after_the_reconcile(tmp_path, back
         assert report["reindexed"] == [entry]
         assert report["failed"] == report["library_missing"] == report["unavailable"] == []
         assert _hits(svc, backend.tenant, doc.document_id)
-        events = svc.audit.list_events(tenant_id=backend.tenant, document_id=doc.document_id,
+        events = own(svc.audit).list_events(tenant_id=backend.tenant, document_id=doc.document_id,
                                        event_type="index")["events"]
         assert any(e["action"] == "reconcile" and e["actor_id"] == "alice" for e in events)
         # Idempotent: a second pass has nothing to do.
@@ -231,8 +235,9 @@ def _unindex_after_reading(svc, tenant: str, doc) -> None:
 
     def read_then_unindex():
         held = real()
-        svc.unindex_document(tenant_id=tenant, actor_id="alice",
-                             document_id=doc.document_id, library_id="docs")
+        with in_space(tenant, "alice"):  # alice's request, in between
+            svc.unindex_document(tenant_id=tenant, actor_id="alice",
+                                 document_id=doc.document_id, library_id="docs")
         return held
 
     store.document_index_entries = read_then_unindex
@@ -245,7 +250,7 @@ def test_an_unindex_during_the_reconcile_is_not_undone(tmp_path, backend):
         report = svc.reconcile_index(tenant_id=backend.tenant)
         assert report["reindexed"] == []
         assert _hits(svc, backend.tenant, doc.document_id) == []
-        assert svc.repository.list_indexed_libraries(
+        assert own(svc.repository).list_indexed_libraries(
             tenant_id=backend.tenant, document_id=DocumentId(doc.document_id)) == ()
     finally:
         svc.close()
@@ -256,7 +261,7 @@ def test_without_the_recheck_the_unindex_is_undone(tmp_path, backend, monkeypatc
     # re-check under the publication lock would, and the unindex is undone.
     svc, doc, _entry = _indexed_then_restored(tmp_path, backend)
     try:
-        stale = svc.repository.list_document_chunks(
+        stale = own(svc.repository).list_document_chunks(
             tenant_id=backend.tenant, library_id="docs", document_id=DocumentId(doc.document_id))
         assert stale
         monkeypatch.setattr(svc.repository, "list_document_chunks", lambda **_kw: stale)
@@ -274,7 +279,7 @@ def test_a_superseded_version_is_reported_not_republished(tmp_path, backend):
     try:
         newer = _ready(svc, tenant, b"Second revision of the plant checklist.\n",
                        document_id=doc.document_id)
-        current = svc.repository.get_document(
+        current = own(svc.repository).get_document(
             tenant_id=tenant, document_id=DocumentId(newer.document_id)).current_version_id
         assert str(current) != entry["version_id"]
         report = svc.reconcile_index(tenant_id=tenant)
@@ -296,8 +301,9 @@ def test_extra_and_orphaned_chunks_are_pruned_only_on_request(tmp_path, backend)
     svc = _service(tmp_path / "content", backend.name, store)
     try:
         doc = _ready(svc, tenant)
-        svc.index_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id,
-                           library_id="docs")
+        with in_space(tenant, "alice"):  # alice's request: index it into her library
+            svc.index_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id,
+                               library_id="docs")
         held = store.get_document_chunks(tenant_id=tenant, library_id="docs",
                                          document_id=str(doc.document_id))
         # Orphaned: chunks of a document this store has never heard of (a
@@ -311,7 +317,7 @@ def test_extra_and_orphaned_chunks_are_pruned_only_on_request(tmp_path, backend)
         )
         # Extra: a live document the store records as unindexed (a restore to
         # a point after it was taken out of the library).
-        svc.repository.tombstone_document_chunks(
+        own(svc.repository).tombstone_document_chunks(
             tenant_id=tenant, document_id=DocumentId(doc.document_id), library_id="docs")
         version = str(held[0]["version_id"])
 
@@ -341,14 +347,16 @@ def _restored_after_delete(tmp_path, backend):
     store = _library_store(path, tenant)
     svc = _service(tmp_path / "content", backend.name, store)
     doc = _ready(svc, tenant)
-    svc.index_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id, library_id="docs")
+    with in_space(tenant, "alice"):  # alice's request: index it into her library
+        svc.index_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id, library_id="docs")
     assert _hits(svc, tenant, doc.document_id)
     store.close()
     shutil.copyfile(path, tmp_path / "backup.db")
     store = KnowledgeStore(str(path))
     svc.knowledge_adapter.store = store
     svc.knowledge_adapter.index._store = store
-    svc.delete_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id)
+    with in_space(tenant, "alice"):  # alice's request: delete it
+        svc.delete_document(tenant_id=tenant, actor_id="alice", document_id=doc.document_id)
     assert _hits(svc, tenant, doc.document_id) == []
     svc.close()
     store.close()

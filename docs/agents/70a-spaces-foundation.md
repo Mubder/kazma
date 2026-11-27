@@ -188,8 +188,9 @@ an install with one account behaves as before.
   swarm, chats and the mirror armed and enforced, seeded as requests bind:
   each space reads its own; not armed as the control).
   `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
-  (`tests/_second_lock_armed.py`); a test there that reaches the database
-  with nothing bound fails, and binding every test is step 5's.
+  (`tests/_second_lock_armed.py`: the rules put back and the lock armed
+  again at each module, with no backfill); a test there that reaches the
+  database with nothing bound fails.
 - **The checkpointer's door** (S4-01 step 4, `checkpoints_pg.py`,
   `db/row_security.py`, the gateway's `stores/checkpoint.py`; nothing arms
   it). The checkpointer's pool asks `row_security.checkpoint_door()` at each
@@ -232,6 +233,28 @@ an install with one account behaves as before.
   its control, the H4 gate over `exec_` and the sync senders, the check's
   cancel, a closed pool). No flow moves a thread between spaces: the chat
   move forks, its copy written under the target's scope.
+- **Every Postgres suite armed** (S4-01 step 5; nothing arms the product).
+  The chat move runs armed end to end on Postgres (no restamp: thread
+  records never change, and the move forks under the target's scope), and
+  the faults hold armed: a space role lost while running (refused and said
+  as the space half's, never an outage), `/health/ready` and `/health/deep`,
+  the audit prune (`tests/test_pg_second_lock_faults.py`). The whole
+  Postgres suite runs armed as well as not. Each test binds what the
+  request or turn it stands for would (`tests/_as_request.py`: `as_owner`,
+  the tenant middleware's answer with Spaces off; `in_space`; the real
+  tenant middleware in front of a test's own app); a store test's own seeds
+  and checks are the install's (`tests_own`, `own(store)`); a private part
+  of a declared pass, called directly, takes that pass's door; a thread a
+  test starts says its own. A test that pins how an install reads with the
+  lock not armed says so (`not_armed`): Spaces off as before, step 1's
+  report mode, the first lock's controls, a database of a test's own that
+  never had the rules, the mirror's own connections, and a restore of the
+  shared tables while running, which takes the space role's rights until a
+  whole `apply` (step 6's to handle). The armed run found one fault, fixed
+  with its class: a closed shared pool made a space half at its next space
+  checkout and wrote through it (`PostgresPool._space_half` raises
+  `PoolClosed`, as the checkpointer's does; a gate reads every
+  `_space_half`, `tests/test_checkpoint_doors.py`).
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

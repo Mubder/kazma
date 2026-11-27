@@ -791,6 +791,11 @@ def test_zz_the_remove_file_takes_the_lock_out(rs: Any, db: dict[str, str]) -> N
     with psycopg.connect(db["base"], autocommit=True) as admin:
         for other in db["extra"]:  # the role's rights in other databases go with them
             admin.execute(f'DROP DATABASE IF EXISTS "{other}" WITH (FORCE)')
+        # An armed run keeps the rules, and the role's rights, in the shared
+        # test database too (tests/_second_lock_armed.py): they go first, and
+        # its next module puts them back.
+        if admin.execute("SELECT 1 FROM pg_roles WHERE rolname = 'kazma_space'").fetchone():
+            admin.execute("DROP OWNED BY kazma_space")
     db["extra"].clear()
     _seed(db)
     with psycopg.connect(db["su"], autocommit=True) as conn:

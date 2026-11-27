@@ -17,11 +17,14 @@ import secrets
 import sqlite3
 import time
 import unicodedata
+from collections.abc import Iterator
 
 import pytest
 from kazma_core.documents import arabic
 from kazma_core.memory import chat_history, transcript_recall
 from kazma_core.memory.transcript_recall import search_transcripts
+
+from tests._as_request import in_space
 
 #: (what it is, the question, what the chat says)
 SPELLINGS = [
@@ -95,8 +98,10 @@ class Chats:
 
 
 @pytest.fixture()
-def chats(data) -> Chats:
-    return Chats(data)
+def chats(data) -> Iterator[Chats]:
+    made = Chats(data)
+    with in_space(made.tenant):  # saved and searched in a turn of that tenant, as the chat page and the tool are
+        yield made
 
 
 # ── Every spelling ────────────────────────────────────────────────────────

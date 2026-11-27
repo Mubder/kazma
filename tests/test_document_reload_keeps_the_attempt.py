@@ -17,12 +17,23 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Iterator
 
 import pytest
 
 from kazma_core.documents.models import DocumentJobState
 from kazma_core.documents.worker import DocumentWorker, StageResult
+from tests._as_request import tests_own
 from tests.test_document_worker import _ready_job, _wait_state
+
+
+@pytest.fixture(autouse=True)
+def _the_tests_own_rows() -> Iterator[None]:
+    """A store test: what it seeds, reads and deletes is its own, of no space
+    -- the install's (S4-01 step 5). The doors of the store's callers are the
+    flow tests' and the door gates' (tests/test_row_work_gates.py)."""
+    with tests_own():
+        yield
 
 
 def test_three_graceful_stops_never_dead_letter_a_job(tmp_path):

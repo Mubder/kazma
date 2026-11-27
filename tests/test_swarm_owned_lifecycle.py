@@ -31,6 +31,7 @@ import ast
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,18 @@ from kazma_core.swarm.engine import SwarmEngine
 from kazma_core.swarm.task import TERMINAL_STATUSES, SwarmTask, TaskResult, TaskStatus, TaskType
 from kazma_core.swarm.task_store import TaskStore
 
+from tests._as_request import as_owner, bound_like_a_request
+
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_request() -> Iterator[None]:
+    """Each test is the owner's swarm work, dispatched and read as the swarm
+    page and the swarm tool do: in the owner's space, as the tenant middleware
+    and the turn bind it (S4-01 step 5). Its apps have that middleware."""
+    with as_owner():
+        yield
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -620,7 +632,7 @@ def test_the_panel_answers_a_full_swarm_with_429(monkeypatch, tmp_path: Path) ->
     monkeypatch.setenv("KAZMA_SWARM_MAX_ACTIVE", "1")
     router = APIRouter()
     routes_tasks.register_tasks_routes(router, templates=None)
-    app = FastAPI()
+    app = bound_like_a_request(FastAPI())
     app.include_router(router)
     client = TestClient(app)
 

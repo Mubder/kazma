@@ -23,6 +23,8 @@ from typing import Annotated, TypedDict
 import pytest
 from kazma_core import checkpoints_pg
 
+from tests._as_request import as_owner
+
 REPO = Path(__file__).resolve().parents[1]
 PRODUCT = [REPO / d for d in (
     "kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",
@@ -146,5 +148,6 @@ def test_a_chat_outlives_its_checkpointer_on_a_real_postgres():
         import selectors
 
         factory = lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())  # noqa: E731
-    with asyncio.Runner(loop_factory=factory) as runner:
+    # The owner's chat turns, bound before the runner copies the context.
+    with as_owner(), asyncio.Runner(loop_factory=factory) as runner:
         runner.run(scenario())

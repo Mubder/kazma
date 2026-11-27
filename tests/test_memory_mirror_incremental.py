@@ -31,6 +31,8 @@ import pytest
 from kazma_core.memory import state_backend as sb
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
+from tests._as_request import not_armed, tests_own
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -423,6 +425,10 @@ def test_a_change_queued_after_the_read_stays_queued(world, monkeypatch):
 def test_the_backend_reuses_its_connections(monkeypatch):
     psycopg = pytest.importorskip("psycopg")
     pytest.importorskip("psycopg_pool")
+    # The mirror's own pool and connections, as an unarmed install opens them:
+    # armed, on Kazma's own database it takes the shared pool's door instead
+    # and opens none of its own (S4-01 step 3; tests/test_pg_armed_flows.py).
+    not_armed(monkeypatch)
     dsn = os.environ.get("KAZMA_DATABASE_URL") or ""
     if not dsn:
         pytest.skip("no Postgres configured")
@@ -454,17 +460,19 @@ def test_the_backend_reuses_its_connections(monkeypatch):
                 assert backend.mirror_episode({"id": f"{tenant}-{i}", "tenant_id": tenant, "session_id": "s",
                                                "turn_number": i, "user_text": "u", "assistant_text": "a",
                                                "tier": "episodic", "created_at": time.time()})
-            assert len(backend.episode_digest()) >= 40
+            with tests_own("as the mirror's sync pass reads it: every space's rows"):
+                assert len(backend.episode_digest()) >= 40
             return len(opened)
         finally:
             monkeypatch.setattr(psycopg.Connection, "connect", classmethod(real))
             monkeypatch.setattr(psycopg, "connect", real_module)
-            conn = backend._connect()
-            try:
-                conn.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
-                conn.commit()
-            finally:
-                conn.close()
+            with tests_own():  # the test's own rows
+                conn = backend._connect()
+                try:
+                    conn.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
+                    conn.commit()
+                finally:
+                    conn.close()
             backend.close()
 
     assert run(pooled=True) <= 4
