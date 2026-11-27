@@ -28,8 +28,8 @@ _HELD_LOCK = threading.Lock()
 
 
 def _own_identity() -> list:
-    """This process as a lease records it: [pid, process start time], the
-    start read once (``process_start``)."""
+    """This process as a lease records it: [pid, start(, stamp)]
+    (``process_start``)."""
     return process_start.own_identity()
 
 
@@ -40,9 +40,7 @@ def _holds(token) -> bool:
 
 def _left_behind(identity, token) -> bool:
     """A lease this process recorded and no longer holds."""
-    if not isinstance(identity, list) or len(identity) != 2:
-        return False
-    return process_start.is_this_process(identity[0], identity[1]) and not _holds(token)
+    return process_start.identity_is_this_process(identity) and not _holds(token)
 
 
 def _key(origin):

@@ -44,7 +44,12 @@ code) and Kazma ran with nobody supervising it.
   `time.sleep` raises), and the logger never raises.
 - **A recorded PID is verified before it is reaped:** creation time recorded
   at spawn, a python image otherwise. A PID left by a dead guard can belong
-  to anything by now.
+  to anything by now. On Linux the stamp (`child_stamp`, the broker's
+  `stamp`: boot id and start ticks, `_process_start_stamp`) is compared
+  first, exactly: the creation time there moves with the wall clock, and a
+  WSL2 VM drifting a second every 30 s turned an orphan recorded minutes
+  earlier into "pid reused", not reaped (2026-11-27). The stamp is
+  `kazma_core.process_start`'s (§35), checked by `tests/test_process_start.py`.
 - **The server says when its guard is gone.** The maintenance cadence runs
   `observability/supervisor_watch.check_supervisor`: with
   `KAZMA_GUARD_STATE_FILE` set (the guard started this server) and no

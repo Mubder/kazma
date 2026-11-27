@@ -1635,6 +1635,29 @@ def _process_started_at(pid: int) -> float | None:
         return None
 
 
+def _process_start_stamp(pid: int) -> str | None:
+    """Linux: ``linux:<boot_id>:<start ticks>`` of *pid*, else None.
+
+    The time ``_process_started_at`` gives is ticks plus ``/proc/stat``'s
+    btime, and btime moves whenever the wall clock is stepped: a whole second
+    about every 30 s on a loaded WSL2 VM (2026-11-27), so a server recorded
+    minutes earlier read as "pid reused" and was not reaped. Neither the
+    ticks since boot nor the boot id move with the clock. The same stamp as
+    ``kazma_core.process_start.stamp_of`` (the guard is loaded by path with
+    the standard library only, so it keeps its own copy;
+    ``tests/test_process_start.py`` checks the two agree).
+    """
+    if pid <= 0 or not sys.platform.startswith("linux"):
+        return None
+    try:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        data = Path(f"/proc/{int(pid)}/stat").read_bytes()
+        ticks = int(data[data.rindex(b")") + 2:].split()[19])
+    except Exception:
+        return None
+    return f"linux:{boot}:{ticks}" if boot else None
+
+
 def _read_state() -> dict:
     try:
         data = json.loads(_state_path().read_text(encoding="utf-8") or "{}")
@@ -1660,7 +1683,18 @@ def _recorded_child_is_ours(pid: int, data: dict, log: GuardLog) -> bool:
     now, and reaping it is ``taskkill /T /F`` of a whole tree. The recorded
     creation time settles it when both sides are known; otherwise only a
     python image is ever reaped -- the rule reap_port_holder already follows.
+    On Linux the recorded stamp (boot id and start ticks) settles it first,
+    exactly: the creation time there moves with the wall clock.
     """
+    recorded_stamp = data.get("child_stamp")
+    actual_stamp = _process_start_stamp(pid) if isinstance(recorded_stamp, str) else None
+    if actual_stamp is not None:
+        if actual_stamp != recorded_stamp:
+            log("warn", "orphan.pid_reused", pid=pid,
+                recorded_stamp=recorded_stamp, actual_stamp=actual_stamp,
+                note="the recorded child is gone; this pid is another process")
+            return False
+        return True
     recorded = data.get("child_created")
     actual = _process_started_at(pid)
     if isinstance(recorded, (int, float)) and actual is not None:
@@ -1730,6 +1764,7 @@ def _record_child(pid: int | None) -> None:
     _update_state(
         child_pid=pid or 0,
         child_created=_process_started_at(pid) if pid else None,
+        child_stamp=_process_start_stamp(pid) if pid else None,
         guard_pid=os.getpid(),
     )
 
@@ -2543,6 +2578,7 @@ class DocumentBroker:
         self._status: dict = {}
         self._stopping = False
         self._created: float | None = None
+        self._stamp: str | None = None
         # Maintenance: wanted or not, nothing starts until the next spawn.
         self.held = False
 
@@ -2634,7 +2670,8 @@ class DocumentBroker:
             return
         if not pid or pid == os.getpid() or not _pid_alive(pid):
             return
-        if not _recorded_child_is_ours(pid, {"child_created": rec.get("created")}, self.log):
+        if not _recorded_child_is_ours(pid, {"child_created": rec.get("created"),
+                                             "child_stamp": rec.get("stamp")}, self.log):
             return
         self.log("warn", "broker.orphan_reaping", pid=pid)
         try:
@@ -2858,6 +2895,7 @@ class DocumentBroker:
                 fh.close()
         self._spawned = time.monotonic()
         self._created = _process_started_at(self.proc.pid)
+        self._stamp = _process_start_stamp(self.proc.pid)
         self._next_probe = self._spawned + 2.0
         self._probe_failures = 0
         self.started_at = time.time()
@@ -3040,6 +3078,7 @@ class DocumentBroker:
             "log": str(_broker_log_path()),
             "pid": proc.pid if proc is not None else None,
             "created": self._created if proc is not None else None,
+            "stamp": self._stamp if proc is not None else None,
             "image_requested": self.image_requested,
             "image": status.get("image_ref"),
             "image_id": status.get("image_id"),

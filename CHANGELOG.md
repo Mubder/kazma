@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## A process's start time is read once and compared in one place (2026-11-27)
+## A process's start is told by what no clock step moves (2026-11-27)
 
 - **The failure**: prepush's Linux part failed once on
   `test_a_second_crawl_of_a_library_is_its_own_code`: the Knowledge ingest
@@ -11,25 +11,47 @@
   boot plus `/proc/stat`'s boot time, read again on every call, and the boot
   time moves whenever the wall clock is stepped. On Docker Desktop's WSL2 VM
   (`hv_utils.timesync_implicit=Y`) it moved a whole second about every 30 s
-  while the PC was loaded (3.7 s in 90 s, measured), and one process's own
-  start went from `...883.48` to `...884.48` between two readings. The crawl
-  journal compared a recorded start with a fresh reading exactly. Waiting for
-  the boot time to step between the crawl's start and the ingest reproduced
-  the failure on that kernel every time, with no mocks.
+  while the PC was loaded (3.7 s in 90 s, measured; 11 s in about 130 s
+  under a second prepush), and one process's own start went from
+  `...883.48` to `...884.48` between two readings. The crawl journal
+  compared a recorded start with a fresh reading exactly. Waiting for the
+  boot time to step between the crawl's start and the ingest reproduced the
+  failure on that kernel every time, with no mocks.
 - **The class**: six owner records compared starts that way. The origin
   table dropped this process's own live leases, research sessions of this
-  process read as interrupted, a research storage reservation as not live, a
-  live document intake owner as dead, and a migration working folder in use
-  as free to sweep. All now go through `kazma_core.process_start`: this
-  process's start is read once and matched exactly (an earlier process with
-  the same pid is still told apart), another process's is matched within
-  10 s where the boot time follows the wall clock (Linux, macOS) and to the
-  millisecond on Windows, whose kernel keeps the creation time. The document certification sampler counts a worker by
-  psutil's own identity.
+  process read as interrupted, a research storage reservation as not live,
+  a live document intake owner as dead, and a migration working folder in
+  use as free to sweep. All now go through `kazma_core.process_start`, and
+  each record carries a stamp beside its start time:
+  - **Linux**: the boot id and the start's ticks after boot
+    (`/proc/<pid>/stat` field 22). Neither moves with the clock, so any
+    process of the host is matched exactly, and a container's pid 1 after a
+    restart or a process of an earlier boot is told apart.
+  - **macOS and the BSDs**: an id made once per process. psutil moves the
+    start with the boot time there too and offers no reading that stays
+    put, so another process is matched by a start read when the record is
+    written, within 10 s.
+  - **Windows**: unchanged. The kernel keeps the creation time; starts are
+    matched within 2 ms (the 3-decimal text some records keep).
+  - **Records from before the stamps**: matched by their start, within
+    2 ms for this process's own pid and 10 s for another process.
+- **The guard's orphan check**: on Linux it read the start the same way and
+  allowed 2 s, so a server recorded minutes before a drifting clock moved
+  read as "pid reused" and was not reaped. The guard (standard library only)
+  now records the same stamp (`child_stamp`, the broker's `stamp`) and
+  compares it first.
+- **The pid-only checks**: a research session's cancel now asks the helper
+  whether its owner is this process. A legacy crawl row's pid check stays:
+  its claim already settles it. The guard's liveness fallback by pid stays:
+  it only reads state files from guards older than the heartbeat.
+- **The certification sampler** counts a worker by psutil's own identity.
 - **Gate**: `tests/test_process_start.py` runs every site with the clock
-  stepped (each failed on the old code), and reads the product source so
-  that no module but the helper calls `create_time()`, with controls for
-  each old shape and for a reused pid.
+  stepped. Each site failed on the old code, and the old crawl journal is
+  run as a control. The gate enumerates the product source: no module but
+  the helper calls `create_time()` or `boot_time()`, asks `as_dict` or
+  `process_iter` for `create_time`, or reads `btime` or `/proc/<pid>/stat`.
+  The guard is allowed its own `/proc` reads, held to the helper's stamp.
+  Each shape has a planted control.
 
 ## The security policy, rewritten in English and Arabic (2026-11-27)
 

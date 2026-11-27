@@ -10,7 +10,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -312,7 +311,7 @@ def _bounded_session_row(session):
 
 
 def _process_owner():
-    """This process as a session's owner: [pid, start read once]."""
+    """This process as a session's owner: [pid, start(, stamp)]."""
     from kazma_core import process_start
 
     return process_start.own_identity()
@@ -806,7 +805,8 @@ def cancel_session(session_id: str) -> ResearchSession | None:
                 _cancel_on_its_loop(task)
             return final
         owner = sess.meta.get('process_owner')
-        if owner and owner[0] != os.getpid():
+        from kazma_core import process_start
+        if owner and not process_start.identity_is_this_process(owner):
             from kazma_core.web_acquire.crawl_jobs import _alive
             if _alive(owner):
                 raise ResearchSessionBusyError('This research session is owned by another live process; cancel it through that owner.')

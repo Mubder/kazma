@@ -170,8 +170,8 @@ def _identity() -> tuple[str, str]:
 
 def _owner() -> dict:
     install, host = _identity()
-    return {'install': install, 'host': host, 'pid': os.getpid(),
-            'started': process_start.own_start(), 'lease_until': time.time() + _LEASE_S}
+    return {'install': install, 'host': host, **process_start.own_fields(),
+            'lease_until': time.time() + _LEASE_S}
 
 
 def _mine(row: dict, install: str) -> bool:
@@ -500,12 +500,13 @@ def _mutate_job(job_id, change):
 
 
 def _alive(identity):
-    """Whether ``[pid, start]`` names a process of this host that still runs
-    (its start compared through :mod:`kazma_core.process_start`: a reading of
-    it moves with the wall clock on Linux, 2026-11-27)."""
+    """Whether ``[pid, start(, stamp)]`` names a process of this host that
+    still runs (compared through :mod:`kazma_core.process_start`: a reading of
+    the start moves with the wall clock on Linux, 2026-11-27)."""
     try:
         process = psutil.Process(identity[0])
-        return (process_start.is_start_of(process, identity[1]) and process.is_running()
+        stamp = identity[2] if len(identity) > 2 else None
+        return (process_start.is_start_of(process, identity[1], stamp) and process.is_running()
                 and process.status() != psutil.STATUS_ZOMBIE)
     except psutil.NoSuchProcess:
         return False
@@ -534,13 +535,13 @@ def _owner_gone(row, now):
     install, host = _identity()
     if owner.get('install') == install and owner.get('host') == host:
         with _ACTIVE_LOCK:
-            # This process, as it recorded itself: its start is read once,
-            # never again (a second reading moved by a whole second when the
-            # Linux boot time stepped, and the Knowledge ingest took a live
-            # crawl over -- prepush, 2026-11-27).
-            if process_start.is_this_process(owner.get('pid'), owner.get('started')):
+            # This process, as it recorded itself: by its stamp, or its start
+            # read once -- never a second reading (it moved by a whole second
+            # when the Linux boot time stepped, and the Knowledge ingest took
+            # a live crawl over -- prepush, 2026-11-27).
+            if process_start.is_this_process(owner.get('pid'), owner.get('started'), owner.get('stamp')):
                 return row['claim'] not in _ACTIVE
-        return not _alive([owner.get('pid'), owner.get('started')])
+        return not _alive([owner.get('pid'), owner.get('started'), owner.get('stamp')])
     return float(owner.get('lease_until') or 0.0) < now
 
 

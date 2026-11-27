@@ -134,8 +134,14 @@ def holding(token: str):
 
 
 def current_owner() -> str:
+    from kazma_core import process_start
+
     install, host, pid, started = _process_identity()
-    return json.dumps({"install": install, "host": host, "pid": pid, "started": started}, sort_keys=True)
+    owner = {"install": install, "host": host, "pid": pid, "started": started}
+    stamp = process_start.own_stamp() if pid == os.getpid() else None
+    if stamp is not None:
+        owner["stamp"] = stamp  # the start that does not move with the clock (Linux)
+    return json.dumps(owner, sort_keys=True)
 
 
 def owner_state(owner: str) -> str:
@@ -171,7 +177,7 @@ def owner_state(owner: str) -> str:
             return "dead"
         # Through process_start: a reading of the start moves with the wall
         # clock on Linux, and an exact match called a live owner dead.
-        return "alive" if process_start.is_start_of(process, owner_started) else "dead"
+        return "alive" if process_start.is_start_of(process, owner_started, recorded.get("stamp")) else "dead"
     except psutil.NoSuchProcess:
         return "dead"
     except psutil.Error:

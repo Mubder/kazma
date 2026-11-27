@@ -380,10 +380,11 @@ def _this_process() -> dict[str, object]:
     """Who uses a working folder: host, pid and start time (guards pid reuse)."""
     from kazma_core import process_start
 
+    fields = process_start.own_fields()
     return {
         "host": socket.gethostname(),
-        "pid": os.getpid(),
-        "started": f"{process_start.own_start():.3f}",
+        **fields,
+        "started": f"{fields['started']:.3f}",
     }
 
 
@@ -427,7 +428,7 @@ def _working_folder_in_use(folder: Path) -> bool:
 
     try:
         process = psutil.Process(pid)
-        if not process_start.is_start_of(process, started):
+        if not process_start.is_start_of(process, started, owner.get("stamp")):
             return False  # the pid was reused: the run that marked it is gone
         return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
     except psutil.NoSuchProcess:

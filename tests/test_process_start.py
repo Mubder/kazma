@@ -1,4 +1,4 @@
-"""A process's start time is read and compared in one place (2026-11-27).
+"""A process's start is read and compared in one place (2026-11-27).
 
 On Linux psutil's ``create_time()`` adds the boot time from ``/proc/stat``,
 read again on every call, and the boot time moves with every step of the
@@ -6,19 +6,29 @@ wall clock: on Docker Desktop's WSL2 VM it moved a whole second about every
 30 s while the PC was loaded. The Knowledge ingest then read a running
 crawl's own owner as gone and took it over (prepush's Linux part,
 ``tests/test_kb_api_contract.py``). Every owner record that compared a
-recorded start with a fresh reading had the same fault. Here each of them is
-run with the clock stepped, the helper's rules are shown, and the product
-source is enumerated so that no module reads a start time by itself again.
+recorded start with a fresh reading had the same fault, and so did the
+guard's orphan check.
+
+Records now carry a stamp: on Linux the boot id and the start's ticks after
+boot, which no clock step moves. Here each site is run with the clock
+stepped, the helper's rules are shown (Linux through a planted ``/proc``, so
+they run on every platform, and through the real one where there is one),
+the guard's copy is held to the helper's, and the product source is
+enumerated so that no module reads a start, the boot time or
+``/proc/<pid>/stat`` by itself again.
 """
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 import psutil
@@ -27,6 +37,9 @@ from kazma_core import process_start
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = "kazma-core/kazma_core/process_start.py"
+GUARD = "scripts/service/kazma_guard.py"
+#: The product before the stamps and the helper (origin/main, 2026-11-27).
+BEFORE = "cc01b8194f3dedc5c564160b16aaf4056bae1e2a"
 
 
 @pytest.fixture
@@ -35,6 +48,7 @@ def step_the_clock(monkeypatch):
     later, as /proc/stat's boot time made it. This process read its own start
     before, as a running server has."""
     process_start.own_start()
+    process_start.own_stamp()
     real = psutil.Process.create_time
 
     def step(seconds: float) -> None:
@@ -45,8 +59,20 @@ def step_the_clock(monkeypatch):
 
 @pytest.fixture
 def linux_rule(monkeypatch):
-    """The rule of a platform whose boot time follows the wall clock."""
+    """The rule where psutil moves the start with the boot time."""
     monkeypatch.setattr(process_start, "_START_KEPT_BY_KERNEL", False)
+
+
+@pytest.fixture
+def fake_proc(monkeypatch, linux_rule):
+    """A planted Linux ``/proc``: one boot id and the start ticks of each pid
+    (``ticks[pid]``); this process gets its stamp from it."""
+    ticks = {os.getpid(): 4_200}
+    monkeypatch.setattr(process_start, "_LINUX_PROC", True)
+    monkeypatch.setattr(process_start, "_BOOT_ID", ["boot-a"])
+    monkeypatch.setattr(process_start, "_start_ticks", lambda pid: ticks.get(pid))
+    monkeypatch.setattr(process_start, "_OWN_STAMP", None)
+    return ticks
 
 
 @pytest.fixture
@@ -61,6 +87,13 @@ def other_process():
         child.wait(timeout=30)
 
 
+def as_another_process(monkeypatch) -> None:
+    """The helper's view from another process of this host: its own pid is
+    not this one's (a record of this process is read as another's)."""
+    real = os.getpid()
+    monkeypatch.setattr(process_start, "os", types.SimpleNamespace(getpid=lambda: real + 1))
+
+
 # -- the helper's rules -------------------------------------------------------
 
 
@@ -68,24 +101,34 @@ def test_this_process_reads_its_start_once(step_the_clock):
     before = process_start.own_start()
     step_the_clock(1.0)
     assert process_start.own_start() == before
-    assert process_start.own_identity() == [os.getpid(), before]
 
 
 def test_this_process_is_itself_after_a_clock_step(step_the_clock):
-    pid, started = process_start.own_identity()
-    step_the_clock(1.0)
-    assert process_start.is_this_process(pid, started)
-    assert process_start.is_start_of(psutil.Process(pid), started)
+    identity = process_start.own_identity()
+    step_the_clock(3600.0)
+    assert process_start.identity_is_this_process(identity)
+    assert process_start.is_start_of(psutil.Process(), *identity[1:])
+    pid, started = identity[:2]
     assert process_start.is_this_process(pid, f"{started:.3f}"), "the 3-decimal text records keep"
 
 
 def test_an_earlier_process_with_this_pid_is_not_this_one():
-    """No tolerance for this process: a container's pid 1 after a restart has
-    this pid and a start a moment earlier."""
-    pid, started = process_start.own_identity()
+    """Within 2 ms for a record without a stamp: a container's pid 1 after a
+    restart has this pid and a start a moment earlier."""
+    pid, started = process_start.own_identity()[:2]
     for earlier in (started - 1.0, started - 0.01, started + 0.5):
         assert not process_start.is_this_process(pid, earlier)
     assert not process_start.is_this_process(pid + 1, started)
+
+
+def test_by_the_stamp_an_earlier_process_with_this_pid_is_not_this_one(fake_proc):
+    """With stamps, exactly: the same pid and the same start time, but the
+    start ticks of another process (or another boot), is not this one."""
+    pid, started, stamp = process_start.own_identity()
+    assert stamp == f"linux:boot-a:{fake_proc[pid]}"
+    assert process_start.is_this_process(pid, started, stamp)
+    assert not process_start.is_this_process(pid, started, f"linux:boot-a:{fake_proc[pid] - 1}")
+    assert not process_start.is_this_process(pid, started, f"linux:boot-b:{fake_proc[pid]}")
 
 
 @pytest.mark.parametrize("recorded", [None, "", "soon", True, float("nan"), float("inf"), [1.0]])
@@ -93,9 +136,45 @@ def test_a_start_that_is_not_a_number_names_no_process(recorded):
     pid = os.getpid()
     assert not process_start.is_this_process(pid, recorded)
     assert not process_start.is_start_of(psutil.Process(pid), recorded)
+    assert not process_start.identity_is_this_process([pid, recorded])
 
 
-def test_another_process_survives_a_boot_time_step(linux_rule, step_the_clock, other_process):
+@pytest.mark.parametrize("identity", [None, 7, "x", [], [1], [1, 2, 3, 4], {"pid": 1}])
+def test_a_record_that_is_not_an_identity_is_not_this_process(identity):
+    assert not process_start.identity_is_this_process(identity)
+
+
+def test_another_process_is_matched_by_its_stamp_however_far_the_clock_moved(
+        fake_proc, step_the_clock, other_process):
+    from kazma_core.web_acquire import crawl_jobs
+
+    process, started = other_process
+    fake_proc[process.pid] = 9_001
+    record = [process.pid, started, f"linux:boot-a:{fake_proc[process.pid]}"]
+    step_the_clock(3600.0)
+    assert process_start.is_start_of(process, *record[1:])
+    assert crawl_jobs._alive(record)
+    fake_proc[process.pid] = 9_002  # the pid now belongs to a later process
+    assert not process_start.is_start_of(process, *record[1:])
+    assert not crawl_jobs._alive(record)
+    fake_proc[process.pid] = 9_001
+    assert not process_start.is_start_of(process, started, "linux:boot-b:9001"), "another boot"
+
+
+def test_a_record_written_late_still_names_its_writer(fake_proc, step_the_clock, monkeypatch):
+    """The review's case: this process read its start, the clock moved 11 s,
+    then it wrote a record. Another process reading it finds its writer by the
+    stamp; by the start alone (the record without it) it would not."""
+    step_the_clock(process_start.CLOCK_STEP_TOLERANCE_S + 1.0)
+    pid, started, stamp = process_start.own_identity()
+    as_another_process(monkeypatch)
+    writer = psutil.Process(pid)
+    assert process_start.is_start_of(writer, started, stamp)
+    assert not process_start.is_start_of(writer, started), "control: the start alone"
+
+
+def test_a_record_without_a_stamp_is_matched_by_its_start(linux_rule, step_the_clock, other_process):
+    """Rows written before the stamps (and macOS, the BSDs) keep the tolerance."""
     process, started = other_process
     step_the_clock(1.0)
     assert process_start.is_start_of(process, started)
@@ -110,7 +189,7 @@ def test_a_reused_pid_is_still_told_apart(linux_rule, step_the_clock, other_proc
     assert not process_start.is_start_of(process, started)
 
 
-def test_where_the_kernel_keeps_the_start_only_the_text_is_slack(monkeypatch, step_the_clock, other_process):
+def test_where_the_kernel_keeps_the_start_it_is_matched_within_2_ms(monkeypatch, step_the_clock, other_process):
     monkeypatch.setattr(process_start, "_START_KEPT_BY_KERNEL", True)
     process, started = other_process
     assert process_start.is_start_of(process, f"{started:.3f}")
@@ -118,18 +197,42 @@ def test_where_the_kernel_keeps_the_start_only_the_text_is_slack(monkeypatch, st
     assert not process_start.is_start_of(process, started)
 
 
+def test_without_a_linux_stamp_this_process_is_known_by_a_run_id(monkeypatch, linux_rule, step_the_clock):
+    """macOS and the BSDs: no reading stays put, so this process is told
+    apart by an id of its own, and its records carry a start read when they
+    are written (another process compares a reading made close to it)."""
+    monkeypatch.setattr(process_start, "_LINUX_PROC", False)
+    monkeypatch.setattr(process_start, "_OWN_STAMP", None)
+    pid, started, stamp = process_start.own_identity()
+    assert stamp.startswith("run:") and process_start.own_stamp() == stamp
+    step_the_clock(60.0)
+    assert abs(process_start.own_identity()[1] - (started + 60.0)) < 5.0
+    assert process_start.is_this_process(pid, started, stamp)
+    assert not process_start.is_this_process(pid, started, "run:" + "0" * 32)
+
+
 def test_a_fork_reads_its_own_start(monkeypatch):
     """The cache is this pid's: a forked child (a new pid) reads its own."""
+    monkeypatch.setattr(psutil.Process, "create_time", lambda self: 1234.5)
     monkeypatch.setattr(process_start, "_OWN", (-1, 1.0))
-    assert process_start.own_start() == psutil.Process().create_time()
+    assert process_start.own_start() == 1234.5
 
 
-def test_the_old_comparison_called_this_process_another(step_the_clock):
-    """Negative control: the rule before -- a fresh reading compared exactly
-    -- says this live process is not itself once the boot time stepped."""
-    recorded = psutil.Process().create_time()
-    step_the_clock(1.0)
-    assert psutil.Process().create_time() != recorded
+def test_field_22_is_counted_from_the_last_parenthesis():
+    fields = " ".join(str(n) for n in range(4, 22))
+    line = f"123 (a (b) c) S {fields} 424242 19 20\n".encode()
+    assert process_start._ticks_from_stat(line) == 424242
+
+
+def test_the_real_proc_gives_this_process_its_stamp(other_process):
+    """Linux: ``/proc`` answers and the stamp of a process reads the same
+    twice; elsewhere there is no Linux stamp."""
+    process, _started = other_process
+    on_linux = sys.platform.startswith("linux")
+    assert process_start.stamp_of(os.getpid()) == (process_start.own_stamp() if on_linux else None)
+    first = process_start.stamp_of(process.pid)
+    assert first == process_start.stamp_of(process.pid)
+    assert (first is not None and first.startswith("linux:")) == on_linux
 
 
 # -- every owner record, with the clock stepped --------------------------------
@@ -140,7 +243,7 @@ def test_a_crawl_owner_is_not_gone_after_a_clock_step(step_the_clock):
 
     owner = crawl_jobs._owner()
     row = {"owner": owner, "claim": "c" * 32, "updated_at": time.time()}
-    step_the_clock(1.0)
+    step_the_clock(3600.0)
     with crawl_jobs._ACTIVE_LOCK:
         crawl_jobs._ACTIVE.add(row["claim"])
     try:
@@ -149,17 +252,35 @@ def test_a_crawl_owner_is_not_gone_after_a_clock_step(step_the_clock):
         with crawl_jobs._ACTIVE_LOCK:
             crawl_jobs._ACTIVE.discard(row["claim"])
     assert crawl_jobs._owner_gone(row, time.time()), "control: a claim this process gave up"
-    assert crawl_jobs._alive([owner["pid"], owner["started"]])
+    assert crawl_jobs._alive([owner["pid"], owner["started"], owner.get("stamp")])
+
+
+def test_the_old_crawl_journal_took_its_own_crawl_over(monkeypatch):
+    """Negative control on the product as it was: the crawl journal before the
+    helper, run against the same stepped clock, reads this process's live
+    crawl as gone."""
+    source = subprocess.run(["git", "show", f"{BEFORE}:kazma-core/kazma_core/web_acquire/crawl_jobs.py"],
+                            cwd=REPO, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    old = types.ModuleType("_crawl_jobs_before_process_start")
+    monkeypatch.setitem(sys.modules, old.__name__, old)
+    exec(compile(source, "<crawl_jobs before>", "exec"), old.__dict__)  # noqa: S102 -- the repo's own file
+    monkeypatch.setattr(psutil.Process, "create_time", lambda self: 1_000.0)
+    row = {"owner": old._owner(), "claim": "c" * 32, "updated_at": time.time()}
+    old._ACTIVE.add(row["claim"])
+    assert not old._owner_gone(row, time.time()), "before the step it is its own"
+    monkeypatch.setattr(psutil.Process, "create_time", lambda self: 1_001.0)  # btime stepped
+    assert old._owner_gone(row, time.time())
 
 
 def test_research_and_storage_owners_stay_alive_after_a_clock_step(step_the_clock):
     """``research_session._process_owner`` and the research storage
-    reservation record ``[pid, start]``; both are read by ``crawl_jobs._alive``."""
+    reservation record ``[pid, start(, stamp)]``; both are read by
+    ``crawl_jobs._alive``."""
     from kazma_core.tools import research_session
     from kazma_core.web_acquire import crawl_jobs
 
     owner = research_session._process_owner()
-    step_the_clock(1.0)
+    step_the_clock(3600.0)
     assert crawl_jobs._alive(owner)
     assert crawl_jobs._alive(process_start.own_identity())
 
@@ -181,7 +302,7 @@ def test_an_origin_lease_this_process_holds_survives_a_clock_step(step_the_clock
     with origin_state._HELD_LOCK:
         origin_state._HELD.add("t" * 32)
     try:
-        step_the_clock(1.0)
+        step_the_clock(3600.0)
         assert "t" * 32 in origin_state._row(table, origin)["active"]
     finally:
         with origin_state._HELD_LOCK:
@@ -189,7 +310,7 @@ def test_an_origin_lease_this_process_holds_survives_a_clock_step(step_the_clock
     assert "t" * 32 not in origin_state._row(table, origin)["active"], "control: a lease given up"
 
 
-def test_a_document_intake_owner_is_alive_after_a_clock_step(tmp_path, monkeypatch, linux_rule, step_the_clock,
+def test_a_document_intake_owner_is_alive_after_a_clock_step(tmp_path, monkeypatch, fake_proc, step_the_clock,
                                                              other_process):
     from kazma_core.documents import admission
 
@@ -199,44 +320,146 @@ def test_a_document_intake_owner_is_alive_after_a_clock_step(tmp_path, monkeypat
         install, host, _pid, _started = admission._process_identity()
         assert install, "an install id in the test's own data folder"
         process, child_started = other_process
-        theirs = json.dumps({"install": install, "host": host, "pid": process.pid,
-                             "started": f"{child_started:.3f}"})
-        step_the_clock(1.0)
-        assert admission.owner_state(admission.current_owner()) == "self"
-        assert admission.owner_state(theirs) == "alive"
-        gone = json.dumps({"install": install, "host": host, "pid": process.pid,
-                           "started": f"{child_started - 60:.3f}"})
-        assert admission.owner_state(gone) == "dead", "control: a reused pid"
+        fake_proc[process.pid] = 5_150
+
+        def owner(started: float, stamp: str | None) -> str:
+            return json.dumps({"install": install, "host": host, "pid": process.pid,
+                               "started": f"{started:.3f}", **({"stamp": stamp} if stamp else {})})
+
+        mine = admission.current_owner()
+        assert json.loads(mine)["stamp"] == process_start.own_stamp()
+        step_the_clock(3600.0)
+        assert admission.owner_state(mine) == "self"
+        assert admission.owner_state(owner(child_started, "linux:boot-a:5150")) == "alive"
+        assert admission.owner_state(owner(child_started, "linux:boot-a:5149")) == "dead", "control: reused"
+        assert admission.owner_state(owner(child_started, None)) == "dead", "control: the start alone, 1 h off"
     finally:
         admission._process_identity.cache_clear()
 
 
-def test_a_migration_folder_in_use_stays_in_use_after_a_clock_step(tmp_path, linux_rule, step_the_clock,
+def test_a_migration_folder_in_use_stays_in_use_after_a_clock_step(tmp_path, fake_proc, step_the_clock,
                                                                     other_process):
     from kazma_core.migration import bundle
 
     mine, theirs = tmp_path / "mine", tmp_path / "theirs"
     bundle.mark_working_folder(mine)
+    assert json.loads((mine / bundle.IN_USE_MARKER).read_text(encoding="utf-8"))["stamp"] == process_start.own_stamp()
     process, started = other_process
+    fake_proc[process.pid] = 6_060
     theirs.mkdir()
-    (theirs / bundle.IN_USE_MARKER).write_text(json.dumps(
-        {"host": socket.gethostname(), "pid": process.pid, "started": f"{started:.3f}"}), encoding="utf-8")
-    step_the_clock(1.0)
+
+    def mark(stamp: str | None) -> None:
+        (theirs / bundle.IN_USE_MARKER).write_text(json.dumps(
+            {"host": socket.gethostname(), "pid": process.pid, "started": f"{started:.3f}",
+             **({"stamp": stamp} if stamp else {})}), encoding="utf-8")
+
+    step_the_clock(3600.0)
     assert bundle._working_folder_in_use(mine)
+    mark("linux:boot-a:6060")
     assert bundle._working_folder_in_use(theirs)
-    (theirs / bundle.IN_USE_MARKER).write_text(json.dumps(
-        {"host": socket.gethostname(), "pid": process.pid, "started": f"{started - 60:.3f}"}), encoding="utf-8")
+    mark("linux:boot-a:6061")
     assert not bundle._working_folder_in_use(theirs), "control: a reused pid"
 
 
-# -- the gate: nothing else reads a start time ----------------------------------
+# -- the guard keeps the same rule ---------------------------------------------
 
 
-def start_readers(source: str) -> list[int]:
-    """Lines of every ``create_time()`` call in *source*."""
-    return sorted(node.lineno for node in ast.walk(ast.parse(source))
-                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                  and node.func.attr == "create_time")
+@pytest.fixture(scope="module")
+def guard():
+    spec = importlib.util.spec_from_file_location("_process_start_guard", REPO / GUARD)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        yield module
+    finally:
+        sys.modules.pop(spec.name, None)
+
+
+class _Log:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def __call__(self, level: str, event: str, **fields: object) -> None:
+        self.events.append(event)
+
+
+def test_the_guards_stamp_is_the_helpers(guard, other_process):
+    process, _started = other_process
+    for pid in (os.getpid(), process.pid):
+        assert guard._process_start_stamp(pid) == process_start.stamp_of(pid)
+
+
+def test_the_guard_reaps_its_orphan_after_the_clock_moved(guard, monkeypatch):
+    """A server recorded with its stamp, the clock 30 s on since: still the
+    guard's child. Another stamp: a reused pid, never killed."""
+    monkeypatch.setattr(guard, "_process_started_at", lambda pid: 1030.0)
+    monkeypatch.setattr(guard, "_process_start_stamp", lambda pid: "linux:boot-a:777")
+    record = {"child_created": 1000.0, "child_stamp": "linux:boot-a:777"}
+    log = _Log()
+    assert guard._recorded_child_is_ours(4242, record, log) and "orphan.pid_reused" not in log.events
+    assert not guard._recorded_child_is_ours(4242, {**record, "child_stamp": "linux:boot-a:778"}, log)
+    assert "orphan.pid_reused" in log.events
+    log = _Log()
+    assert not guard._recorded_child_is_ours(4242, {"child_created": 1000.0}, log), (
+        "control: by the creation time alone, 30 s of drift reads as a reused pid")
+    assert "orphan.pid_reused" in log.events
+
+
+def test_the_guard_records_its_childs_stamp(guard, monkeypatch, tmp_path):
+    monkeypatch.setattr(guard, "_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(guard, "_process_started_at", lambda pid: 1000.0)
+    monkeypatch.setattr(guard, "_process_start_stamp", lambda pid: f"linux:boot-a:{pid}")
+    guard._record_child(4242)
+    state = guard._read_state()
+    assert state["child_created"] == 1000.0 and state["child_stamp"] == "linux:boot-a:4242"
+
+
+# -- the gate: nothing else reads a start -------------------------------------
+
+#: What a read of a start looks like, by kind.
+_PROC_STAT = re.compile(r"^/proc/[^/]+/stat$|^/proc/stat$")
+#: Files allowed some kinds, and why.
+ALLOWED: dict[str, tuple[set[str], str]] = {
+    HELPER: ({"create_time", "boot_time", "attrs", "info", "btime", "/proc stat"}, "the helper itself"),
+    GUARD: ({"btime", "/proc stat"}, "loaded by path with the standard library only: its time for display and "
+            "old state files, and its own copy of the Linux stamp, held to the helper's above"),
+}
+
+
+def _text(node: ast.AST) -> str | None:
+    """A string literal's text (an f-string's placeholders as ``{}``)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+        value = node.value
+        return value.decode("latin-1") if isinstance(value, bytes) else value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(part.value if isinstance(part, ast.Constant) else "{}" for part in node.values)
+    return None
+
+
+def start_reads(source: str) -> list[tuple[int, str]]:
+    """Every read of a process start in *source*: (line, kind)."""
+    found: set[tuple[int, str]] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if name in ("create_time", "boot_time"):
+                found.add((node.lineno, name))
+            elif name == "getattr" and len(node.args) > 1 and _text(node.args[1]) in ("create_time", "boot_time"):
+                found.add((node.lineno, "attrs"))
+            elif name in ("as_dict", "process_iter") and any(
+                    _text(inner) == "create_time" for arg in [*node.args, *node.keywords] for inner in ast.walk(arg)):
+                found.add((node.lineno, "attrs"))
+        elif (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+              and node.value.attr == "info" and _text(node.slice) == "create_time"):
+            found.add((node.lineno, "info"))
+        text = _text(node) if isinstance(node, (ast.Constant, ast.JoinedStr)) else None
+        if text is not None:
+            if text.startswith("btime"):
+                found.add((node.lineno, "btime"))
+            if _PROC_STAT.match(text):
+                found.add((node.lineno, "/proc stat"))
+    return sorted(found)
 
 
 def product_sources() -> list[str]:
@@ -251,39 +474,60 @@ def product_sources() -> list[str]:
 def test_no_module_but_the_helper_reads_a_process_start():
     found = []
     for name in product_sources():
-        if name == HELPER:
-            continue
         path = REPO / name
-        if path.exists():
-            found += [f"{name}:{line}" for line in start_readers(path.read_text(encoding="utf-8"))]
+        if not path.exists():
+            continue
+        allowed = ALLOWED.get(name, (set(), ""))[0]
+        found += [f"{name}:{line} {kind}" for line, kind in start_reads(path.read_text(encoding="utf-8"))
+                  if kind not in allowed]
     assert not found, (
-        "a module reads a process's start itself; on Linux a second reading moves with the wall "
-        "clock. Use kazma_core.process_start (own_start, is_this_process, is_start_of): " + ", ".join(found))
+        "a module reads a process's start itself; on Linux a reading moves with the wall clock. "
+        "Use kazma_core.process_start (own_identity, is_this_process, is_start_of): " + ", ".join(found))
 
 
-def test_the_gate_reads_the_real_files_and_sees_the_helper():
-    """Negative control: the enumeration holds the helper and the sites it
-    replaced, and the scanner finds the helper's own reading."""
+def test_the_gate_reads_the_real_files_and_sees_the_helper_and_the_guard():
+    """Negative control: the enumeration holds the helper, the guard and the
+    sites it replaced, and the scanner finds what the two allowed files read."""
     names = set(product_sources())
-    assert HELPER in names, "stage the helper: the gate reads git-listed files"
+    assert {HELPER, GUARD} <= names, "stage the helper: the gate reads git-listed files"
     assert {"kazma-core/kazma_core/web_acquire/crawl_jobs.py", "kazma-core/kazma_core/documents/admission.py",
             "kazma-core/kazma_core/migration/bundle.py", "kazma-core/kazma_core/web_acquire/origin_state.py",
             "kazma-core/kazma_core/tools/research_session.py",
             "kazma-core/kazma_core/web_acquire/artifact_storage.py"} <= names
-    assert start_readers((REPO / HELPER).read_text(encoding="utf-8"))
+    helper = {kind for _line, kind in start_reads((REPO / HELPER).read_text(encoding="utf-8"))}
+    assert {"create_time", "/proc stat"} <= helper
+    guard = {kind for _line, kind in start_reads((REPO / GUARD).read_text(encoding="utf-8"))}
+    assert guard == {"btime", "/proc stat"}
+
+
+@pytest.mark.parametrize("snippet, kind", [
+    ("ok = owner['started'] == psutil.Process().create_time()", "create_time"),
+    ("started = f'{psutil.Process(os.getpid()).create_time():.3f}'", "create_time"),
+    ("seen.add((child.pid, child.create_time()))", "create_time"),
+    ("booted = psutil.boot_time()", "boot_time"),
+    ("info = p.as_dict(attrs=['pid', 'create_time'])", "attrs"),
+    ("procs = list(psutil.process_iter(['pid', 'create_time']))", "attrs"),
+    ("started = p.info['create_time']", "info"),
+    ("started = getattr(p, 'create_time')()", "attrs"),
+    ("boot = [line for line in lines if line.startswith(b'btime ')]", "btime"),
+    ("text = Path('/proc/stat').read_text()", "/proc stat"),
+    ("text = Path(f'/proc/{pid}/stat').read_text()", "/proc stat"),
+    ("text = open('/proc/self/stat').read()", "/proc stat"),
+])
+def test_the_scanner_sees_each_shape(snippet, kind):
+    """Negative control: each shape of a start read, planted."""
+    assert kind in {found for _line, found in start_reads(snippet)}
 
 
 @pytest.mark.parametrize("snippet", [
-    "ok = owner['started'] == psutil.Process().create_time()",
-    "started = f'{psutil.Process(os.getpid()).create_time():.3f}'",
-    "def alive(p, s):\n    return p.create_time() == s",
-    "seen.add((child.pid, child.create_time()))",
+    "when = message.get('create_time')",
+    "boot = _boot_time(row[0])",
+    "text = Path('/proc/self/status').read_text()",
+    "group = Path('/proc/self/cgroup').read_text()",
+    "ns = os.readlink('/proc/self/ns/net')",
+    "boot = Path('/proc/sys/kernel/random/boot_id').read_text()",
 ])
-def test_the_scanner_sees_each_old_shape(snippet):
-    """Negative control: each shape the product used before 2026-11-27."""
-    assert start_readers(snippet) == [snippet.count("\n") + 1]
-
-
-def test_the_scanner_leaves_a_key_named_create_time():
-    """A chat export's ``create_time`` field is not a process's start."""
-    assert start_readers("when = message.get('create_time')") == []
+def test_the_scanner_leaves_what_is_not_a_start(snippet):
+    """A chat export's ``create_time`` field, Postgres's start, and other
+    ``/proc`` files are not a process's start."""
+    assert start_reads(snippet) == []
