@@ -4,7 +4,9 @@
 
 - When Kazma recalls a weekly summary, or a later conversation, too long for
   the room left, the conversations it shows no longer give up room for it:
-  they get the widest excerpt that still fits, in English and Arabic.
+  they get the widest excerpt that still fits, in English and Arabic. When
+  room is short, that can show one more conversation in place of the short
+  summaries after it.
 - Weekly summaries and monthly roll-ups now read days in your own time zone,
   the one your reminders use, not the server's. Summaries written before
   keep their week and month names wherever your zone is.

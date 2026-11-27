@@ -507,7 +507,13 @@ def _messages(turns: list[_Turn], period_key: str, start: float) -> list[dict[st
     zone = memory_zone()
     rendered = [_render(t, zone) for t in turns]
     shown = _sample(rendered, _PROMPT_CHARS)
-    monday = _dt.datetime.fromtimestamp(start, zone).strftime("%Y-%m-%d")
+    # The week's Monday from its key, with no zone (an old week a server
+    # wrote in its own local time is rebuilt with its own Monday; the step 5
+    # final review's M); else its start read at midday.
+    from kazma_core.memory.topic_rollups import _MIDDAY_S, _week_monday
+
+    monday = (_week_monday(period_key)
+              or _dt.datetime.fromtimestamp(float(start) + _MIDDAY_S, zone).date()).strftime("%Y-%m-%d")
     chats = len({t.chat for t in turns if not t.note})
     notes = sum(1 for t in turns if t.note)
     head = (

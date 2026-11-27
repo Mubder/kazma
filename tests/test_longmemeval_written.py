@@ -322,6 +322,8 @@ def _undone(store: Path, done: Path, how: str) -> None:
         held["written_with"]["merge"]["errors"] = 1
     elif how == "weeks_left":
         held["written_with"]["summaries"]["weeks_left"] = 1
+    elif how == "no_question_time":
+        held["written_with"].pop("at")
     done.write_text(json.dumps(held), encoding="utf-8")
     conn = sqlite3.connect(str(store))
     try:
@@ -329,6 +331,10 @@ def _undone(store: Path, done: Path, how: str) -> None:
             conn.execute("UPDATE memory_summary_periods SET status = 'queued'")
         elif how == "summary_to_rebuild":
             conn.execute("UPDATE memory_summaries SET status = 'rebuild'")
+        elif how == "only_summaries_gone":
+            # the done markers kept (the final review's L3)
+            conn.execute("DELETE FROM memory_summary_sources")
+            conn.execute("DELETE FROM memory_summaries")
         elif how == "summaries_gone":
             # the done file still says no week is left (the delta review's E)
             conn.execute("DELETE FROM memory_summary_sources")
@@ -347,7 +353,7 @@ def _undone(store: Path, done: Path, how: str) -> None:
 
 
 @pytest.mark.parametrize("how", ["merge_errors", "weeks_left", "week_queued", "summary_to_rebuild", "twin_left",
-                                 "summaries_gone"])
+                                 "summaries_gone", "only_summaries_gone", "no_question_time"])
 def test_a_store_left_unfinished_refuses_the_run(scripts, made, monkeypatch, how):
     """The step 5 review, M2: the refusal reads the store itself and each
     step's own counts, not only that the done file names the step."""
