@@ -1012,6 +1012,42 @@ async def _remember_resume(thread_id: str, action: str, approved: bool) -> None:
         pass
 
 
+async def _drive_decision(graph: Any, resume_cmd: Any, resume_config: dict[str, Any], thread_id: str,
+                          gate: str, *, since: float, whose: Any) -> tuple[Any, dict[str, Any] | None] | None:
+    """Carry out a chat app's recorded decision (``_run_resume``), as the
+    card's asker (S3-04, as S2-05 on the web), only while its chat is there.
+
+    The drive asks ``chat_runs_end.begin_drive`` and registers this task as
+    the thread's running turn in the same step, so a chat that goes away
+    either took the gate first -- nothing runs, the card is stamped settled,
+    and None is returned -- or finds this drive and cancels it (its call is
+    recorded as possibly run). Before, the turn was registered only inside
+    ``invoke_turn``, after the checkpoint read and two hops off the loop: a
+    delete in between found nothing to cancel and the approved call ran on the
+    deleted chat (review of e916a8f96, M1). The caller holds the thread's
+    lock, so the drive runs in this task (a task of its own would wait on
+    that lock when the turn's budget writes its end)."""
+    from kazma_ui.active_turns import register_turn, unregister_turn
+    from kazma_ui.chat_runs_end import begin_drive, real_gate_id, settle_refused_card
+    from kazma_ui.hitl_answerers import as_the_asker
+
+    drive_gate = await asyncio.to_thread(real_gate_id, gate)
+    task = asyncio.current_task()
+    if not begin_drive(thread_id, drive_gate, since=since):
+        await asyncio.to_thread(settle_refused_card, thread_id)
+        return None
+    register_turn(thread_id, task)
+    try:
+        with as_the_asker(whose):
+            return await _run_resume(graph, resume_cmd, resume_config, thread_id)
+    except asyncio.CancelledError:
+        logger.warning("[HITL] thread=%s: the drive of its decision was cancelled (its chat went away, or "
+                       "Kazma stops)", thread_id)
+        raise
+    finally:
+        unregister_turn(thread_id, task)
+
+
 async def _say_chat_gone(manager: Any, msg: Any, ctx: Any, thread_id: str, approved: bool) -> bool:
     """A decision whose chat went away before it was carried out
     (``chat_runs_end.begin_drive`` refused): nothing runs, and the chat app
@@ -1420,9 +1456,11 @@ async def _handle_hitl_resume_here(
             # Record the decision the way every surface does: registry CAS,
             # the transcript part a browser on this thread paints, and the
             # journal frame that tells open tabs it was decided here.
+            from kazma_ui.chat_runs_end import drive_clock
             from kazma_ui.hitl_decision import record_gate_decision
 
             _pending = pending if isinstance(pending, dict) else {}
+            decided_at = drive_clock()
             refused, recorded_gate = await _not_recorded(record_gate_decision(
                 target_thread,
                 decision="approved" if approved else "denied",
@@ -1501,20 +1539,13 @@ async def _handle_hitl_resume_here(
                     context_metadata=ctx,
                 ))
                 return True
-            # The resumed turn is its asker's, whoever answered (S3-04, as
-            # S2-05 on the web): it runs as them, in their space.
-            # The decision is carried out only while its chat is there
-            # (chat_runs_end.begin_drive): a chat that went away since took
-            # its gate, and the record says the call did not run.
-            from kazma_ui.chat_runs_end import begin_drive
-            from kazma_ui.hitl_answerers import as_the_asker
-
-            if not begin_drive(target_thread, recorded_gate):
+            # Carried out only while its chat is there, as its asker
+            # (_drive_decision): a chat that went away since took its gate.
+            outcome = await _drive_decision(graph, _resume_cmd, resume_config, target_thread,
+                                            recorded_gate, since=decided_at, whose=whose)
+            if outcome is None:
                 return await _say_chat_gone(manager, msg, ctx, target_thread, approved)
-            with as_the_asker(whose):
-                result_state, chained = await _run_resume(
-                    graph, _resume_cmd, resume_config, target_thread,
-                )
+            result_state, chained = outcome
 
         destination = await _resume_destination(
             manager, msg, ctx, result_state, whose=whose, thread=target_thread, answered_elsewhere=(

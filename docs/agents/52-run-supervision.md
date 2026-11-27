@@ -100,8 +100,9 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   `scripts/deploy_live.py`'s test turn denies a card it raises through
   `/api/approve` before it deletes its chat.
   **The review's Lows** (2026-11-27, `tests/test_chat_gone_race_lows.py`):
-  no drive of a recorded decision starts once its chat is going away
-  (`begin_drive`, §30), and the ended run carries what became of the
+  no drive of a recorded decision starts once its chat is going away, and
+  every drive is registered in the same step, so an end cancels it on every
+  path, a chat app's too (`begin_drive`, §30), and the ended run carries what became of the
   approval it waited on (`Run.ended_gate`, a `hitl_gates.CHAT_GONE_FATES`
   code; `ended_word(reason, lang, gate)` words both from the catalog, so
   Running work reads "The chat was deleted; it was approved, but the chat went

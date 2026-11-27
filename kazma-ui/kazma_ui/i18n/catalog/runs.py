@@ -58,18 +58,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     # What became of the approval a chat's turn waited on when the chat went
     # away (kazma_core/safety/hitl_gates.py CHAT_GONE_FATES; the run's
-    # ``ended_gate`` and the gate's own message), per decision.
+    # ``ended_gate`` and the gate's own message), per decision. They never
+    # name the cause: ``runs.ended.<reason>`` says it beside them.
     "runs.gate_fate.not_needed": {
         "en": "its approval was never answered, and the call did not run",
         "ar": "لم يُجَب عن طلب الموافقة، ولم يُنفَّذ الإجراء",
     },
     "runs.gate_fate.not_run": {
-        "en": "it was approved, but the chat went away before the call started: the call did not run",
-        "ar": "تمت الموافقة عليه، لكن المحادثة أُزيلت قبل أن يبدأ الإجراء: لم يُنفَّذ الإجراء",
+        "en": "it was approved, but the call had not started, and it did not run",
+        "ar": "تمت الموافقة عليه، لكن الإجراء لم يكن قد بدأ، فلم يُنفَّذ",
     },
     "runs.gate_fate.cut": {
-        "en": "it was approved, and the chat went away while the call ran: whether it ran is not known",
-        "ar": "تمت الموافقة عليه، وأُزيلت المحادثة أثناء تنفيذ الإجراء: لا يُعرف إن كان قد نُفِّذ",
+        "en": "it was approved, and the call had started: whether it ran is not known",
+        "ar": "تمت الموافقة عليه، وكان الإجراء قد بدأ: لا يُعرف إن كان قد نُفِّذ",
     },
     "runs.gate_fate.denied": {
         "en": "it was denied, and the call did not run",

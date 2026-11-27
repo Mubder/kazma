@@ -29,7 +29,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DECISIONS", "GateDecisionUnavailable", "GateNotYours", "record_gate_decision"]
+__all__ = ["DECISIONS", "GateDecisionUnavailable", "GateNotYours", "record_gate_decision",
+           "resolve_decision_turn"]
 
 
 class GateDecisionUnavailable(RuntimeError):
@@ -83,6 +84,14 @@ def _resolve_turn(thread_id: str, session_id: str, turn_id: str) -> tuple[str, s
     except Exception:  # noqa: BLE001 -- no turn found is "do not stamp", never an error
         logger.warning("[gate-decision] turn lookup failed", exc_info=True)
     return session_id, turn_id
+
+
+def resolve_decision_turn(thread_id: str, session_id: str = "", turn_id: str = "") -> tuple[str, str]:
+    """The session and existing turn a decision's card is stamped in, as
+    :func:`record_gate_decision` finds them (blanks when there is none):
+    for a card stamped again after it (``chat_runs_end.settle_refused_card``).
+    Blocking."""
+    return _resolve_turn(thread_id, session_id, turn_id)
 
 
 def _open_gate_id(thread_id: str) -> str:

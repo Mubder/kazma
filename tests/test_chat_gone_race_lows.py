@@ -49,7 +49,7 @@ import pytest
 from kazma_core.safety import hitl_gates
 from kazma_core.safety.hitl_gates import CHAT_GONE_FATES, TIMEOUT_ACTOR, TransitionConflict
 from kazma_ui import chat_runs_end, reply_sink, runs_chat_turn, turn_resume
-from kazma_ui.chat_runs_end import begin_drive, chat_went_away, end_chat_runs
+from kazma_ui.chat_runs_end import begin_drive, chat_went_away, drive_clock, end_chat_runs
 from kazma_ui.i18n import t
 
 import tests.test_chat_gone_ends_runs as _gone
@@ -76,6 +76,11 @@ def _fate(gate_id: str) -> str:
     return hitl_gates.ended_fate(row.state, row.decision, row.actor, row.ended_reason)
 
 
+def _both(fate: str) -> str:
+    """A gate's message: its fate in English and in Arabic, from the catalog."""
+    return "\n".join(t(f"runs.gate_fate.{fate}", lang) for lang in ("en", "ar"))
+
+
 def _claim(gate_id: str, decision: str = "approve", actor: str = "owner", *, resuming: bool = False) -> None:
     """A person's answer, as ``record_gate_decision`` records it."""
     hitl_gates.claim_gate(gate_id, decision, actor)
@@ -86,7 +91,8 @@ def _claim(gate_id: str, decision: str = "approve", actor: str = "owner", *, res
 # ── L1 at the route: the delete lands between the decision and its drive ──
 
 
-def _approve_route(monkeypatch: pytest.MonkeyPatch, chat: Any, *, in_the_window: Any = None) -> Any:
+def _approve_route(monkeypatch: pytest.MonkeyPatch, chat: Any, *, in_the_window: Any = None,
+                   real_record: bool = False) -> Any:
     """The real ``/api/approve`` over the real gate registry: the decision is
     recorded as ``record_gate_decision`` records it (claim, resuming), and
     *in_the_window* runs in the step between that and the drive (the scope
@@ -118,10 +124,12 @@ def _approve_route(monkeypatch: pytest.MonkeyPatch, chat: Any, *, in_the_window:
     monkeypatch.setattr(auth, "get_kazma_secret", lambda: "")
     monkeypatch.setattr(misc, "_gate_not_pending", AsyncMock(return_value=""))
     monkeypatch.setattr(misc, "_attach_hitl_view", lambda body, *a, **k: body)
-    monkeypatch.setattr(hitl_status, "persisted_hitl_for_thread", lambda _: None)
+    if not real_record:
+        monkeypatch.setattr(hitl_status, "persisted_hitl_for_thread", lambda _: None)
     monkeypatch.setattr(turn_runtime, "resolve_session_id", lambda _: chat.session_id)
     monkeypatch.setattr(reply_sink, "resolve_reply_turn", lambda *a: chat.turn_id)
-    monkeypatch.setattr(hitl_decision, "record_gate_decision", record)
+    if not real_record:  # else the real recorder: claim, resuming, then the transcript stamp
+        monkeypatch.setattr(hitl_decision, "record_gate_decision", record)
     monkeypatch.setattr(misc, "_apply_scope_grants", grants)
     monkeypatch.setattr(streaming, "_drive_graph_to_journal", drive)
     misc.register_misc_routes(builder)
@@ -141,13 +149,13 @@ def test_an_approve_whose_chat_is_deleted_before_its_drive_never_runs(store, mon
                           in_the_window=lambda: chat_went_away(chat.thread_id, reason="chat_deleted"))
     assert seen.answer.status_code == 409, seen.answer.text
     assert seen.answer.json()["reason"] == "chat_gone"
-    assert seen.answer.json()["error"] == t("runs.gate_fate.not_run", "en")
+    assert seen.answer.json()["error"] == t("chat.decision_chat_gone", "en")
     seen.drive.assert_not_called()
     gate = _gate(chat.gate_id)
     assert (gate.state, gate.decision, gate.actor, gate.ended_reason) == ("settled", "approve", "owner",
                                                                            "chat_deleted"), gate
     assert _fate(chat.gate_id) == "not_run"
-    assert gate.message == t("runs.gate_fate.not_run", "en")
+    assert gate.message == _both("not_run")
     assert hitl_gates.gate_outcomes_since(0) == {"not_run": 1}
     assert runs_chat_turn._ended_turns()[chat.thread_id].approval == "not_run"
 
@@ -231,7 +239,7 @@ def test_an_approve_landing_inside_the_end_is_taken_and_never_runs(store, web, m
     if not resuming:
         with pytest.raises(TransitionConflict):
             hitl_gates.mark_resuming(chat.gate_id)         # the route's next step
-    assert begin_drive(chat.thread_id, chat.gate_id) is False
+    assert begin_drive(chat.thread_id, chat.gate_id, since=drive_clock()) is False
 
 
 def test_control_the_end_that_wrote_once_leaves_the_approve_to_run(store, web, monkeypatch) -> None:
@@ -256,12 +264,12 @@ def test_a_drive_that_started_first_is_cut_and_its_call_may_have_run(store, web)
     "whether it ran is not known"."""
     chat = _waiting_chat(store)
     _claim(chat.gate_id, resuming=True)
-    assert begin_drive(chat.thread_id, chat.gate_id) is True
+    assert begin_drive(chat.thread_id, chat.gate_id, since=drive_clock()) is True
     _delete(web, chat)
     gate = _gate(chat.gate_id)
     assert (gate.state, gate.decision, gate.ended_reason) == ("error", "approve", "chat_deleted"), gate
     assert _fate(chat.gate_id) == "cut"
-    assert gate.message == t("runs.gate_fate.cut", "en")
+    assert gate.message == _both("cut")
     assert hitl_gates.gate_outcomes_since(0) == {"cut": 1}
 
 
@@ -281,14 +289,14 @@ def test_no_drive_starts_while_its_chat_is_being_ended(store, monkeypatch) -> No
     asked: list[bool] = []
 
     def read(thread_id: str) -> list[Any]:
-        asked.append(begin_drive(chat.thread_id, "another-gate"))
+        asked.append(begin_drive(chat.thread_id, "another-gate", since=drive_clock()))
         return real(thread_id)
 
     monkeypatch.setattr(hitl_gates, "live_gates", read)
     asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", waiting_only=True))
     assert asked == [False]
     # Control: once it is over (archived, not deleted), a new gate's drive starts.
-    assert begin_drive(chat.thread_id, "a-later-gate") is True
+    assert begin_drive(chat.thread_id, "a-later-gate", since=drive_clock()) is True
 
 
 # ── L2: what happened, per decision, said and counted ───────────────────
@@ -307,12 +315,12 @@ def test_an_ended_denial_is_said_and_counted_as_what_it_was(store, web, decision
     chat = _waiting_chat(store)
     _claim(chat.gate_id, decision, actor, resuming=True)
     if drove:
-        assert begin_drive(chat.thread_id, chat.gate_id)
+        assert begin_drive(chat.thread_id, chat.gate_id, since=drive_clock())
     _delete(web, chat)
     gate = _gate(chat.gate_id)
     assert (gate.state, gate.decision, gate.actor) == ("settled", decision, actor), gate
     assert _fate(chat.gate_id) == fate
-    assert gate.message == t(f"runs.gate_fate.{fate}", "en")
+    assert gate.message == _both(fate)
     assert "approved" not in gate.message
     assert hitl_gates.gate_outcomes_since(0) == {key: 1}
 
@@ -322,7 +330,7 @@ def test_control_an_ended_driven_approve_is_the_one_cut(store, web) -> None:
     fate that is an error, said differently from a denial."""
     chat = _waiting_chat(store)
     _claim(chat.gate_id, resuming=True)
-    begin_drive(chat.thread_id, chat.gate_id)
+    begin_drive(chat.thread_id, chat.gate_id, since=drive_clock())
     _delete(web, chat)
     assert _gate(chat.gate_id).state == "error"
     assert t("runs.gate_fate.cut", "en") != t("runs.gate_fate.denied", "en")
@@ -473,6 +481,228 @@ def test_a_start_ends_an_archived_chats_cut_turn_and_says_why(store, monkeypatch
     assert turn_resume.cut_turns() == {}
 
 
+# ── the review of e916a8f96: the chat app, an expiry, the alias, the card, the words ──
+
+
+def _chat_app_drive(monkeypatch: pytest.MonkeyPatch, store_: Any, *, delete_in_the_read: bool) -> Any:
+    """A chat app's recorded Approve carried out by the real
+    ``_drive_decision`` -> ``_run_resume``; the checkpoint read it awaits
+    first is held, and the delete lands in it (deterministically). The call
+    is recorded where ``invoke_turn`` would run it."""
+    from kazma_gateway.agent_handler import hitl as gw_hitl
+    from kazma_ui import turn_runtime
+
+    chat = _waiting_chat(store_)
+    since = drive_clock()
+    _claim(chat.gate_id, resuming=True)
+    ran: list[str] = []
+
+    async def fake_invoke(graph: Any, cmd: Any, cfg: Any, *, thread_id: str = "", **_: Any) -> Any:
+        ran.append(thread_id)                    # the approved call runs here
+        return {"messages": []}
+
+    monkeypatch.setattr(turn_runtime, "invoke_turn", fake_invoke)
+
+    async def scenario() -> Any:
+        held, reading = asyncio.Event(), asyncio.Event()
+
+        class Graph:
+            async def aget_state(self, cfg: Any) -> Any:
+                reading.set()
+                await held.wait()
+                return SimpleNamespace(values={"messages": []}, next=(), tasks=())
+
+        cfg = {"configurable": {"thread_id": chat.thread_id, "checkpoint_ns": ""}}
+        task = asyncio.create_task(gw_hitl._drive_decision(Graph(), object(), cfg, chat.thread_id, chat.gate_id,
+                                                           since=since, whose=None))
+        await reading.wait()                     # parked in the checkpoint read
+        if delete_in_the_read:
+            await end_chat_runs(chat.thread_id, reason="chat_deleted")
+        held.set()
+        return (await asyncio.gather(task, return_exceptions=True))[0]
+
+    outcome = asyncio.run(scenario())
+    return SimpleNamespace(chat=chat, ran=ran, outcome=outcome)
+
+
+def test_a_chat_apps_approve_whose_chat_is_deleted_mid_drive_never_runs(store, monkeypatch) -> None:
+    """M1: the drive is registered in the same step as its token, so the
+    delete finds it in its first await and cancels it: the approved call
+    never runs, and the gate says it may have (it had started)."""
+    seen = _chat_app_drive(monkeypatch, store, delete_in_the_read=True)
+    assert seen.ran == []
+    assert isinstance(seen.outcome, asyncio.CancelledError), seen.outcome
+    gate = _gate(seen.chat.gate_id)
+    assert (gate.state, gate.decision, gate.ended_reason) == ("error", "approve", "chat_deleted"), gate
+    assert _fate(seen.chat.gate_id) == "cut"
+
+
+def test_control_the_chat_apps_approve_with_its_chat_there_runs(store, monkeypatch) -> None:
+    seen = _chat_app_drive(monkeypatch, store, delete_in_the_read=False)
+    assert seen.ran == [seen.chat.thread_id] and isinstance(seen.outcome, tuple), seen.outcome
+
+
+def test_a_chat_apps_decision_whose_chat_went_first_is_refused_and_its_card_settled(store, web,
+                                                                                    monkeypatch) -> None:
+    """M1/L3: the chat was archived before the drive: nothing runs and the
+    card is stamped settled. The archive's end had no open reply turn to
+    stamp it by (as after a restart), so the decision's own stamp,
+    "approved", was the card's last word."""
+    from kazma_gateway.agent_handler import hitl as gw_hitl
+    from kazma_ui.sse_chat._streaming import stamp_hitl_part_state
+
+    chat = _waiting_chat(store)
+    since = drive_clock()
+    _claim(chat.gate_id, resuming=True)
+    reply_sink.reset_reply_turns()
+    _archive(web, chat)
+    stamp_hitl_part_state(chat.session_id, chat.turn_id, state="approved", thread_id=chat.thread_id,
+                          tool="python_exec", payload={"interrupt_id": chat.gate_id}, interrupt_id=chat.gate_id)
+    assert _card_state(store, chat) == "approved"            # the late stamp, as in the race
+    outcome = asyncio.run(gw_hitl._drive_decision(SimpleNamespace(), object(), {}, chat.thread_id, chat.gate_id,
+                                                  since=since, whose=None))
+    assert outcome is None
+    assert _card_state(store, chat) == "settled"
+    assert _fate(chat.gate_id) == "not_run"
+
+
+def _card_state(store_: Any, chat: Any) -> str:
+    with as_owner():
+        rows = store_.get(chat.session_id).messages
+    cards = [p for row in rows for p in row.get("parts") or () if p.get("type") == "hitl"
+             and p.get("interrupt_id") == chat.gate_id]
+    return str(cards[-1].get("state")) if cards else ""
+
+
+@pytest.mark.parametrize("way", ["store_limit", "reset"])
+def test_an_expiry_between_a_decision_and_its_drive_does_not_let_it_run(store, way) -> None:
+    """L1: the TTL sweep moved the resuming gate to timeout before the end
+    read it, so the end took no token; the decision, recorded before the end
+    finished, still never drives after it."""
+    chat = _waiting_chat(store)
+    since = drive_clock()
+    _claim(chat.gate_id, resuming=True)
+    assert [row.gate_id for row in hitl_gates.expire_due_gates(time.time() + 10 ** 7)] == [chat.gate_id]
+    if way == "store_limit":
+        chat_went_away(chat.thread_id, reason="chat_store_full")
+    else:
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_cleared"))
+    assert hitl_gates.live_gates(chat.thread_id) == []
+    assert begin_drive(chat.thread_id, chat.gate_id, since=since) is False
+    # Control: a decision recorded after the end (the chat goes on) drives.
+    assert begin_drive(chat.thread_id, "a-later-gate", since=drive_clock()) is True
+
+
+def test_a_taken_token_never_refuses_the_next_identical_question(store, web) -> None:
+    """L2 (the reviewer's probe): an archive takes a gate; un-archived, the
+    same call is asked again on the same thread -- the same alias (a hash of
+    thread, tool and arguments). Its drive, named by that alias, starts."""
+    from kazma_core.safety.hitl_gates import make_gate_id
+    from kazma_ui import hitl_gate_bridge
+    from kazma_ui.chat_runs_end import real_gate_id
+
+    chat = _waiting_chat(store, gate=False)
+    args = {"code": "print(1)"}
+    payload = {"thread_id": chat.thread_id, "tool": "python_exec", "args": args, "interrupt_id": "lg-1"}
+    asyncio.run(hitl_gate_bridge.gate_pending_from_payload(payload))
+    alias = make_gate_id(chat.thread_id, "python_exec", args)
+    assert _gate("lg-1").alias_id == alias
+    _archive(web, chat)
+    assert web.client.post(f"/api/chat/sessions/{chat.session_id}/unarchive").json()["status"] == "ok"
+    asyncio.run(hitl_gate_bridge.gate_pending_from_payload(dict(payload, interrupt_id="lg-2")))
+    _claim("lg-2", resuming=True)
+    assert real_gate_id(alias) == "lg-2"
+    assert begin_drive(chat.thread_id, real_gate_id(alias), since=drive_clock()) is True
+    # Control: the gate the archive took is still refused.
+    assert begin_drive(chat.thread_id, "lg-1", since=drive_clock()) is False
+
+
+def test_an_approve_stamped_after_an_archive_leaves_its_card_settled(store, monkeypatch) -> None:
+    """L3, through the real route and the real recorder: the archive's end
+    runs between the claim and the transcript stamp, with no open reply turn
+    to stamp the card by (as after a restart), so the stamp's "approved" is
+    the card's last word. The refused drive
+    stamps it settled again: un-archived, the card never reads Approved for
+    a call that did not run."""
+    import kazma_ui.sse_chat._streaming as streaming
+
+    chat = _waiting_chat(store)
+    real_stamp = streaming.stamp_hitl_part_state
+
+    def archive_then_stamp(*a: Any, **k: Any) -> Any:
+        with as_owner():
+            store.set_archived(chat.session_id, True)
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", session_id=chat.session_id,
+                                  waiting_only=True))
+        return real_stamp(*a, **k)
+
+    monkeypatch.setattr(streaming, "stamp_hitl_part_state", archive_then_stamp)
+    reply_sink.reset_reply_turns()      # as after a restart: the end stamps no card
+    seen = _approve_route(monkeypatch, chat, real_record=True)
+    assert seen.answer.status_code == 409 and seen.answer.json()["reason"] == "chat_gone", seen.answer.text
+    seen.drive.assert_not_called()
+    assert _card_state(store, chat) == "settled"
+    assert _fate(chat.gate_id) == "not_run"
+
+
+def test_control_without_the_refused_stamp_the_card_reads_approved(store, monkeypatch) -> None:
+    import kazma_ui.sse_chat._streaming as streaming
+
+    chat = _waiting_chat(store)
+    real_stamp = streaming.stamp_hitl_part_state
+
+    def archive_then_stamp(*a: Any, **k: Any) -> Any:
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", session_id=chat.session_id,
+                                  waiting_only=True))
+        return real_stamp(*a, **k)
+
+    monkeypatch.setattr(streaming, "stamp_hitl_part_state", archive_then_stamp)
+    monkeypatch.setattr(chat_runs_end, "settle_refused_card", lambda *a, **k: False)
+    reply_sink.reset_reply_turns()
+    _approve_route(monkeypatch, chat, real_record=True)
+    assert _card_state(store, chat) == "approved"
+
+
+#: Words that name why a chat went away: said by ``runs.ended.<reason>``
+#: beside a fate, never inside one (an archive is no removal).
+_CAUSES = ("went away", "deleted", "archived", "removed", "أُزيلت", "حُذفت", "أُرشفت", "مُسحت")
+
+
+def test_the_fate_words_name_no_cause_and_the_record_holds_both_languages(store, web) -> None:
+    """L4: one wording per cause (the fate never says "removed" for an
+    archive), and the gate's message holds both languages."""
+    for fate in CHAT_GONE_FATES:
+        for lang in ("en", "ar"):
+            said = t(f"runs.gate_fate.{fate}", lang)
+            assert not any(cause in said for cause in _CAUSES), (fate, lang, said)
+    chat = _waiting_chat(store)
+    _claim(chat.gate_id)
+    _archive(web, chat)
+    message = _gate(chat.gate_id).message
+    assert message.splitlines() == [t("runs.gate_fate.not_run", "en"), t("runs.gate_fate.not_run", "ar")]
+    assert _ARABIC.search(message.splitlines()[1])
+
+
+def _chat_gone_branch(source: str) -> str:
+    """The approve fetch's branch for a 409 ``chat_gone`` in chat.js, or ""."""
+    start = source.find("res.body.reason === 'chat_gone'")
+    generic = source.find("if (res.status === 409) {", start if start >= 0 else 0)
+    return source[start:generic] if 0 <= start < generic else ""
+
+
+def test_the_chat_page_says_why_and_settles_the_card() -> None:
+    """L4: the page shows the 409's words (``body.error``, else the catalog's
+    ``chat.decision_chat_gone``) and paints the card settled -- it painted
+    every other 409 an error and never showed the words."""
+    source = (REPO / "kazma-ui/kazma_ui/static/js/chat.js").read_text(encoding="utf-8")
+    branch = _chat_gone_branch(source)
+    assert branch, "chat.js has no chat_gone branch before its other 409s"
+    for needed in ("res.body.error", "chat.decision_chat_gone", "showToast", "state: 'settled'"):
+        assert needed in branch, needed
+    # Control: the same file without the branch is caught.
+    assert _chat_gone_branch(source.replace("res.body.reason === 'chat_gone'", "false")) == ""
+
+
 # ── the gates ───────────────────────────────────────────────────────────
 
 #: What starts the drive that carries out a recorded decision.
@@ -517,36 +747,53 @@ def _records_durably(nodes: list[ast.AST]) -> list[int]:
     return lines
 
 
+def _refusals(nodes: list[ast.AST]) -> list[tuple[int, int]]:
+    """The lines of each ``if not begin_drive(...): ... return``: what the
+    refusal does starts no drive, so its awaits are not in the step."""
+    return [(n.body[0].lineno, n.body[-1].end_lineno or n.body[-1].lineno) for n in nodes
+            if isinstance(n, ast.If) and any(isinstance(c, ast.Call) and _name(c) == "begin_drive"
+                                             for c in ast.walk(n.test))]
+
+
+def _calls(nodes: list[ast.AST], names: set[str] | frozenset[str]) -> list[int]:
+    return sorted(n.lineno for n in nodes if isinstance(n, ast.Call) and _name(n) in names)
+
+
 def drives_without_a_token(sources: dict[str, str]) -> tuple[list[str], list[str]]:
-    """(every function that records a decision and starts a drive after it,
-    the ones whose drive start is not preceded by ``begin_drive`` with no
-    await in between): ``module:function:line``."""
+    """(every function that records a decision and starts its drive after
+    it, the findings): a drive started with no ``begin_drive`` before it in
+    the same step, and a ``begin_drive`` whose drive is not registered
+    (``register_turn``, what an end cancels) in the same step -- both with
+    no await in between. A decider may hand both to a helper of its module
+    that does them (the chat app's ``_drive_decision``)."""
+    funcs = [(module, name, _own(fn)) for module, source in sources.items() if "begin_drive" in source
+             or "record_gate_decision" in source for name, fn in _functions(source)]
+    helpers = {name for _, name, nodes in funcs if _calls(nodes, {"begin_drive"})}
     deciders, bad = [], []
-    for module, source in sources.items():
-        if "record_gate_decision" not in source:
+    for module, name, nodes in funcs:
+        refused = _refusals(nodes)
+        awaits = sorted(n.lineno for n in nodes if isinstance(n, ast.Await)
+                        and not any(lo <= n.lineno <= hi for lo, hi in refused))
+        tokens = _calls(nodes, {"begin_drive"})
+        registers = _calls(nodes, {"register_turn"})
+        for token in tokens:
+            register = min((line for line in registers if line > token), default=None)
+            if register is None or any(token < line < register for line in awaits):
+                bad.append(f"{module}:{name}:{token} (begin_drive without register_turn in its step)")
+        recorded = _records_durably(nodes)
+        if not recorded:
             continue
-        for name, fn in _functions(source):
-            nodes = _own(fn)
-            recorded = _records_durably(nodes)
-            if not recorded:
+        starts = [line for line in _calls(nodes, DRIVE_STARTS | helpers) if line > min(recorded)]
+        if not starts:
+            continue
+        deciders.append(f"{module}:{name}")
+        by_helper = set(_calls(nodes, helpers))
+        for start in starts:
+            if start in by_helper:
                 continue
-            starts = sorted(n.lineno for n in nodes if isinstance(n, ast.Call) and _name(n) in DRIVE_STARTS
-                            and n.lineno > min(recorded))
-            if not starts:
-                continue
-            deciders.append(f"{module}:{name}")
-            tokens = sorted(n.lineno for n in nodes if isinstance(n, ast.Call) and _name(n) == "begin_drive")
-            # What the refusal does (``if not begin_drive(...): ... return``)
-            # starts no drive: its awaits are not between the token and one.
-            refused = [(n.body[0].lineno, n.body[-1].end_lineno or n.body[-1].lineno) for n in nodes
-                       if isinstance(n, ast.If) and any(isinstance(c, ast.Call) and _name(c) == "begin_drive"
-                                                        for c in ast.walk(n.test))]
-            awaits = sorted(n.lineno for n in nodes if isinstance(n, ast.Await)
-                            and not any(lo <= n.lineno <= hi for lo, hi in refused))
-            for start in starts:
-                token = max((line for line in tokens if min(recorded) < line < start), default=None)
-                if token is None or any(token < line < start for line in awaits):
-                    bad.append(f"{module}:{name}:{start}")
+            token = max((line for line in tokens if min(recorded) < line < start), default=None)
+            if token is None or any(token < line < start for line in awaits):
+                bad.append(f"{module}:{name}:{start}")
     return sorted(deciders), sorted(bad)
 
 
@@ -556,9 +803,10 @@ def test_every_drive_of_a_recorded_decision_asks_begin_drive_first() -> None:
     for where in ("routes_direct/misc.py:", "kazma_ui/hitl_timeout.py:", "agent_handler/hitl.py:"):
         assert any(where in d for d in deciders), (where, deciders)
     assert not bad, (
-        "A recorded decision's drive starts here without asking kazma_ui.chat_runs_end.begin_drive in the "
-        "same step (no await in between): a chat deleted meanwhile runs the approved call (review L1): "
-        + ", ".join(bad))
+        "A recorded decision's drive starts here without asking kazma_ui.chat_runs_end.begin_drive and "
+        "registering the drive (register_turn) in the same step, no await in between: a chat deleted "
+        "meanwhile finds nothing to cancel and the approved call runs (reviews of ec538d779 and "
+        "e916a8f96): " + ", ".join(bad))
 
 
 _PLANTED_NO_TOKEN = '''
@@ -570,29 +818,56 @@ async def approve(thread_id):
 _PLANTED_AWAIT_BETWEEN = '''
 async def approve(thread_id):
     gate = await record_gate_decision(thread_id, decision="approved", actor="a", require_durable=True)
-    if not begin_drive(thread_id, gate):
+    if not begin_drive(thread_id, gate, since=0):
         return
     await asyncio.to_thread(grants, thread_id)
     task = asyncio.create_task(drive(thread_id))
+    register_turn(thread_id, task)
+'''
+_PLANTED_REGISTER_LATE = '''
+async def approve(thread_id):
+    gate = await record_gate_decision(thread_id, decision="approved", actor="a", require_durable=True)
+    await _drive_it(thread_id, gate)
+
+
+async def _drive_it(thread_id, gate):
+    if not begin_drive(thread_id, gate, since=0):
+        return None
+    before = await graph.aget_state(config)
+    register_turn(thread_id, asyncio.current_task())
+    return await run(before)
 '''
 _PLANTED_GOOD = '''
 async def approve(thread_id):
     gate = await record_gate_decision(thread_id, decision="approved", actor="a", require_durable=True)
     await asyncio.to_thread(grants, thread_id)
-    if not begin_drive(thread_id, gate):
+    if not begin_drive(thread_id, gate, since=0):
         return
     task = asyncio.create_task(drive(thread_id))
+    register_turn(thread_id, task)
+    await _drive_it(thread_id, gate)
+
+
+async def _drive_it(thread_id, gate):
+    if not begin_drive(thread_id, gate, since=0):
+        await asyncio.to_thread(stamp, thread_id)
+        return None
+    register_turn(thread_id, asyncio.current_task())
+    return await run()
 '''
 
 
-@pytest.mark.parametrize("planted", [_PLANTED_NO_TOKEN, _PLANTED_AWAIT_BETWEEN], ids=["no-token", "await-between"])
+@pytest.mark.parametrize("planted", [_PLANTED_NO_TOKEN, _PLANTED_AWAIT_BETWEEN, _PLANTED_REGISTER_LATE],
+                         ids=["no-token", "await-between", "register-after-an-await"])
 def test_control_a_drive_without_its_token_is_caught(planted) -> None:
     deciders, bad = drives_without_a_token({"kazma-ui/kazma_ui/planted.py": planted})
-    assert deciders == ["kazma-ui/kazma_ui/planted.py:approve"] and len(bad) == 1, (deciders, bad)
+    assert deciders == ["kazma-ui/kazma_ui/planted.py:approve"] and bad, (deciders, bad)
+    assert all(b.startswith("kazma-ui/kazma_ui/planted.py:") for b in bad)
 
 
 def test_control_a_drive_with_its_token_passes() -> None:
-    assert drives_without_a_token({"kazma-ui/kazma_ui/planted.py": _PLANTED_GOOD})[1] == []
+    assert drives_without_a_token({"kazma-ui/kazma_ui/planted.py": _PLANTED_GOOD}) == (
+        ["kazma-ui/kazma_ui/planted.py:approve"], [])
 
 
 #: What ends a chat's runs, and what writes a gate's end other than end_gate.
@@ -659,5 +934,5 @@ async def clear(thread_id):
 def test_the_token_is_bounded() -> None:
     """The tokens are memory: a long-running install keeps a bounded number."""
     for _ in range(chat_runs_end._TOKENS_KEPT + 5):
-        begin_drive("t-bound", uuid4().hex)
+        begin_drive("t-bound", uuid4().hex, since=drive_clock())
     assert len(chat_runs_end._tokens) <= chat_runs_end._TOKENS_KEPT

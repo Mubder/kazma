@@ -6411,6 +6411,24 @@
         });
       }).then(function(res) {
         var acceptedView = _applyApproveView(res.body, ovIid);
+        if (res.status === 409 && res.body && res.body.reason === 'chat_gone') {
+          // The chat went away before the answer was carried out
+          // (chat_runs_end.begin_drive): nothing ran. Say so in the page's
+          // words, and the card is settled, not an error.
+          var goneText = String(res.body.error || window.kazmaT('chat.decision_chat_gone',
+            'This chat is no longer available, so your answer was not carried out and nothing was run.'));
+          try {
+            if (typeof window.showToast === 'function') window.showToast(goneText, 'warning', 8000);
+          } catch (eGone) { /* the notice must never break the card */ }
+          applyTurnEvent({
+            type: 'hitl', state: 'settled', tool: data.tool || '',
+            interrupt_id: (res.body && res.body.interrupt_id) || data.interrupt_id || '',
+            payload: data, view: acceptedView || ovView,
+            turn_id: _liveTurnId, source: 'approve-409',
+          });
+          _awaitingApproval = false;
+          return;
+        }
         if (res.status === 409) {
           var running409 = !!(res.body && (res.body.running
             || res.body.hitl_state === 'inflight'

@@ -6,7 +6,12 @@
   with a delete still ran its call on the deleted chat. Every drive that
   carries out a decision (the chat page's Approve, the approval watchdog, a
   chat app's button) now starts only while its chat is there, decided in one
-  step against the delete; a click that lost is told the chat went away.
+  step against the delete, and a delete that comes after it stops it -- a
+  chat app's Approve included, which could still run its call after the
+  chat was deleted. A click that lost is told the chat is no longer
+  available, in the page's language, and its card no longer reads Approved.
+  An approval that expired while its chat was being cleared no longer runs
+  afterwards.
 - **The record says what really happened.** An approved card whose chat went
   away before its action started keeps your Approve and says the action did
   not run; one whose action had started says whether it ran is not known. A

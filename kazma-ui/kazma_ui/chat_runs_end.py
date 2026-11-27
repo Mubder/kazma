@@ -45,7 +45,10 @@ What it had ends the same way each time:
   Running work lists it cancelled, "The chat was deleted" in the reader's
   language (the catalog's ``runs.ended.<reason>``) with what became of its
   approval, and no incident is opened for it. Each thing is taken in one step (the cancel, the reply turn, the cut
-  turn, each gate), so of two ends at once one reports and logs it.
+  turn, each gate), and two ends of one thread take what is left one at a
+  time (``_one_end_at_a_time``), so of two ends of a waiting chat at once one
+  reports and logs it. Before, the end whose gate write lost could take the
+  reply turn first, and both reported (Linux, 2026-11-28).
 
 :func:`end_chat_runs` is the way from the event loop, before the chat's state
 is removed (the cancel is awaited); :func:`chat_went_away` the same from a
@@ -71,6 +74,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -216,12 +220,20 @@ def _cancel_on_its_loop(thread_id: str, task: asyncio.Future[Any]) -> None:
 
 _token_lock = threading.Lock()
 #: gate id -> "driven" (the drive carrying its decision out started) or
-#: "taken" (its chat went away first: no drive starts). Oldest first, bounded:
-#: a token matters for the moments between a decision and its drive.
+#: "taken" (its chat went away first: no drive starts). Keyed by the
+#: registry's own gate id, never its alias: the alias is a hash of the
+#: thread, tool and arguments, which the next identical question on the same
+#: thread shares (review of e916a8f96, L2). Oldest first, bounded: a token
+#: matters for the moments between a decision and its drive.
 _tokens: OrderedDict[str, str] = OrderedDict()
 _TOKENS_KEPT = 10_000
 #: thread id -> how many ends of its chat are under way.
 _going: dict[str, int] = {}
+#: thread id -> when (``time.perf_counter``, :func:`drive_clock`) an end of its chat last finished.
+#: A decision recorded before then is never carried out after: its gate may
+#: have left the live states meanwhile (an expiry), so the end took no token
+#: for it (review of e916a8f96, L1). Bounded like the tokens.
+_ended_at: OrderedDict[str, float] = OrderedDict()
 
 
 def _mark(gate_id: str, what: str) -> None:
@@ -232,44 +244,65 @@ def _mark(gate_id: str, what: str) -> None:
         _tokens.popitem(last=False)
 
 
-def begin_drive(thread_id: str, *gate_ids: str) -> bool:
+def drive_clock() -> float:
+    """The clock *since* of :func:`begin_drive` is read on: take it before
+    the decision is recorded."""
+    return time.perf_counter()
+
+
+def real_gate_id(gate_id: str) -> str:
+    """The registry's own id of the gate *gate_id* names (it may name it by
+    its alias), for :func:`begin_drive`; *gate_id* itself when the registry
+    holds no such gate or is off. Blocking (the gate registry)."""
+    from kazma_ui.hitl_gate_bridge import registry_on
+
+    if not gate_id or not registry_on():
+        return gate_id
+    from kazma_core.safety.hitl_gates import gate_for
+
+    row = gate_for(gate_id)
+    return row.gate_id if row is not None else gate_id
+
+
+def begin_drive(thread_id: str, gate_id: str, *, since: float) -> bool:
     """Before a drive that carries out a recorded decision starts (the
     approve route, the approval watchdog, a chat app's button), in the same
-    step as the caller starts and registers it: True when it may start, and
-    from now on a chat that goes away counts its call as started (``cut``).
-    False when its chat is going away or went away -- the thread's chat is
-    being ended or was deleted, or an end took the gate (*gate_ids*: the id
-    the decision was recorded under) -- and nothing may start: the caller
-    says the chat went away. Memory only, never blocks."""
+    step as the caller starts AND registers it (``register_turn``, so an end
+    can cancel it): True when it may start, and from now on a chat that goes
+    away counts its call as started (``cut``). False when its chat is going
+    away or went away -- the thread's chat is being ended, was deleted, or
+    was ended after *since* (:func:`drive_clock`, read before the decision
+    was recorded), or an end took the gate (*gate_id*: the registry's own
+    id, :func:`real_gate_id`) -- and nothing may start: the caller says the
+    chat went away and stamps its card (:func:`settle_refused_card`).
+    Memory only, never blocks."""
     from kazma_core.spaces.threads import thread_ended
 
-    ids = [g for g in gate_ids if g]
     with _token_lock:
-        if _going.get(thread_id) or any(_tokens.get(g) == "taken" for g in ids):
+        if _going.get(thread_id) or (gate_id and _tokens.get(gate_id) == "taken"):
             return False
-        if thread_ended(thread_id):
+        if _ended_at.get(thread_id, float("-inf")) >= since or thread_ended(thread_id):
             return False
-        for gate_id in ids:
+        if gate_id:
             _mark(gate_id, "driven")
     return True
 
 
-def _take(*gate_ids: str) -> bool:
+def _take(gate_id: str) -> bool:
     """Take a gate's token for an end: True when no drive carrying its
     decision started -- and none will (:func:`begin_drive` refuses it from
     now on); False when one did."""
-    ids = [g for g in gate_ids if g]
     with _token_lock:
-        if any(_tokens.get(g) == "driven" for g in ids):
+        if _tokens.get(gate_id) == "driven":
             return False
-        for gate_id in ids:
-            _mark(gate_id, "taken")
+        _mark(gate_id, "taken")
     return True
 
 
 @contextmanager
 def _going_away(thread_id: str) -> Iterator[None]:
-    """The thread's chat is being ended: no drive starts on it meanwhile."""
+    """The thread's chat is being ended: no drive starts on it meanwhile,
+    nor after for a decision recorded before the end finished."""
     with _token_lock:
         _going[thread_id] = _going.get(thread_id, 0) + 1
     try:
@@ -281,15 +314,39 @@ def _going_away(thread_id: str) -> Iterator[None]:
                 _going[thread_id] = left
             else:
                 _going.pop(thread_id, None)
+            _ended_at[thread_id] = time.perf_counter()
+            _ended_at.move_to_end(thread_id)
+            while len(_ended_at) > _TOKENS_KEPT:
+                _ended_at.popitem(last=False)
 
 
-def _fate_words(lang: str) -> dict[str, str]:
-    """Each fate in *lang*, from the catalog (``runs.gate_fate.<fate>``)."""
+def settle_refused_card(thread_id: str, session_id: str = "", turn_id: str = "") -> bool:
+    """The card of a decision whose drive :func:`begin_drive` refused,
+    stamped ``settled`` in its chat's transcript: the decision's own stamp
+    may have landed after the end stamped it (``record_gate_decision``
+    claims, then stamps), and an un-archived card read "Approved" for a call
+    that never ran (review of e916a8f96, L3). *session_id* / *turn_id* are
+    found when not given. Blocking; False when nothing was written."""
+    if not (session_id and turn_id):
+        from kazma_ui.hitl_decision import resolve_decision_turn
+
+        session_id, turn_id = resolve_decision_turn(thread_id, session_id, turn_id)
+    from kazma_ui.hitl_gate_bridge import stamp_waiting_card
+
+    return _step("stamping its refused card", thread_id,
+                 lambda: stamp_waiting_card(thread_id, session_id, turn_id, "settled"), False)
+
+
+def _fate_words() -> dict[str, str]:
+    """Each fate in English and Arabic, from the catalog
+    (``runs.gate_fate.<fate>``): the gate row's message, read by whoever
+    reads the row."""
     from kazma_core.safety.hitl_gates import CHAT_GONE_FATES
 
     from kazma_ui.i18n import t
 
-    return {fate: t(f"runs.gate_fate.{fate}", lang) for fate in CHAT_GONE_FATES}
+    return {fate: "\n".join(t(f"runs.gate_fate.{fate}", lang) for lang in ("en", "ar"))
+            for fate in CHAT_GONE_FATES}
 
 
 def _end_one(row: Any, outcome: str, reason: str, *, waiting_only: bool) -> str:
@@ -301,7 +358,7 @@ def _end_one(row: Any, outcome: str, reason: str, *, waiting_only: bool) -> str:
 
     held = row
     for _ in range(len(LIVE_STATES) + 1):     # a gate only moves forward
-        drove = not _take(held.gate_id, held.alias_id)
+        drove = not _take(held.gate_id)
         if drove and waiting_only:
             # An archive leaves what runs to finish: its drive settles it.
             logger.info("[chat] gate %s of thread=%s is being carried out; the archive leaves it",
@@ -309,7 +366,7 @@ def _end_one(row: Any, outcome: str, reason: str, *, waiting_only: bool) -> str:
             return ""
         fate = chat_gone_fate(held.state, held.decision, held.actor, drove=drove)
         if end_gate(held.gate_id, held.state, outcome=outcome, reason=reason, drove=drove,
-                    words=_fate_words("en")) is not None:
+                    words=_fate_words()) is not None:
             return fate
         again = gate_for(held.gate_id)
         if again is None or not again.is_live:
@@ -388,12 +445,56 @@ def _step(what: str, thread_id: str, call: Any, default: Any) -> Any:
         return default
 
 
+#: How long an end waits for another end of the same thread to finish what
+#: is left before it goes on (said at WARNING): a stalled store never holds
+#: a chat's going away for good.
+REST_WAIT_S = 30.0
+_rest_lock = threading.Lock()
+#: thread id -> [its lock, how many ends hold or wait for it].
+_rest_held: dict[str, list[Any]] = {}
+
+
+@contextmanager
+def _one_end_at_a_time(thread_id: str) -> Iterator[None]:
+    """Two ends of one thread take what is left one after the other: the
+    first takes it all (its gates, its reply turn, its cut turn) and
+    reports; the second finds nothing. Bounded (:data:`REST_WAIT_S`).
+    Blocking; never on the event loop."""
+    with _rest_lock:
+        held = _rest_held.setdefault(thread_id, [threading.Lock(), 0])
+        held[1] += 1
+    got = held[0].acquire(timeout=REST_WAIT_S)
+    if not got:
+        logger.warning("[chat] another end of thread=%s held on for %.0f s; this one goes on beside it",
+                       thread_id[:12], REST_WAIT_S)
+    try:
+        yield
+    finally:
+        if got:
+            held[0].release()
+        with _rest_lock:
+            held[1] -= 1
+            if held[1] <= 0 and _rest_held.get(thread_id) is held:
+                _rest_held.pop(thread_id, None)
+
+
 def _end_the_rest(thread_id: str, reason: str, *, session_id: str, title: str | None,
                   gate_outcome: str, cancelled: bool, space: str | None = None,
                   waiting_only: bool = False) -> ChatRunsEnded:
-    """Everything but the cancel. Blocking: the gate registry, the chat
+    """Everything but the cancel, one end of the thread at a time
+    (:func:`_one_end_at_a_time`). Blocking: the gate registry, the chat
     store, the settings, the commitments. With *waiting_only* (an archive) a
     turn still running is left to finish, with its reply turn."""
+    with _one_end_at_a_time(thread_id):
+        return _end_what_is_left(thread_id, reason, session_id=session_id, title=title,
+                                 gate_outcome=gate_outcome, cancelled=cancelled, space=space,
+                                 waiting_only=waiting_only)
+
+
+def _end_what_is_left(thread_id: str, reason: str, *, session_id: str, title: str | None,
+                      gate_outcome: str, cancelled: bool, space: str | None,
+                      waiting_only: bool) -> ChatRunsEnded:
+    """:func:`_end_the_rest`'s steps, under the thread's end lock."""
     from kazma_core.agent.steer import clear_all_steers
 
     from kazma_ui.reply_sink import close_reply_turn, take_reply_turn
