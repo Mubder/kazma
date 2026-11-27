@@ -193,25 +193,41 @@ def _own_nodes(func: ast.AST) -> list[ast.AST]:
     return out
 
 
+#: The sync helpers that send with libpq's blocking ``exec_`` (step 4 review L4).
+_SYNC_SENDERS = ("exec_", "begin_space", "end_space", "check_space_role")
+
+
 def _blocking_in_async(sources: dict[str, str]) -> list[str]:
-    """``.exec_(...)`` (libpq's blocking send) inside an ``async def``."""
+    """``.exec_(...)`` (libpq's blocking send), or a sync helper that sends
+    with it, called inside an ``async def``."""
     out = []
     for rel, text in sources.items():
-        if "exec_(" not in text:
+        if not any(f"{name}(" in text for name in _SYNC_SENDERS):
             continue
         for node in ast.walk(ast.parse(text)):
             if isinstance(node, ast.AsyncFunctionDef):
                 for inner in _own_nodes(node):
-                    if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) \
-                            and inner.func.attr == "exec_":
+                    if not isinstance(inner, ast.Call):
+                        continue
+                    func = inner.func
+                    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) \
+                        else ""
+                    if name in _SYNC_SENDERS:
                         out.append(f"{rel}::{node.name}")
     return sorted(set(out))
 
 
 def test_no_blocking_libpq_send_runs_on_the_loop() -> None:
     assert _blocking_in_async(_product()) == [], "await conn.execute(..., prepare=False), never pgconn.exec_"
-    planted = {"kazma-core/kazma_core/planted.py": "async def begin(conn):\n    conn.pgconn.exec_(b'BEGIN')\n"}
-    assert _blocking_in_async(planted) == ["kazma-core/kazma_core/planted.py::begin"]
+    planted = {"kazma-core/kazma_core/planted.py": "async def begin(conn):\n    conn.pgconn.exec_(b'BEGIN')\n",
+               "kazma-core/kazma_core/helper.py": ("async def begin(conn, space):\n"
+                                                   "    row_security.begin_space(conn, space)\n")}
+    assert _blocking_in_async(planted) == ["kazma-core/kazma_core/helper.py::begin",
+                                           "kazma-core/kazma_core/planted.py::begin"]
+    # Its control: the awaited sender is no sync one.
+    awaited = {"kazma-core/kazma_core/ok.py": ("async def begin(conn, space):\n"
+                                               "    await row_security.begin_space_async(conn, space, role=True)\n")}
+    assert _blocking_in_async(awaited) == []
 
 
 # ── a caller that names its store (Spaces S4-01 step 5) ──────────────────
@@ -243,3 +259,46 @@ def test_a_caller_that_names_sqlite_gets_its_file_whatever_the_address(monkeypat
     assert len(opened) == 1, "the control: as set up, Postgres is tried first"
     with pytest.raises(ValueError):
         asyncio.run(_go("mysql"))
+
+
+# ── the step 4 review: the pool's check and a closed pool (L1, L3) ───────
+
+
+@pytest.mark.parametrize("kept", [True, False])
+def test_a_cancel_in_the_pools_check_stays_a_cancel(monkeypatch: pytest.MonkeyPatch, kept: bool) -> None:
+    """L1: psycopg_pool counts a cancel in its check as a bad connection, takes
+    another and returns: a cancelled turn went on."""
+    from kazma_core import checkpoints_pg
+    from psycopg_pool import AsyncConnectionPool
+
+    async def _cancelled(conn: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(AsyncConnectionPool, "check_connection", staticmethod(_cancelled))
+    check = checkpoints_pg._check_kept_cancel if kept else AsyncConnectionPool.check_connection
+
+    async def _checkout() -> str:
+        try:
+            await check(object())
+        except asyncio.CancelledError:  # what psycopg_pool does with it
+            pass
+        await asyncio.sleep(0)  # the pool's next wait
+        return "went on"
+
+    if kept:
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(_checkout())
+    else:  # the control: the plain check, and the turn goes on
+        assert asyncio.run(_checkout()) == "went on"
+
+
+def test_a_closed_checkpointer_pool_makes_no_space_half() -> None:
+    """L3: armed, a checkout after close() made a new half."""
+    from kazma_core import checkpoints_pg
+    from psycopg_pool import PoolClosed
+
+    pool = checkpoints_pg._reported_pool_class()(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1,
+                                                    open=False)
+    with pytest.raises(PoolClosed):
+        asyncio.run(pool._space_half())
+    assert pool._kazma_space_half is None

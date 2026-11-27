@@ -263,7 +263,11 @@ RESOLVERS = {"resolve_work_of", "resolve_act_of", "work_of_async"}
 #: The forms that may act for a space's own account.
 FALLS_BACK = {"work_of", "resolve_work_of", "work_of_async"}
 ROW_FORMS_DECLARED = FALLS_BACK | OWN_ROW_FORMS | {"statements_of", "resolve_act_of"}
-FORMS = INSTALL_FORMS | OWN_ROW_FORMS | {"statements_of", "work_of"}
+#: A helper that enters a door for its caller (the gateway's
+#: ``CheckpointManager._door``): entered, and never held across a yield
+#: (Spaces S4-01 step 4 review L5).
+DOOR_HELPERS = {"_door"}
+FORMS = INSTALL_FORMS | OWN_ROW_FORMS | DOOR_HELPERS | {"statements_of", "work_of"}
 
 
 @dataclass(frozen=True)
@@ -620,6 +624,7 @@ def test_who_acts_for_a_space_is_declared() -> None:
     ("async def f():\n    with statements_of('a'):\n        async for x in g():\n            yield x\n",
      "held across a yield"),
     ("def f():\n    with work_of('a'):\n        yield from g()\n", "held across a yield"),
+    ("async def f(self):\n    with self._door('a'):\n        yield 1\n", "held across a yield"),
     ("async def f():\n    with (await work_of_async('a'))():\n        yield 1\n", "held across a yield"),
 ])
 def test_a_planted_wrong_use_is_found(source: str, said: str) -> None:

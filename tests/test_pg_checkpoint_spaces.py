@@ -268,6 +268,7 @@ def test_the_backfill_gives_old_rows_their_threads_space(db: dict[str, str], loc
     from kazma_core.spaces import scope, threads
     from kazma_core.spaces.row_work import statements_of
 
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own database (step 4 review M2)
     old, moved = f"t-{uuid.uuid4().hex[:8]}", f"t-{uuid.uuid4().hex[:8]}"
     threads.record_thread(old, "sa", scope.OWNER_ACCOUNT_ID)
 
@@ -330,3 +331,63 @@ def test_pruning_to_the_latest_is_refused_in_a_space(db: dict[str, str], lock: A
     _saver_on(db["app"], _work)
     count = _sql(db["app"], "SELECT count(*) FROM checkpoints WHERE thread_id = %s", (a,))[0][0]
     assert count == (0 if enforced else 1)
+
+
+# ── the step 4 review: what the backfill trusts (M1, M2) ─────────────────
+
+
+def _stamped_row(db: dict[str, str], space: str) -> str:
+    """A checkpoint row stamped with *space*, written as the owner."""
+    thread = f"t-{uuid.uuid4().hex[:8]}"
+    _sql(db["app"], "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata, space_id) "
+                    "VALUES (%s, '', 'k1', '{}', '{}', %s)", (thread, space))
+    return thread
+
+
+def test_a_missing_record_store_is_no_list_of_no_threads(db: dict[str, str], lock: Any, tmp_path: Any,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """M1: sqlite3.connect made the missing store, empty; the backfill read
+    "no threads" and gave every space's rows to the owner, complete."""
+    from kazma_core.spaces import threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    theirs = _stamped_row(db, "sa")
+    gone = tmp_path / "thread_scopes.db"
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(gone))
+    done = lock.apply(db["app"], vector_table="")
+    assert not done.complete and any("not there" in u for u in done.unresolved), done
+    assert _stamps(db, theirs) == {"sa"}, "nothing was reset"
+    assert not gone.exists(), "the store is not made by reading it"
+
+
+def test_an_empty_record_store_with_stamped_rows_changes_nothing(db: dict[str, str], lock: Any, tmp_path: Any,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+
+    from kazma_core.spaces import threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    theirs = _stamped_row(db, "sb")
+    empty = tmp_path / "thread_scopes.db"
+    with sqlite3.connect(empty) as made:
+        made.executescript(threads._SCHEMA)
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(empty))
+    done = lock.apply(db["app"], vector_table="")
+    assert not done.complete and any("list no thread" in u for u in done.unresolved), done
+    assert _stamps(db, theirs) == {"sb"}
+    _sql(db["app"], "DELETE FROM checkpoints WHERE thread_id = %s", (theirs,))
+
+
+def test_another_databases_stamps_are_not_this_installs_to_change(db: dict[str, str], lock: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: on a replica, or a database --url-from named, this install's
+    records reset the stamps of threads it never knew."""
+    theirs = _stamped_row(db, "sc")  # a thread another install recorded
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["su"].rsplit("/", 1)[0] + "/postgres")  # Kazma's is elsewhere
+    done = lock.apply(db["app"], vector_table="")
+    assert done.complete and any("not this install's own database" in n for n in done.notes), done
+    assert _stamps(db, theirs) == {"sc"}, "kept"
+    # The control: as this install's own database, the record store answers for it.
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    assert lock.apply(db["app"], vector_table="").backfilled >= 1
+    assert _stamps(db, theirs) == {None}
