@@ -420,12 +420,16 @@ Each issue deducts from the security score (0-100).
 ### Reporting Vulnerabilities
 
 If you discover a security vulnerability, please report it responsibly.
-**Canonical policy:** repository root [`SECURITY.md`](SECURITY.md).
+**Canonical policy:** repository root [`SECURITY.md`](SECURITY.md) (in Arabic,
+[`SECURITY.ar.md`](SECURITY.ar.md)).
 
 1. **Do NOT** open a public GitHub issue
-2. Email **admin@kazma.ai**, or use GitHub private vulnerability reporting when enabled
+2. Use GitHub's private form first
+   ([Report a vulnerability](https://github.com/Mubder/kazma/security/advisories/new));
+   write to **admin@kazma.ai** if you cannot use GitHub
 3. Include: description, steps to reproduce, potential impact, affected version
-4. Coordinate public disclosure after a fix is available (or ~90 days if none is ready)
+4. Public disclosure is agreed with the reporter, at most 90 days after the
+   report; an advisory is published only once the fix is released
 
 There is **no paid bug bounty** at this time. Contact details are also published
 in [`.well-known/security.txt`](.well-known/security.txt) (served at

@@ -7,19 +7,19 @@
 
   # Kazma
 
-  **The self-hosted AI agent that asks before it acts.**
+  <!-- kazma-heading:en (docs/brand/heading.json) -->
+  **Open-source, self-hosted AI agent that remembers you & asks before it acts. English & Arabic as equals. Any model. Web, WhatsApp, Telegram, Discord & Slack.**
 
-  One agent, bilingual in English and Arabic, that you reach from the browser,
-  the terminal, Telegram, Discord or Slack. It works in your repository,
-  researches, writes and posts, and runs your schedule; it pauses for your
-  approval before anything risky, remembers what you tell it, and says so when
-  it fails instead of inventing an answer.
+  Research, write and code. Run your mail and calendar, and draft, schedule and
+  post on X. In English, Arabic, or both at once. Use any model, even a local
+  one; your chats and memory stay in your install, and when something fails,
+  Kazma says so instead of inventing an answer.
 
   <p>
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-33%2C622-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-33%2C732-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://www.bestpractices.dev/projects/16743"><img src="https://img.shields.io/cii/level/16743?style=flat-square&label=OpenSSF%20Best%20Practices" alt="OpenSSF Best Practices"></a>
     <a href="https://scorecard.dev/viewer/?uri=github.com/Mubder/kazma"><img src="https://img.shields.io/ossf-scorecard/github.com/Mubder/kazma?style=flat-square&label=OpenSSF%20Scorecard" alt="OpenSSF Scorecard"></a>
@@ -42,7 +42,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~1097K LOC** (865K Python code + 54K JS) | **33,622 tests** (2,116 test files) | **6,125+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~1100K LOC** (867K Python code + 54K JS) | **33,732 tests** (2,119 test files) | **6,126+ commits** across 6 packages | Web · TUI · CLI · WhatsApp · Telegram · Discord · Slack |
 
 ---
 
@@ -149,9 +149,13 @@ kazma-tui                                              # the terminal UI
 | Memory | `http://127.0.0.1:9090/memory` |
 | Documents | `http://127.0.0.1:9090/documents` |
 
-To reach Kazma from Telegram, Discord or Slack, add the bot's token in
-**Settings → Adapters & Routes**; its **Test** button says what works and
-what is missing. See [Gateways and platforms](https://kazma.ai/docs/gateways-and-platforms/).
+To reach Kazma from WhatsApp, Telegram, Discord or Slack, add the bot's token
+in **Settings → Adapters & Routes** (WhatsApp uses your own Meta app and
+number); its **Test** button says what works and what is missing. See
+[Gateways and platforms](https://kazma.ai/docs/gateways-and-platforms/).
+
+Kazma also installs as an app on your computer or phone, in its own window,
+from the browser's install button.
 
 ### Updating
 
@@ -239,20 +243,30 @@ the model cannot overwrite your words with a guess.
 **Memory you can see and correct.** Facts keep both when they were said and
 when they held. A memory reaches the model only when it clears a measured
 threshold, and every answer shows the memory it used. Write an **About me**
-that every reply reads; forget a memory or a whole chat, keep a chat out of
-memory, export everything. Archiving moves a memory to cold storage and never
-erases it. → [Memory](https://kazma.ai/docs/memory-and-rag/)
+that every reply reads; bring your history from a ChatGPT or Claude export;
+forget a memory, a whole chat or everything that mentions something, keep a
+chat out of memory, export everything. Long threads get weekly topic
+summaries. → [Memory](https://kazma.ai/docs/memory-and-rag/)
 
 **One agent, every channel.** The web UI, the TUI, the `kazma` command,
-Telegram, Discord and Slack all talk to the same agent. `/sessions` lists your
-conversations from every channel, and `/session` picks one up wherever you
-are. Each chat app has its own allowlist, and platform IDs stay out of the
-agent's state.
+WhatsApp, Telegram, Discord and Slack all talk to the same agent. In a chat
+app it reads photos, documents and voice notes, and approve and deny buttons
+arrive in the chat. `/sessions` lists your conversations from every channel,
+and `/session` picks one up wherever you are. Each chat app has its own
+allowlist, and platform IDs stay out of the agent's state.
 → [Gateways and platforms](https://kazma.ai/docs/gateways-and-platforms/)
 
-**Your code, with a Web IDE.** Workspace-scoped files, git, GitHub, a code
-index and patch review with per-hunk rollback, all behind the same approval
-gate. Steer a running task with `/steer` or stop it with `/abort`.
+**Mail, calendar and reminders.** Gmail, Outlook and IMAP accounts with their
+calendars, several at once, named in chat by name or address. Reminders
+arrive in the chat you asked from, and ready-made automations start in one
+click: a morning briefing, inbox triage, a weekly report, a news digest.
+Sending mail waits for your approval. → [Email and calendar](https://kazma.ai/docs/email-integration/)
+
+**Your code, with a Web IDE.** Workspace-scoped files, git, GitHub branches
+and pull requests, a code index and patch review with per-hunk rollback, all
+behind the same approval gate. Steer a running task with `/steer`, stop it
+with `/abort`, or rewind or branch a conversation from any earlier step with
+`/replay` and `/fork`.
 → [Skills, MCP and tools](https://kazma.ai/docs/skills-mcp-and-tools/)
 
 **Knowledge Base and Deep Research.** Libraries of your own documents, pages
@@ -284,10 +298,12 @@ indexing into knowledge libraries. Arabic and mixed-direction documents
 render correctly, block by block and table by table, in one house style
 (HTML converted to PDF included). → [Document intelligence](https://kazma.ai/docs/document-intelligence/)
 
-**Any model.** Every OpenAI-compatible API, plus native Anthropic, Gemini,
-Azure OpenAI and AWS Bedrock, local Ollama and LM Studio, and tools from any
-MCP server. A fallback to another model is always announced.
-→ [Configuration](https://kazma.ai/docs/configuration/)
+**Any model, even local.** 35 providers in one list (OpenAI, Anthropic,
+Gemini, Azure OpenAI, AWS Bedrock, DeepSeek, OpenRouter and more), any
+OpenAI-compatible endpoint, local models through Ollama and LM Studio, and
+tools from any MCP server. Pick a model per chat and see the cost of every
+answer; a cost breaker stops runaway spending, and a fallback to another model
+is always announced. → [Configuration](https://kazma.ai/docs/configuration/)
 
 **English and Arabic as equals.** A full Arabic interface laid out right to
 left, text that follows its own language in either interface, Gulf and
@@ -336,7 +352,7 @@ swarm:
 
 ```mermaid
 flowchart LR
-    U["Web UI · TUI · CLI<br/>Telegram · Discord · Slack"] --> S
+    U["Web UI · TUI · CLI<br/>WhatsApp · Telegram · Discord · Slack"] --> S
     S["LangGraph supervisor<br/>plans, calls tools, answers"]
     S --> H{{"Approval gate<br/>you decide"}}
     S --> C["Commitment layer<br/>checks intent against memory"]
@@ -427,7 +443,7 @@ English and [Arabic](https://kazma.ai/ar/docs/).
 | Package | Path | What it holds |
 |---|---|---|
 | **`kazma-core`** | [`kazma-core/`](kazma-core/) | Agent runner, model providers, swarm engine, memory, IDE backend, safety and document services |
-| **`kazma-gateway`** | [`kazma-gateway/`](kazma-gateway/) | Telegram, Discord and Slack adapters, slash commands, in-flight steering |
+| **`kazma-gateway`** | [`kazma-gateway/`](kazma-gateway/) | WhatsApp, Telegram, Discord and Slack adapters, slash commands, in-flight steering |
 | **`kazma-ui`** | [`kazma-ui/`](kazma-ui/) | FastAPI web app: streaming chat, dashboard, Web IDE, memory console |
 | **`kazma-tui`** | [`kazma-tui/`](kazma-tui/) | Textual terminal UI, editor and documents manager |
 | **`kazma-skills`** | [`kazma-skills/`](kazma-skills/) | Native skills: document platform, vault, research, crawler, database and more |

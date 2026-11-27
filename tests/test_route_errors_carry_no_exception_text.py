@@ -41,8 +41,10 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import builtins
 import functools
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -114,8 +116,47 @@ def _type_names(node: ast.AST | None) -> set[str]:
     return names
 
 
+def _product_files() -> list[str]:
+    out = subprocess.run(["git", "ls-files", "-z", "--", "kazma-*"], cwd=ROOT,
+                         capture_output=True, check=True).stdout.decode("utf-8")
+    return [rel for rel in out.split("\0") if rel.endswith(".py") and "/tests/" not in rel]
+
+
+def exception_classes_in(trees: list[ast.AST]) -> frozenset[str]:
+    """Python's exception classes, and every class *trees* define whose
+    bases lead to one (by name, to a fixpoint): ``PeopleRefused(ValueError)``,
+    ``_Refused(PeopleRefused)``."""
+    found = {name for name in dir(builtins)
+             if isinstance(getattr(builtins, name), type) and issubclass(getattr(builtins, name), BaseException)}
+    bases: dict[str, set[str]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                bases.setdefault(node.name, set()).update(*(_type_names(b) for b in node.bases))
+    changed = True
+    while changed:
+        changed = False
+        for name, named in bases.items():
+            if name not in found and (named & found or any(b.endswith(("Exception", "Error")) for b in named)):
+                found.add(name)
+                changed = True
+    return frozenset(found)
+
+
+@functools.lru_cache(maxsize=1)
+def _exception_classes() -> frozenset[str]:
+    trees = [ast.parse((ROOT / rel).read_text(encoding="utf-8")) for rel in _product_files()]
+    assert len(trees) > 500, "the class census must see the packages"
+    return exception_classes_in(trees)
+
+
 def _is_exception_annotation(annotation: ast.AST | None) -> bool:
-    return any(name.endswith(("Exception", "Error")) for name in _type_names(annotation))
+    """A parameter typed as an exception: a name ending in Exception or
+    Error, or any exception class Kazma defines. By the suffix alone,
+    ``people_api._refused(exc: people.PeopleRefused)`` answered ``str(exc)``
+    unseen (2026-11-26, CodeQL alert 554)."""
+    names = _type_names(annotation)
+    return any(name.endswith(("Exception", "Error")) for name in names) or bool(names & _exception_classes())
 
 
 def _is_leak(node: ast.AST, tainted: set[str]) -> bool:
@@ -402,6 +443,46 @@ def test_the_walker_leaves_the_safe_shapes() -> None:
     assert not found, found
     undeclared = findings_in(_SAFE_SHAPES, "planted.py", frozenset())
     assert [f[1] for f in undeclared] == ["b"], "an undeclared type is held to the rule"
+
+
+#: people_api._refused before 2026-11-26: a parameter typed with one of
+#: Kazma's refusal classes, whose text went out raw.
+_REFUSAL_PARAMETER = '''
+from fastapi.responses import JSONResponse
+from kazma_core.spaces import people
+
+
+def _refused(exc: people.PeopleRefused) -> JSONResponse:
+    body = {"ok": False, "error": exc.code, "message": str(exc)}
+    return JSONResponse(body, status_code=exc.status)
+
+
+def _answered_by_field(exc: people.PeopleRefused) -> JSONResponse:
+    return JSONResponse({"ok": False, "message": refusal_message(exc)}, status_code=exc.status)
+'''
+
+
+def test_a_parameter_typed_with_kazmas_own_exception_is_held_to_the_rule(monkeypatch) -> None:
+    """Every exception class the packages define is known, whatever its
+    name ends in: the old suffix rule (the negative control) let the People
+    page answer ``str(exc)`` of a ``PeopleRefused`` unseen."""
+    assert {"PeopleRefused", "LinkRefused", "SpaceMoveRefused", "ImportRefused"} <= _exception_classes()
+    assert not {"Path", "JSONResponse", "BaseModel"} & _exception_classes()
+    found = findings_in(_REFUSAL_PARAMETER, "planted.py", frozenset(DECLARED_TYPES))
+    assert [f[1] for f in found] == ["_refused"], found
+
+    def suffix_only(annotation: ast.AST | None) -> bool:
+        return any(n.endswith(("Exception", "Error")) for n in _type_names(annotation))
+
+    monkeypatch.setitem(globals(), "_is_exception_annotation", suffix_only)
+    assert not findings_in(_REFUSAL_PARAMETER, "planted.py", frozenset(DECLARED_TYPES)), (
+        "the control: the suffix rule must miss the refusal parameter")
+
+
+def test_the_class_census_follows_bases_to_a_fixpoint() -> None:
+    tree = ast.parse("class A(ValueError): ...\nclass B(A): ...\nclass C(B): ...\nclass D(object): ...\n")
+    found = exception_classes_in([tree])
+    assert {"A", "B", "C"} <= found and "D" not in found
 
 
 # ── Behaviour: each answer says what happened, never the exception's text ──

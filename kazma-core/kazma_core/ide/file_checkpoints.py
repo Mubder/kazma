@@ -160,6 +160,57 @@ class FileCheckpointStore:
             "files": json.loads(row[5]),
         }
 
+    def review(self, checkpoint_id: str) -> dict[str, Any] | None:
+        """Each held file's text then and now, for the IDE's review page
+        (``GET /api/ide/checkpoints/{id}/review``); None for an unknown
+        checkpoint.
+
+        A held path is read again now, so it is asked the path policy now
+        (``check_path_access``): a path that names one of Kazma's own files
+        today (a folder on its way linked there since) is left out, as
+        :meth:`create` leaves out a refused path, and ``not_shown`` counts
+        them (the page says some are not shown). A file the checkpoint saw
+        as missing and that exists now was created after it: it is a change
+        too. Both sides are exact text: a text-mode read turned CRLF into LF
+        and an unchanged CRLF file was listed as changed.
+        """
+        from kazma_core.ide.hunks import file_diff, split_hunks
+        from kazma_core.tools.text_newlines import read_exact
+
+        rec = self.get(checkpoint_id)
+        if rec is None:
+            return None
+        files: list[dict[str, Any]] = []
+        not_shown = 0
+        for item in rec.get("files") or []:
+            path = str(item.get("path") or "")
+            if not check_path_access(path, "read").allowed:
+                not_shown += 1
+                continue
+            before = str(item.get("content") or "")
+            after = ""
+            try:
+                p = Path(path)
+                if p.is_file():
+                    after = read_exact(p)
+            except (OSError, UnicodeDecodeError):
+                after = ""
+            lines = file_diff(before, after, Path(path).name).splitlines()
+            diff_text = "\n".join(lines[:400])
+            files.append({
+                "path": path,
+                "before": before,
+                "after": after,
+                "diff": diff_text,
+                "hunks": split_hunks(diff_text),
+                "changed": before != after,
+            })
+        if not_shown:
+            logger.info("[file_checkpoints] a review leaves out %d held file(s) the path "
+                        "policy refuses now", not_shown)
+        return {"id": rec["id"], "reason": rec.get("reason") or "", "files": files,
+                "not_shown": not_shown}
+
     def restore(self, checkpoint_id: str) -> list[str]:
         """Write stored bytes back (containment-checked). Used as in-tool rollback."""
         rec = self.get(checkpoint_id)

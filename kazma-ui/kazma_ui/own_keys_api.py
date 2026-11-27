@@ -27,7 +27,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from kazma_core.errors import validation_error
+from kazma_core.errors import refusal_message
 from kazma_core.spaces.identity import IdentityUnavailable
 from kazma_core.spaces.own_keys import OwnKeyRefused, OwnKeyUnreadable
 
@@ -135,7 +135,7 @@ def create_own_keys_router() -> APIRouter:
                                     status_code=400)
             await asyncio.to_thread(lambda: set_key(account, provider, key, _registry()))
         except OwnKeyRefused as exc:
-            return _refused(exc.code, validation_error(exc))
+            return _refused(exc.code, refusal_message(exc))
         except (IdentityUnavailable, OwnKeyUnreadable):
             logger.warning("[own-keys] a person's own key could not be kept", exc_info=True)
             return _unreadable()
@@ -149,7 +149,7 @@ def create_own_keys_router() -> APIRouter:
         try:
             removed = remove_key(_account(request), provider, _registry())
         except OwnKeyRefused as exc:
-            return _refused(exc.code, validation_error(exc))
+            return _refused(exc.code, refusal_message(exc))
         except (IdentityUnavailable, OwnKeyUnreadable):
             logger.warning("[own-keys] a person's own key could not be removed", exc_info=True)
             return _unreadable()

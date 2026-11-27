@@ -74,6 +74,8 @@ class OwnKeyRefused(ValueError):  # noqa: N818 -- named for what happened, as pe
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+        #: Kazma's sentence, which the page shows (``errors.refusal_message``).
+        self.message = message
 
 
 class OwnKeyUnreadable(RuntimeError):  # noqa: N818 -- named for the state

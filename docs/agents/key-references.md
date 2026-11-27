@@ -3,6 +3,7 @@
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/FEATURES.md` — What Kazma does, a plain list checked against the code (the website's source; re-check a line against the code before changing it)
+- `docs/brand/heading.json` — Kazma's one heading, short form and lede in English and Arabic, for both READMEs, the GitHub About, kazma.ai and social bios. Change it there and in every copy at once; `tests/test_heading_everywhere.py` checks the READMEs carry it verbatim, that it fits a 160-character bio, and that it names every chat app in `CHAT_PLATFORMS` (a new adapter is named in the same change)
 - `docs/docs/ops/website-sync.md` — How kazma.ai is kept in step with this repository: the standing procedure, `docs/website-pages.json` (every doc page's place on the site) and `scripts/website_sync_plan.py` (what the site must add, update, remove, translate)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
 - `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
@@ -21,6 +22,7 @@
 - `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
+- `docs/audits/CODEQL_TRIAGE_2026-11-26.md` — Every code-scanning alert open on 2026-11-26 (135): fixed, false positive with its reason, or the owner's; the list the owner dismisses from (section 66)
 - `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report (historical, 2026-08-11; not a current qualification — the current state is the hardening tracker above)
 - `docs/audits/AUDIT_{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_2026-10-13.md` and their trackers `docs/plans/{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_INDUSTRIAL_HARDENING_GOAL.md` — the 2026-10-13 audits of those areas (findings, AGENTS.md claims the code does not match, staged path) and the open remediation, one tracker per area, modelled on Documents
 - `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)

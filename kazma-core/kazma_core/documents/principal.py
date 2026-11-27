@@ -66,8 +66,13 @@ NO_SPACE_REFUSAL = (
 
 
 class DocumentsRefused(Exception):
-    """A surface may not act on documents here; ``str(exc)`` says why, in
+    """A surface may not act on documents here; ``message`` says why, in
     words a person can act on."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        #: Kazma's sentence, which the page shows (errors.refusal_message).
+        self.message = message
 
 
 @dataclass(frozen=True)

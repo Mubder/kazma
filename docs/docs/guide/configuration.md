@@ -617,16 +617,9 @@ cross_division_rules:
   audit_all_access: true
 ```
 
-### 7.2 `kazma-security.yaml`
+### 7.2 `kazma-security.yaml` (removed)
 
-| Section | Key options |
-|---|---|
-| `scanning` | `enabled`, `interval: "24h"`, `sources: [osv, github_advisories, nvd]`, `auto_create_issues`, `severity_threshold: medium`, `ignore`. |
-| `disclosure` | `enabled`, `response_window: "48h"`, `assessment_window: "7d"`, `security_txt_url` (RFC 9116 contact file, not a PGP key), `encrypted_channels` (email + GitHub private reporting). |
-| `bug_bounty` | **`enabled: false`** — no paid program. Payout fields are reserved/zeroed; do not advertise tiers as active. See root `SECURITY.md`. |
-| `hardening` | `run_on_startup`, `fail_on_critical`, `auto_fix: false`, `checks` (8: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). |
-
-> **No code reads `kazma-security.yaml`** (checked 2026-09-27): it declares the security program (disclosure contacts, no paid bounty) for people. Its `scanning` and `hardening` keys schedule nothing; the hardening report and the dependency scan run on demand through `GET /api/security/hardening` and `GET /api/security/deps`. See [Security & Safety](security-and-safety).
+The file `kazma-security.yaml` was removed on 2026-11-27. It declared the security program for people (contacts, response windows, no paid bounty), and no code read it: its `scanning` and `hardening` keys looked like a schedule and never ran. The program is stated in root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md) and on [Security policy](../security/security-policy). The hardening report and the dependency scan run on demand through `GET /api/security/hardening` and `GET /api/security/deps` ([Security & Safety](security-and-safety)).
 
 ### 7.3 `proxy.*` keys (scraping proxy provider addon)
 

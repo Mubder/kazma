@@ -1,0 +1,9 @@
+# The "New issue" page. A security problem goes to the private form, never a
+# public issue (SECURITY.md, section 1). Blank issues stay allowed.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability (privately) · الإبلاغ عن ثغرة أمنية
+    url: https://github.com/Mubder/kazma/security/advisories/new
+    about: >-
+      Only you and the maintainers see it. Please read SECURITY.md first; admin@kazma.ai if you cannot use GitHub.
+      لا يراه سواك وسوى القائمين على المشروع. اقرأ SECURITY.ar.md أولًا.

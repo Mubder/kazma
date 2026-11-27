@@ -1645,8 +1645,13 @@ class ConfigStore(_ChangeNotices):
                     "[ConfigStore] scoped resolve unavailable for %s — "
                     "falling back to ambient retrieve", key, exc_info=True,
                 )
-                secret = vault.retrieve(name)
-                return secret if secret is not None else None
+                # Returned as it comes, never bound to a name like "secret":
+                # this is every key's read path, and CodeQL calls whatever a
+                # variable of that name holds a secret -- every setting any
+                # module read became one, and 88 log lines of ids and counts
+                # were reported as secrets (2026-11-26, AGENTS.md section 66).
+                # A secret is named where it is read, by its key.
+                return vault.retrieve(name)
 
         # Lazy migrate: plaintext sensitive value + vault available → encrypt
         # Guard against re-migration loops: only migrate if the vault doesn't

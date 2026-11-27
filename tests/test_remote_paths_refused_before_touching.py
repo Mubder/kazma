@@ -245,6 +245,37 @@ def test_control_the_old_ide_and_list_bodies_touch_the_network_path(touches, tmp
     assert len(touches) == 2, touches
 
 
+# ── 2026-11-27: the IDE's read-only git (/api/ide/git, /ide git: no card) ──
+
+@pytest.mark.parametrize("parts", [
+    ["log", "--", r"\\attacker\share\x"],
+    ["show", r"HEAD:\\attacker\share\x"],
+    ["log", "--", "//attacker/share/x"],
+    ["blame", r"\\?\UNC\attacker\share\x"],
+    ["diff", "--", "//attacker/share/x", "src"],
+])
+def test_the_ide_git_read_refuses_a_network_operand_before_resolving(touches, tmp_path, parts):
+    from kazma_core.ide.git_policy import validate_read_paths
+
+    (tmp_path / ".git" / "objects").mkdir(parents=True)
+    (tmp_path / ".git" / "refs").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="network or device"):
+        validate_read_paths(parts, tmp_path)
+    assert touches == []
+
+
+def test_control_the_old_git_operand_check_resolves_the_network_path(touches, tmp_path):
+    # git_policy.validate_read_paths before 2026-11-27: a Path built from the
+    # operand's path part, joined to the root when relative, then resolved.
+    for path in (r"\\attacker\share\x", "//attacker/share/x"):
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = tmp_path / candidate
+        candidate.resolve()
+    assert len(touches) == 2, touches
+
+
 # ── Negative controls: the old bodies touch the path first ─────────────────
 
 def test_control_the_old_bodies_touch_the_network_path(touches, tmp_path):

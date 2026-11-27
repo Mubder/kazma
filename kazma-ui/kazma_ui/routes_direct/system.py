@@ -838,19 +838,21 @@ def register_system_routes(self: Any) -> None:
         import sqlite3
         from pathlib import Path
 
-        from kazma_core.memory.backup import NotAMemoryBackup, is_memory_backup_name
+        from kazma_core.memory.backup import NotAMemoryBackup, memory_backup_path
         from kazma_core.paths import backups_dir, primary_memory_db
 
         # Only a backup of the memory database, never the operations
         # database's copy beside it: restored over the memory database, it
-        # took every memory away (2026-11-18).
-        if not is_memory_backup_name(backup_name):
+        # took every memory away (2026-11-18). Its path is made from the
+        # name's timestamp, never from the text sent (memory_backup_path).
+        named = memory_backup_path(backup_name)
+        if named is None:
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="not_a_memory_backup")
 
         try:
             _backups_root = Path(backups_dir()).resolve()
-            src = (Path(backups_dir()) / backup_name).resolve()
+            src = named.resolve()
             try:
                 src.relative_to(_backups_root)
             except ValueError:

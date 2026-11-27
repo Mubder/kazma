@@ -183,9 +183,49 @@ async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
     return fence_untrusted(out.strip() or "No commits.", source="git_log")
 
 
+async def _content_read_refusal() -> str | None:
+    """Why a content read may not run in the workspace's repository, or None
+    (``safety.git_kazma_files.read_refusal``: a work tree git itself
+    accepts, and a repository that holds none of Kazma's files), asked with
+    this tool's own read argv and environment. git_diff shows no card."""
+    from pathlib import Path
+
+    from kazma_core.safety.git_kazma_files import read_refusal
+    from kazma_core.security.child_env import tool_child_env
+
+    cwd = await asyncio.to_thread(_get_workspace)
+    env = tool_child_env()
+    for name in _PROGRAM_ENV:
+        env.pop(name, None)
+
+    def ask(args: list[str]) -> tuple[int, str]:
+        res = subprocess.run(  # noqa: S603 -- git, a fixed argv of listings
+            _git_read_argv(list(args)), cwd=cwd, env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, stdin=subprocess.DEVNULL,
+        )
+        return res.returncode, res.stdout or ""
+
+    return await asyncio.to_thread(read_refusal, Path(str(cwd)), ask)
+
+
 async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
     """Show uncommitted changes, or the changes of *target* (a commit, or a
-    range like ``main..HEAD``), read-only. ``stat`` lists the files only."""
+    range like ``main..HEAD``), read-only. ``stat`` lists the files only.
+
+    It shows no approval card, so it reads only a repository that holds none
+    of Kazma's own files (:func:`_content_read_refusal`), and a network or
+    device path is refused on its text."""
+    from kazma_core.workspace.remote_paths import remote_path_reason
+
+    remote = remote_path_reason(path) if (path or "").strip() else None
+    if remote:
+        return f"Error: {remote}"
+    try:
+        refusal = await _content_read_refusal()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"Error executing git diff: {e}"
+    if refusal:
+        return f"Error: {refusal}"
     args = ["diff"]
     ref = (target or "").strip()
     if ref:
