@@ -50,6 +50,7 @@ from kazma_core.swarm.task import (
     TaskType,
     WorkerCapabilities,
     WorkerResult,
+    is_terminal,
 )
 from kazma_core.swarm.dispatch_helpers import (
     aggregate_outputs as _aggregate_outputs_impl,
@@ -275,6 +276,10 @@ class SwarmEngine:
         # Each task's newest store write (SW-E07): writes run in threads,
         # each after the one before it for the same task.
         self._writes: dict[str, asyncio.Task] = {}
+        # Admitted tasks whose ending is recorded and whose slot stays until
+        # that ending is stored (_release_admission_slot). A second finalize
+        # in that window keeps the first ending.
+        self._endings_recorded: set[str] = set()
         # An admission write whose run or approval was stopped while it ran:
         # kept for the code that records the stop, which reads its outcome
         # (the write itself goes on in its thread).
@@ -694,7 +699,12 @@ class SwarmEngine:
 
     def _at_capacity(self) -> int | None:
         """The admission cap when it is reached (resumed and running tasks
-        count; paused ones wait on a human and do not), else None."""
+        count; paused ones wait on a human and do not), else None.
+
+        A task whose work has finished still counts until its ending is
+        stored (:meth:`_release_admission_slot`). The soak reads a row with
+        no ``completed_at`` as running, so the slot and that row change
+        together."""
         max_active = self._max_concurrent_tasks()
         active_non_paused = sum(
             1 for t in self._active_tasks.values() if t.status != TaskStatus.PAUSED
@@ -1992,12 +2002,14 @@ class SwarmEngine:
         the pattern's own model call (the Refiner, a synthesis: SW-E15),
         added to the workers' in the task's totals."""
         # Idempotent terminal finalize (audit H7): avoid double SSE/persist
-        # when cancel() and CancelledError both race.
+        # when cancel() and CancelledError both race. The slot stays until
+        # the ending write lands, so a second call in that window is the
+        # same ending, not a task still to record.
         prior_status = getattr(task, "status", None)
         if (
             prior_status in TERMINAL_STATUSES
-            and task.id not in self._active_tasks
             and task.result is not None
+            and (task.id not in self._active_tasks or task.id in self._endings_recorded)
         ):
             # A finished task is never reopened (SW-E03): a late "paused" from
             # a run the watchdog already ended used to bring it back.
@@ -2028,11 +2040,11 @@ class SwarmEngine:
                     metadata.setdefault("invoked_tools", list(tracker.tools))
         task.completed_at = _utc_now_iso()
 
-        # Remove from in-flight tracking (unless paused — paused tasks
-        # stay visible until resumed or rejected).
+        # The slot stays until the ending is stored (below). Dropping it
+        # here let the next task start while this row still had no
+        # completed_at, and the soak counted both (2026-11-27). A paused
+        # task keeps its slot either way: it waits on a person.
         if task.status != TaskStatus.PAUSED:
-            self._active_tasks.pop(task.id, None)
-            self._task_handles.pop(task.id, None)
             self._close_open_checkpoint(task.id)
 
         # Record per-worker metrics for any worker results not yet recorded.
@@ -2086,17 +2098,49 @@ class SwarmEngine:
 
         # Persist to SQLite when a task store is configured. The store's
         # transition table refuses a write from a superseded run or over a
-        # finished row; that result is kept as evidence (SW-E03).
+        # finished row; that result is kept as evidence (SW-E03). The
+        # admission slot is released when that write lands, not before.
+        ending = task.status != TaskStatus.PAUSED
+        if ending:
+            self._endings_recorded.add(task.id)
         if self._task_store is not None:
             self._persist(task, status, error)
+        elif ending:
+            self._release_admission_slot(task.id)
 
         return result
+
+    def _release_admission_slot(self, task_id: str) -> None:
+        """Drop *task_id*'s admission slot now that its ending is stored.
+
+        The limit counts ``_active_tasks``. A row with no ``completed_at``
+        still reads as running, so the slot is not free until the ending
+        write has returned. A task that is running or paused is left: this
+        run does not take its slot."""
+        task = self._active_tasks.get(task_id)
+        if task is not None and not is_terminal(task.status):
+            return
+        self._endings_recorded.discard(task_id)
+        self._active_tasks.pop(task_id, None)
+        self._task_handles.pop(task_id, None)
+
+    def _release_if_ending_stored(self, task_id: str) -> None:
+        """Release *task_id*'s slot when its ending is recorded and no later
+        store write is still in flight (that write releases)."""
+        if task_id not in self._endings_recorded:
+            return
+        newer = self._writes.get(task_id)
+        if newer is not None and not newer.done():
+            return
+        self._release_admission_slot(task_id)
 
     def _persist(self, task: SwarmTask, status: str = "", error: str | None = None) -> None:
         """Write *task* as it is now. With an event loop running the write
         runs in a thread (Swarm audit SW-E07: every task write ran on the
         loop), after the task's previous write; :meth:`_flush_writes` waits
-        for it. A write the transition table refuses is kept as evidence."""
+        for it. A write the transition table refuses is kept as evidence.
+        When this task's ending is recorded, the last write to finish
+        releases its admission slot."""
         if self._task_store is None:
             return
         snapshot = SwarmTask.from_dict(task.to_dict())
@@ -2141,6 +2185,7 @@ class SwarmEngine:
             asyncio.get_running_loop()
         except RuntimeError:
             _write()
+            self._release_if_ending_stored(task.id)
             return
         previous = self._writes.get(task.id)
 
@@ -2148,6 +2193,12 @@ class SwarmEngine:
             if previous is not None and not previous.done():
                 await asyncio.wait({previous})
             await asyncio.to_thread(_write)
+            # Before this task is marked done: a flush waiting on it must
+            # already see the slot free. A newer write of this task owns
+            # the release.
+            if self._writes.get(task.id) is asyncio.current_task():
+                self._writes.pop(task.id, None)
+            self._release_if_ending_stored(task.id)
 
         from kazma_core.background import spawn_background
 
@@ -2155,8 +2206,10 @@ class SwarmEngine:
         self._writes[task.id] = write
 
         def _done(finished: asyncio.Task, tid: str = task.id) -> None:
+            # Cancelled before _in_order released: the slot must not stay.
             if self._writes.get(tid) is finished:
                 self._writes.pop(tid, None)
+            self._release_if_ending_stored(tid)
 
         write.add_done_callback(_done)
 
@@ -2705,9 +2758,8 @@ class SwarmEngine:
                     else:
                         # If task not in history, store the result directly.
                         self._checkpoint_mgr.complete_pipeline(task_id, result)
-            # Ensure active maps cleared even if finalize path missed
-            self._active_tasks.pop(task_id, None)
-            self._task_handles.pop(task_id, None)
+            # The ending write releases the slot. Flush waits until it has,
+            # so a reject does not free the slot while the row is still open.
             await self._flush_writes(task_id)
         return result
 

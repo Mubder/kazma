@@ -66,6 +66,23 @@ compatibility. **All public API methods and constructors are unchanged.**
   gate: `tests/test_swarm_chaos.py` (each fix's old code as its negative
   control, the run-anyway admission included; the Postgres cases
   `@pytest.mark.postgres`).
+- **An admitted task keeps its slot until its ending is stored**
+  (2026-11-27). The limit counts `_active_tasks` (a paused task does not).
+  The soak counts stored `started_at` / `completed_at`, and a row with no
+  `completed_at` counts as running until the check. `_finalize_task` used to
+  drop the slot and then write the ending in a thread: under load the next
+  task was admitted and its start stored while the previous ending was still
+  unwritten, and the store showed 7 tasks in flight against a limit of 6.
+  The slots had peaked at 6; once the writes landed the stored intervals did
+  not overlap. The slot is released when that write returns, before the
+  write is marked done (`_release_admission_slot`); a cancelled write
+  releases from its done callback so the slot cannot stay held. A new task
+  cannot start until that `completed_at` is stored. `reject_checkpoint`
+  used to pop the slot again on its own and does not. A refusal before a RUNNING row (`_store_refused`,
+  a share refusal, a duplicate, a stop during admission) still drops the
+  slot at once: nothing of this run was stored as running. Gate:
+  `tests/test_swarm_slot_matches_store.py` (the old pop beside the end stamp
+  as the control).
 - **A shared breaker never takes an older state** (SQ01 soak, 2026-10-15):
   an outcome changes the breaker under its lock and shares it in a second
   step, so a refresh between the two read the generation before;
