@@ -407,13 +407,17 @@
   its MCP server and the terminal app's preview now refuse Kazma's stores
   and secret files wherever they are. An alert reported this earlier (#53)
   and was dismissed; the owner reopens it.
-- **The IDE's read-only git reads the repository's versions only**: no
-  `--no-index`, `git diff` only in a repository, and none of Kazma's own
-  files as an operand. Git with no approval (the IDE's, `/ide git`, the
-  agent's `git_diff`) shows a file's contents only in a work tree git
-  itself accepts and a repository that holds none of Kazma's files; the
-  answer says why in English or Arabic. A network path given to git is
-  refused before anything touches it.
+- **Git with no approval runs a list of known read forms; anything else
+  asks**: the IDE's git (the page, `/ide git`, the terminal app) and the
+  agent's git read tools run with no card only status, the branch and tag
+  lists, names and ids, `stash list`, log, and diff, show and blame in the
+  forms the list names. A diff, show or patch log runs only on commits of
+  the repository's own history, in a work tree git accepts; the sections
+  under Kazma's own paths are left out, with a line saying how many, in
+  English or Arabic.
+  Every other command, option or operand goes to the approval card with
+  the exact command shown. A word naming one of Kazma's files is refused,
+  and a network path given to git is refused before anything touches it.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

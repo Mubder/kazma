@@ -27,6 +27,7 @@ __all__ = [
     "NO_DIFF_PROGRAMS",
     "PROGRAM_ENV",
     "READ_CONFIG",
+    "READ_GLOBALS",
     "filter_driver_overrides",
     "no_hooks_dir",
     "read_argv",
@@ -42,6 +43,10 @@ READ_CONFIG = (
     "core.pager=cat",
     "log.showSignature=false",
 )
+#: Git's own options before the verb of every read: a replace ref
+#: (``refs/replace/``) makes git print one object's bytes under another's
+#: name, a blob of ``.env`` as ``src/app.py``.
+READ_GLOBALS = ("--no-replace-objects",)
 #: Diff options that keep external diff drivers (``diff.external``,
 #: ``diff.<driver>.command``) and textconv drivers from running.
 NO_DIFF_PROGRAMS = ("--no-ext-diff", "--no-textconv")
@@ -101,9 +106,9 @@ def read_argv(args: Sequence[str], filter_listing: str = "", *, location: Sequen
 
     *location* holds git's own location options (``-C``, ``--git-dir``,
     ``--work-tree``) of the command being judged, so the read sees the
-    repository that command will.
+    repository that command will; :data:`READ_GLOBALS` come before the verb.
     """
-    argv = ["git", *location, "--no-optional-locks"]
+    argv = ["git", *location, "--no-optional-locks", *READ_GLOBALS]
     for setting in (*READ_CONFIG, f"core.hooksPath={no_hooks_dir()}"):
         argv += ["-c", setting]
     argv += filter_driver_overrides(filter_listing)
