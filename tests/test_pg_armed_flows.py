@@ -345,20 +345,30 @@ def _another_name_for(dsn: str) -> str:
     return conninfo.make_conninfo(dsn, host="kazma-db.invalid", hostaddr=socket.gethostbyname(host))
 
 
-@pytest.mark.parametrize("by_identity", [True, False], ids=["told by identity", "the control: by address alone"])
+@pytest.mark.parametrize("told", ["by identity", "by address alone", "not told"],
+                         ids=["told by identity", "the control: by address alone", "not told: refused"])
 def test_the_mirror_and_pgvector_by_another_name_take_the_shared_door(armed: Any, monkeypatch: pytest.MonkeyPatch,
-                                                                      by_identity: bool) -> None:
+                                                                      told: str) -> None:
     """Step 5 review M1: through another name for Kazma's database (a
     ``hostaddr`` alias) the mirror and pgvector took it for another, signed in
     as the tables' owner -- whom row security does not hold -- and read every
-    space's rows. Told by its identity, they take the shared door: the space
-    role, the space's own rows."""
+    space's rows (the control: the address-only answer they asked before).
+    Told by its identity, they take the shared door: the space role, the
+    space's own rows. Not told (an identity that cannot be read), they are
+    refused, never reached as the owner."""
     from kazma_core.db import availability
     from kazma_core.memory.backends import PgvectorBackend
     from kazma_core.memory.state_backend import PostgresStateBackend
+    from kazma_core.spaces.scope import NoSpaceBound
 
     dsn = os.environ["KAZMA_DATABASE_URL"]
-    if not by_identity:
+    if told == "by address alone":
+        def by_address(asked: str | None, *, or_its_server: bool = False) -> bool:
+            return availability._same_as_kazmas(asked, availability._server_of if or_its_server
+                                                else availability._database_of)
+
+        monkeypatch.setattr(availability, "kazma_database", by_address)
+    elif told == "not told":
         monkeypatch.setattr(availability, "server_identity", lambda _dsn: None)
     a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
     mirror = PostgresStateBackend(dsn)
@@ -373,6 +383,10 @@ def test_the_mirror_and_pgvector_by_another_name_take_the_shared_door(armed: Any
         seen = {}
         with bind_scope(a, "reem"):
             for name, backend in (("mirror", aliased), ("pgvector", PgvectorBackend(dsn=alias))):
+                if told == "not told":
+                    with pytest.raises(NoSpaceBound):
+                        backend._connect()
+                    continue
                 conn = backend._connect()
                 try:
                     cur = conn.cursor()
@@ -381,8 +395,9 @@ def test_the_mirror_and_pgvector_by_another_name_take_the_shared_door(armed: Any
                     seen[name] = tuple(cur.fetchone())
                 finally:
                     conn.close()
+        assert len(seen) == (0 if told == "not told" else 2)
         for name, (who, rows) in seen.items():
-            if by_identity:
+            if told == "by identity":
                 assert (who, rows) == ("kazma_space", 1), (name, who, rows)
             else:
                 assert who != "kazma_space" and rows == 2, (name, who, rows)
