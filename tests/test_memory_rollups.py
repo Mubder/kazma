@@ -554,3 +554,215 @@ def test_control_the_stored_stretch_brings_a_neighbouring_month(monkeypatch, que
     stored = {r["id"]: (r["period_start"], r["period_end"]) for r in _kuwait_months()}
     assert "sum_m7" in _june_answer(monkeypatch, "UTC", question, stored)
     assert "sum_m5" in _june_answer(monkeypatch, "Pacific/Kiritimati", question, stored)
+
+
+# ── A roll-up the model skips is not asked again (the follow-up's O1) ────
+
+_SKIP = {"title": "", "summary": "", "skip": True}
+
+
+def _passes(mem, chat: _Chat, passes: int) -> int:
+    """The sweep's part, *passes* times: plan, then write every roll-up that
+    waits, as the queue's task does. The model calls it made."""
+    before = len(chat.calls)
+    for _ in range(passes):
+        _plan(mem)
+        for row in mem.db.execute(
+                "SELECT id FROM memory_summaries WHERE level != 'week' AND status = 'rebuild'").fetchall():
+            _write(mem, row["id"], chat)
+    return len(chat.calls) - before
+
+
+def test_a_skipped_project_is_not_planned_again_until_its_parts_change(mem):
+    _training(mem)
+    chat = _Chat(reply=_SKIP)
+    assert _passes(mem, chat, 1) == 2  # the month and the project, each skipped once
+    assert {r["status"] for r in _rollups(mem, "project")} == {"retired"}
+    assert _passes(mem, chat, 3) == 0  # settled: no model call again
+    _weekly(mem, "tr4", 4, title="Half marathon training: 16 km", text="A 16 km long run.", direction=0)
+    assert _passes(mem, chat, 1) >= 1  # a part added: asked again
+
+
+def test_control_with_skipped_projects_left_out_the_sweep_never_settles(mem, monkeypatch):
+    """The negative control: the project lookup as it was (retired projects
+    left out) plans the skipped project again and asks the model again."""
+    from kazma_core.memory import topic_rollups
+
+    real = topic_rollups._known_projects
+    monkeypatch.setattr(topic_rollups, "_known_projects", lambda conn, tenant: {
+        rid: known for rid, known in real(conn, tenant).items() if known[0] != "retired"})
+    _training(mem)
+    chat = _Chat(reply=_SKIP)
+    _passes(mem, chat, 1)
+    assert _passes(mem, chat, 4) >= 2
+
+
+def _months_store() -> sqlite3.Connection:
+    """May to July 2026 as month roll-ups a Kuwait server wrote, each about
+    the training."""
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    for row in _kuwait_months():
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'month', ?, ?, 'active', 0, 0, '{}')",
+            (row["id"], row["period_key"], row["period_start"], row["period_end"],
+             f"Half marathon training, {row['period_key']}", "The training runs and how the calf felt."))
+    return conn
+
+
+def _recalled(monkeypatch, zone: str, question: str) -> list[str]:
+    """``_recall_summaries`` itself on the store, the question read in *zone*."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    monkeypatch.setattr(recall, "_summaries_enabled", lambda: True)
+    monkeypatch.setattr(recall, "_encode_query", lambda query: None)
+    conn = _months_store()
+    token = recall._ASK.set(read_time(question, now=_ASKED_ON, zone=ZoneInfo(zone)))
+    try:
+        return [h.id for h in recall._recall_summaries(conn, question, "default")]
+    finally:
+        recall._ASK.reset(token)
+        conn.close()
+
+
+@pytest.mark.parametrize("zone", ["UTC", "Pacific/Kiritimati"])
+def test_recall_answers_june_with_june_through_its_own_path(monkeypatch, zone):
+    """The follow-up's L1: through ``_recall_summaries``, a said-in-June
+    question gets June alone, and a June question about the training shows no
+    other month."""
+    assert _recalled(monkeypatch, zone, "What did we talk about in June?") == ["sum_m6"]
+    assert _recalled(monkeypatch, zone, "شنو تكلمنا عنه في يونيو؟") == ["sum_m6"]
+    shown = _recalled(monkeypatch, zone, "How was my training going in June?")
+    assert "sum_m6" in shown and not {"sum_m5", "sum_m7"} & set(shown), shown
+
+
+def test_control_recall_with_the_stored_stretch_shows_a_neighbouring_month(monkeypatch):
+    """The negative control: ``_spans`` as the stretches were stored lets
+    July in (UTC) beside June."""
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_spans", lambda rows, weeks=None: {
+        str(r["id"]): (float(r["period_start"]), float(r["period_end"])) for r in rows})
+    said = _recalled(monkeypatch, "UTC", "What did we talk about in June?")
+    training = _recalled(monkeypatch, "UTC", "How was my training going in June?")
+    assert "sum_m7" in said or "sum_m7" in training, (said, training)
+
+
+def _honolulu_project() -> sqlite3.Connection:
+    """A project of weeks 2026-W19 to W22 (4 to 31 May) as a Honolulu server
+    wrote it: each stretch from its local midnight."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    honolulu = ZoneInfo("Pacific/Honolulu")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    starts = []
+    for week, day in ((19, 4), (20, 11), (21, 18), (22, 25)):
+        start = _dt.datetime(2026, 5, day, tzinfo=honolulu).timestamp()
+        starts.append(start)
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', 't', 's', 'active', 0, 0, '{}')",
+            (f"w{week}", f"2026-W{week}", start, start + 7 * 86400))
+    conn.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES ('proj', 'default', 'project:abc', ?, ?, 'project', 't', 's', 'active', 0, 0, '{}')",
+        (starts[0], starts[-1] + 7 * 86400))
+    conn.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('proj', ?)",
+                     [(f"w{w}",) for w in (19, 20, 21, 22)])
+    return conn
+
+
+def test_a_project_s_stretch_and_label_come_from_its_weeks(monkeypatch):
+    """The follow-up review's L2: a Honolulu-written project of May, read in
+    Kuwait (13 hours ahead), stays 4 May to 1 June and is named May."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall, topic_rollups
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: kuwait)
+    conn = _honolulu_project()
+    rows = conn.execute("SELECT * FROM memory_summaries WHERE level = 'project'").fetchall()
+    weeks = recall._project_weeks(conn, rows)
+    assert weeks == {"proj": ("2026-W19", "2026-W22")}
+    assert recall._spans(rows, weeks)["proj"] == (_dt.datetime(2026, 5, 4, tzinfo=kuwait).timestamp(),
+                                                  _dt.datetime(2026, 6, 1, tzinfo=kuwait).timestamp())
+    assert topic_rollups.rollup_label("project", rows[0]["period_start"], rows[0]["period_end"], "project:abc",
+                                      weeks["proj"]) == "Project, May 2026 to May 2026"
+    # the control: read at midday, 13 hours away, it moves a day and into June
+    start, end = recall._spans(rows)["proj"]
+    assert _dt.datetime.fromtimestamp(start, kuwait).day == 5 and _dt.datetime.fromtimestamp(end, kuwait).month == 6
+    conn.close()
+
+
+# ── "What did we talk about last week?" is answered by the week ──────────
+# (the follow-up review's O2: a said week was answered by its whole month)
+
+_LAST_WEEK = ["What did we talk about last week?", "شنو تكلمنا عنه الأسبوع الماضي؟"]
+
+
+def _weeks_and_months_store() -> sqlite3.Connection:
+    """June and July's roll-ups, and weeks W26, W27 and W31, as a Kuwait
+    server wrote them."""
+    from zoneinfo import ZoneInfo
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    conn = _months_store()
+    for week, (month, day) in ((26, (6, 22)), (27, (6, 29)), (31, (7, 27))):
+        start = _dt.datetime(2026, month, day, tzinfo=kuwait).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', ?, 'What we talked about that week.', 'active', 0, 0, '{}')",
+            (f"sum_w{week}", f"2026-W{week}", start, start + 7 * 86400, f"Week {week}"))
+    return conn
+
+
+def _asked_last_week(monkeypatch, zone: str, question: str) -> list[str]:
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    monkeypatch.setattr(recall, "_summaries_enabled", lambda: True)
+    monkeypatch.setattr(recall, "_encode_query", lambda query: None)
+    monday = _dt.datetime(2026, 8, 3, 10, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    conn = _weeks_and_months_store()
+    token = recall._ASK.set(read_time(question, now=monday, zone=ZoneInfo(zone)))
+    try:
+        return [h.id for h in recall._recall_summaries(conn, question, "default")]
+    finally:
+        recall._ASK.reset(token)
+        conn.close()
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+@pytest.mark.parametrize("zone", ["Asia/Kuwait", "UTC"])
+def test_last_week_is_answered_by_its_weekly_summary(monkeypatch, zone, question):
+    assert _asked_last_week(monkeypatch, zone, question) == ["sum_w31"]
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_control_with_months_for_every_period_last_week_gets_july(monkeypatch, question):
+    """The negative control: months answering every said period (as before)
+    gives July's roll-up, not the week."""
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_SAID_BY_MONTHS_S", 0.0)
+    assert _asked_last_week(monkeypatch, "Asia/Kuwait", question) == ["sum_m7"]

@@ -117,7 +117,16 @@ queued by the maintenance sweep with at most two weeks in flight.
   June question in EN and AR in four zones, the stored stretch as control).
   Weeks and months are named and filed from their keys too (`rollup_label`,
   `_week_month`, `_month_settled`; a gate reads every place that dates a
-  stored stretch from source).
+  stored stretch from source), and a project from its first and last part's
+  week keys (`recall._project_weeks`; read at midday, a zone 13 hours away
+  moved it a day: the follow-up review's L2). A said period shorter than
+  `_SAID_BY_MONTHS_S` (20 days: "What did we talk about last week?", "شنو
+  تكلمنا عنه الأسبوع الماضي؟") is answered by its weekly summaries by share,
+  not its whole month (O2). A roll-up the model skips is retired with its
+  parts and planned again only when they change: a project was left out of
+  `_known_projects` and planned under the same id on every other sweep,
+  about 48 model calls a day each (O1; gate: the sweep settles after a skip,
+  a new part asks again, and the old lookup as control never settles).
   Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
   from it: through a turn and through a weekly summary; a roll-up that names
   no source, and a store without the re-read, as controls),

@@ -163,10 +163,13 @@ def _week_month(row: Any, zone: Any) -> tuple[str, float, float]:
     return _month_of(float(row["period_start"]) + _MIDDAY_S, zone)
 
 
-def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any) -> tuple[float, float]:
+def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any,
+               weeks: tuple[str, str] | None = None) -> tuple[float, float]:
     """A summary's stretch of time in *zone*, as epoch seconds: a week from
-    its key's Monday to the next, a month from its key's first to the next,
-    with no zone in the key; else its stored stretch read at midday, from its
+    its key's Monday to the next, a month from its key's first to the next, a
+    project from its first part's Monday to the Monday after its last
+    (*weeks*: their keys; the follow-up review's L2), with no zone in a key;
+    else its stored stretch read at midday, from its
     first day's midnight to the midnight after its last. Recall compares it
     with the question's period (the step 5 follow-up review's L-a: a stretch
     a server wrote in its own local time, compared as stored, put a June
@@ -174,6 +177,9 @@ def stretch_of(level: str, period_key: str, period_start: float, period_end: flo
     def midnight(day: _dt.date) -> float:
         return _dt.datetime(day.year, day.month, day.day, tzinfo=zone).timestamp()
 
+    first_week, last_week = (_week_monday(weeks[0]), _week_monday(weeks[1])) if weeks else (None, None)
+    if first_week is not None and last_week is not None:
+        return midnight(first_week), midnight(last_week + _dt.timedelta(days=7))
     monday = _week_monday(period_key) if level == "week" else None
     if monday is not None:
         return midnight(monday), midnight(monday + _dt.timedelta(days=7))
@@ -187,7 +193,8 @@ def stretch_of(level: str, period_key: str, period_start: float, period_end: flo
                                                 zone).date() + _dt.timedelta(days=1)))
 
 
-def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "") -> str:
+def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "",
+                 weeks: tuple[str, str] | None = None) -> str:
     """How recall's block and the roll-up prompts name a summary's stretch of
     time, in English (Kazma's own text): "Week of Oct 06, 2026",
     "October 2026", "Project, Sep 2026 to Nov 2026". A week and a month are
@@ -206,7 +213,13 @@ def rollup_label(level: str, period_start: float, period_end: float, period_key:
     if level == "month":
         return (_month_first(period_key) or day(start + _MIDDAY_S)).strftime("%B %Y")
     if level == "project":
-        first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
+        # from its parts' weeks (*weeks*: the first and last part's keys), else
+        # its stretch read at midday
+        first_week, last_week = (_week_monday(weeks[0]), _week_monday(weeks[1])) if weeks else (None, None)
+        if first_week is not None and last_week is not None:
+            first, last = first_week, last_week + _dt.timedelta(days=6)
+        else:
+            first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
         return f"Project, {first.strftime('%b %Y')} to {last.strftime('%b %Y')}"
     return f"Week of {(_week_monday(period_key) or day(start + _MIDDAY_S)).strftime('%b %d, %Y')}"
 
@@ -336,14 +349,22 @@ def _project_groups(weekly: list[sqlite3.Row]) -> list[list[sqlite3.Row]]:
     return groups
 
 
-def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
-                   budget: list[int]) -> int:
-    existing = {
+def _known_projects(conn: sqlite3.Connection, tenant_id: str) -> dict[str, tuple[str, set[str]]]:
+    """Every project roll-up the space has, by id: its status and parts. A
+    retired one is among them: one the model skipped keeps its parts, and is
+    not planned again until they change (the step 5 follow-up's O1: left out,
+    the same group was planned under the same id on every other sweep, about
+    48 model calls a day for each project the model skips)."""
+    return {
         str(r["id"]): (str(r["status"]), set(_parts_of(conn, str(r["id"]))))
         for r in conn.execute(
-            "SELECT id, status FROM memory_summaries WHERE tenant_id = ? AND level = 'project' "
-            "AND status != 'retired'", (tenant_id,))
+            "SELECT id, status FROM memory_summaries WHERE tenant_id = ? AND level = 'project'", (tenant_id,))
     }
+
+
+def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
+                   budget: list[int]) -> int:
+    existing = _known_projects(conn, tenant_id)
     planned = 0
     for group in _project_groups(weekly):
         if budget[0] <= 0:
@@ -353,6 +374,8 @@ def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite
                       if held and len(held & set(parts)) >= _SAME_PROJECT_SHARE * min(len(held), len(parts))), None)
         if match is not None:
             status, held = existing[match]
+            # a tombstone; written, waiting or skipped (retired) from these
+            # very parts
             if status == "forgotten" or held == set(parts):
                 continue
             rid = match

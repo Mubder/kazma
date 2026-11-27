@@ -3478,14 +3478,14 @@ def _summary_background(sims: Iterable[float]) -> float:
     return (median * n + _SUMMARY_BACKGROUND_PRIOR * missing) / (n + missing)
 
 
-def _summary_display(row: Any) -> str:
+def _summary_display(row: Any, weeks: tuple[str, str] | None = None) -> str:
     """What the model is shown of a summary: its stretch of time (a week, a
     month or a project's months: ``topic_rollups.rollup_label``), title and
     text, bounded."""
     from kazma_core.memory.topic_rollups import rollup_label
 
     key = row["period_key"] if "period_key" in row.keys() else ""
-    when = rollup_label(str(row["level"] or "week"), row["period_start"], row["period_end"], str(key or ""))
+    when = rollup_label(str(row["level"] or "week"), row["period_start"], row["period_end"], str(key or ""), weeks)
     text = " ".join(str(row["summary_text"] or "").split())
     if len(text) > _SUMMARY_SHOW_CHARS:
         text = text[: _SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
@@ -3517,7 +3517,8 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
 
     ask = _ASK.get()
     level = {str(row["id"]): str(row["level"] or "week") for row in rows}
-    span = _spans(rows)
+    weeks = _project_weeks(conn, rows)
+    span = _spans(rows, weeks)
     if ask is not None and ask.period and ask.said:
         months = _months_said_in(query, ask, rows, level, span)
         if months:
@@ -3536,7 +3537,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
             similarity=sims.get(str(row["id"])),
             by_meaning=str(row["id"]) in sims,
             content=str(row["title"] or ""),
-            display=_summary_display(row),
+            display=_summary_display(row, weeks.get(str(row["id"]))),
         )
         for row in rows
         # A month's roll-up says what the month was about: it answers a
@@ -3559,16 +3560,37 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
     return hits[:_SUMMARY_LIMIT]
 
 
-def _spans(rows: list[Any]) -> dict[str, tuple[float, float]]:
-    """Each summary's stretch of time in the operator's zone, from its key
-    (``topic_rollups.stretch_of``), as the question's period is read."""
+def _spans(rows: list[Any], weeks: dict[str, tuple[str, str]] | None = None) -> dict[str, tuple[float, float]]:
+    """Each summary's stretch of time in the operator's zone, from its key,
+    a project's from its parts' weeks (*weeks*, :func:`_project_weeks`;
+    ``topic_rollups.stretch_of``), as the question's period is read."""
     from kazma_core.memory.topic_rollups import stretch_of
 
     zone = _memory_zone()
+    weeks = weeks or {}
     return {str(row["id"]): stretch_of(str(row["level"] or "week"),
                                        str((row["period_key"] if "period_key" in row.keys() else "") or ""),
-                                       row["period_start"], row["period_end"], zone)
+                                       row["period_start"], row["period_end"], zone, weeks.get(str(row["id"])))
             for row in rows}
+
+
+def _project_weeks(conn: sqlite3.Connection, rows: list[Any]) -> dict[str, tuple[str, str]]:
+    """Each project roll-up's first and last part's week key (ISO keys sort
+    as their weeks do): its stretch, with no zone (the follow-up review's L2:
+    read at midday, a project a day's zone away moved a day)."""
+    ids = [str(row["id"]) for row in rows if str(row["level"] or "") == "project"]
+    if not ids:
+        return {}
+    try:
+        found = conn.execute(
+            "SELECT p.rollup_id, MIN(s.period_key), MAX(s.period_key) FROM memory_summary_parts p "
+            "JOIN memory_summaries s ON s.id = p.part_id AND s.level = 'week' "
+            f"WHERE p.rollup_id IN ({','.join('?' for _ in ids)}) GROUP BY p.rollup_id", ids).fetchall()
+    except sqlite3.OperationalError:
+        logger.warning("[recall] a project's weeks could not be read; its stretch is read at midday",
+                       exc_info=True)
+        return {}
+    return {str(r[0]): (str(r[1]), str(r[2])) for r in found if r[1] and r[2]}
 
 
 def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:
@@ -3577,15 +3599,23 @@ def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:
                 and stretch[0] < float(ask.end) and stretch[1] > float(ask.start))
 
 
+#: A said period this long or longer is answered by its months; a shorter
+#: one by its weeks ("What did we talk about last week?" was answered by the
+#: whole month; the step 5 follow-up review's O2).
+_SAID_BY_MONTHS_S = 20 * 86400.0
+
+
 def _months_said_in(
     query: str, ask: Any, rows: list[Any], level: dict[str, str], span: dict[str, tuple[float, float]],
 ) -> list[RecallHit]:
     """A question that asks only what was said in a period ("What did we
     talk about back in June?", "شنو تكلمنا عنه في يونيو؟",
     ``question_shape.asks_what_was_said``) is answered by that period's
-    month roll-ups, the month holding most of it first; [] when it names
-    something else, or no month of it is written yet (the weeks are then
-    ranked as for any question).
+    month roll-ups, the month holding most of it first; a period shorter
+    than :data:`_SAID_BY_MONTHS_S` ("last week", "الأسبوع الماضي") by its
+    weekly summaries, the same way; [] when it names something else, or no
+    month or week of it is written yet (the weeks are then ranked as for any
+    question).
 
     By meaning it was missed: the question names no topic, so nothing stands
     out from the background (June's roll-up measured 0.08 against a floor of
@@ -3596,10 +3626,11 @@ def _months_said_in(
     if not asks_what_was_said(query, ask.words):
         return []
     whole = max(float(ask.end) - float(ask.start), 1.0)
+    by = "month" if whole >= _SAID_BY_MONTHS_S else "week"
     share = {
         rid: (min(stretch[1], float(ask.end)) - max(stretch[0], float(ask.start))) / whole
         for rid, stretch in span.items()
-        if level.get(rid) == "month" and _overlaps(stretch, ask)
+        if level.get(rid) == by and _overlaps(stretch, ask)
     }
     if not share:
         return []
@@ -3619,7 +3650,7 @@ def _months_said_in(
                 "evidence": round(share[rid], 4),
                 "strength": "strong",
                 "at": span[rid][1],
-                "level": "month",
+                "level": by,
                 "display": _summary_display(by_id[rid]),
             },
         )
