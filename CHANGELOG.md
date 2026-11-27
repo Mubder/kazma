@@ -123,6 +123,149 @@
   reaches its 30-minute limit at that moment still ends as having reached
   its limit, not as stopped.
 
+## Kazma's engine reads every way of writing a folder given to a container (2026-11-27)
+
+- A folder given to a container inside a group of docker options
+  (`-itv G:\w:/w`, `-vG:\w:/w`, `-v=G:\w:/w`) now reaches Kazma's engine in
+  the form it reads, as `-v G:\w:/w` already did.
+- While a new container engine waits for running document jobs, a broker
+  that misses one status answer no longer ends the wait early; Kazma's log
+  says the number of jobs stopped is unknown when the broker did not answer,
+  and says so when a wait ends with nothing to restart.
+
+## A new container engine lets running document jobs finish first (2026-11-27)
+
+- When the container engine changes, the document broker now waits for the
+  jobs it is running to finish (up to 11 minutes, one job's longest run and
+  a minute) before it moves to the new engine; Kazma's log says it waits,
+  and how many jobs were stopped if the wait ran out.
+- On a PC without the Windows docker program's context for Kazma's engine,
+  the broker also moves to Kazma's engine when that engine is set up while
+  Kazma runs.
+- Docker options written together (`-itp 80:80`) no longer keep a folder
+  given to a container from reaching Kazma's engine in the form it reads.
+
+## Kazma's engine without a Windows docker context: the document broker follows a changed choice (2026-11-27)
+
+- On a PC where the Windows docker program has no context for Kazma's
+  engine, the document broker now starts again when the engine choice
+  arrives or changes, so document jobs run on the engine you chose.
+- With `KAZMA_DOCKER_ROUTE=cli` or `KAZMA_DOCKER_BIN` set, Kazma's log and
+  its status name the Windows docker program it really uses, and why.
+- The document broker, the guard and the pre-push check keep wsl.exe's
+  messages readable (UTF-8) when they reach Kazma's engine through it.
+- The Smart App Control page says an installer that isn't signed may not
+  run while Smart App Control is on, as it is not measured yet.
+
+## Windows setup asks before it installs Python, and takes the newest (2026-11-27)
+
+- A new Windows install takes the newest python.org Python on the PC: 3.14,
+  then 3.13. 3.12 and 3.11 are used only when nothing newer is there, as
+  python.org no longer ships patched Windows builds of them.
+- When there is none, setup installs Python 3.14.10 from python.org with
+  winget only with your yes: `-Yes` installs it, a terminal asks once, and
+  without either nothing is installed and setup says so. A failed install
+  says winget's exit code and its last line. Looking for a Python never
+  installs one.
+- Kazma's document jobs reach Kazma's own engine through `wsl.exe` on a PC
+  without the Windows docker program's context, as Kazma itself does.
+  `kazma doctor` says the Windows docker tool is not needed there, without
+  starting it.
+- The installer question in the Smart App Control page now depends on
+  whether Smart App Control is on (English and Arabic).
+
+## Windows' file check: the review's fixes (2026-11-26)
+
+- Backups of a Postgres that runs in a container on Kazma's engine work on
+  the route through `wsl.exe` again: the dump reached a closed port and the
+  restore check called a good backup corrupt.
+- The route to Kazma's engine is chosen from the engine you picked, even in
+  a program's first docker call and on a PC where Windows' file check refuses
+  the Windows docker tool; `kazma doctor` then says the tool is not needed
+  instead of naming a feature that waits.
+- A deploy that waits because Windows checked a file the new version needs
+  is kept and reported, never undone.
+- A code run that runs out of time stops its container too. A reload's
+  failure detail never shows a password or a token. The company-IT section
+  suggests publisher rules only.
+
+## Every Windows file Kazma runs, and its route without Kazma's certificate (2026-11-26)
+
+- A new Windows install runs on python.org's Python, which the Python
+  Software Foundation signs (3.12 first, installed for you when none is
+  there); the Python builds uv downloads are not signed. An existing install
+  keeps its Python.
+- The installer's SmartScreen notice is said as it is: Windows shows it for
+  installers that aren't signed yet, and signed releases are on the way.
+- `docs/plans/WINDOWS_TRUST_INVENTORY.md` lists every Windows-native file
+  Kazma runs or loads, its signature, and how it keeps working with Smart App
+  Control on; what is left needs Kazma's own certificate, four tools still
+  need a route, and three script rows need the VM test.
+
+## Kazma reaches its own container engine without a Windows docker program (2026-11-26)
+
+- Every docker call Kazma makes to its own engine now runs the engine's own
+  Docker inside WSL through Microsoft's `wsl.exe`, so Kazma needs no Windows
+  `docker.exe` for it and Windows' file check has nothing to refuse there.
+  Docker Desktop keeps its own signed tool. It is as fast or faster: a
+  container command 281 -> 152 ms, a container start 699 -> 425 ms, 50 MB out
+  of a container 551 -> 316 ms (measured on the owner's PC).
+- Paths are given as the engine reads them, a value a container takes from
+  the environment never goes on a command line, and the reboot drill checks
+  this route with nobody signed in. `KAZMA_DOCKER_ROUTE=cli` keeps the old way.
+
+## Windows' file check: the outside audit's findings (2026-11-26)
+
+- A docker program Windows does not allow is never taken for a Docker engine
+  that is down: the guard uses the next program Windows allows, or waits and
+  says once which feature waits; it no longer restarts Kazma's engine for it.
+  A program that started is checked again after 15 minutes, so a policy that
+  arrives while Kazma runs is noticed.
+- `KAZMA_DOCKER_BIN` naming a program Windows refused is said as that, not as
+  a missing file. The PostgreSQL Kazma's setup installed is looked for first
+  wherever it lives, and a `libpq.dll` on PATH that Windows refuses is passed
+  over.
+- One list of Windows' refusal codes, read everywhere, including by the
+  pre-push check, which now finds docker the way Kazma does.
+- Kazma's setup hints and the MCP and ACP client configs run Kazma with
+  Python (`python -m kazma_cli`), never its unsigned launchers.
+- The Smart App Control page has a section for company IT (App Control for
+  Business) and says what Windows checked on a real PC.
+
+## Kazma works with Windows' file check (Smart App Control) (2026-11-26)
+
+- **An update never replaces a working Kazma with one that cannot start**:
+  before the guard stops the running server for a reload, it checks in a
+  separate process that the new code can load what it needs on this PC
+  (the database client library, the app, the docker command-line tool).
+  When it cannot, the running server stays, the update waits, and the owner
+  gets one calm message saying so; `kazma_guard.py --reload` answers 4.
+  On 26 November a reload left Kazma read-only for thirty minutes this way.
+  The running guard takes this on the next restart of the KazmaAgent task.
+- **Kazma says what Windows checked, calmly**: `kazma doctor` has a
+  "Windows' file check" section (whether Smart App Control checks files, and
+  each of Kazma's native parts: allowed, replaced by its signed alternative,
+  or the feature that waits); `kazma setup system` and `kazma setup install`
+  add a note when there is something to say; the security report shows it as
+  information, never a finding. The two fallbacks (PostgreSQL's signed client
+  library, Docker Desktop's signed CLI) now say so at INFO. One alert,
+  "Kazma could not keep a feature working on this PC", only when a feature
+  has no signed alternative, naming it. Nothing Kazma says asks anyone to
+  change Windows' protection, in English or Arabic (a test reads every
+  phrase).
+- **Signed parts first while Smart App Control checks files**: Kazma then
+  uses PostgreSQL's signed client library and Docker Desktop's signed CLI
+  from the start, and never tries the unsigned copies (psycopg's bundled
+  library, the engine's own CLI). With it off, nothing changes.
+- **Fewer unsigned files in Express**: the test suite part installs pytest
+  and its plugins (the `test` extra), not the developer tools (`dev`: mypy,
+  locust, pre-commit), which nothing in a running Kazma or its tests uses.
+  Measured on Windows: 699 unsigned native files in an Express install's
+  packages before, 359 after.
+- **New page**: [Kazma and Windows Smart App Control](docs/docs/guide/windows-smart-app-control.md),
+  with its Arabic text, and the plan: signed releases, then a release bundle
+  where every file Kazma ships is signed.
+
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 
 - Kazma's connection to its own Postgres can now hold each space to its own

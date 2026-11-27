@@ -201,9 +201,9 @@ def _code_in_containers() -> tuple[bool, str]:
 
 
 def _container_engine() -> tuple[bool, str]:
-    from kazma_core.docker_cli import engine_label, find_docker_cli
+    from kazma_core.docker_cli import docker_command, engine_label
 
-    if find_docker_cli() is None:
+    if docker_command(["version"]) is None:
         return False, "no docker CLI on this machine: code cannot run until a container engine is installed"
     return True, f"{engine_label()} is installed (readiness says whether it answers)"
 

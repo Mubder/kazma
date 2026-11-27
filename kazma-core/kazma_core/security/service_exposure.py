@@ -78,16 +78,16 @@ def _published_problems(rows: Iterable[dict[str, Any]]) -> list[str]:
 
 def _docker_rows() -> list[dict[str, Any]] | None:
     """``docker ps``'s rows, or None when Docker cannot be asked."""
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_command
     from kazma_core.security.child_env import tool_child_env
 
-    docker = find_docker_cli()
-    if not docker:
+    docker = docker_command(["ps", "--format", "{{json .}}"], env=tool_child_env())
+    if docker is None:
         return None
     try:
         out = subprocess.run(
-            [docker, "ps", "--format", "{{json .}}"], capture_output=True, text=True,
-            timeout=_DOCKER_TIMEOUT_S, env=tool_child_env(), check=False,
+            docker.argv, capture_output=True, text=True,
+            timeout=_DOCKER_TIMEOUT_S, env=docker.env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         logger.info("[security] docker ps did not answer: the published-port check is skipped")
@@ -105,16 +105,16 @@ def _docker_rows() -> list[dict[str, Any]] | None:
 
 def _inspect_container(name: str) -> dict[str, Any] | None:
     """``docker inspect``'s record of *name*, or None when Docker cannot say."""
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_command
     from kazma_core.security.child_env import tool_child_env
 
-    docker = find_docker_cli()
-    if not docker:
+    docker = docker_command(["inspect", "--type", "container", name], env=tool_child_env())
+    if docker is None:
         return None
     try:
         out = subprocess.run(
-            [docker, "inspect", "--type", "container", name], capture_output=True, text=True,
-            timeout=_DOCKER_TIMEOUT_S, env=tool_child_env(), check=False,
+            docker.argv, capture_output=True, text=True,
+            timeout=_DOCKER_TIMEOUT_S, env=docker.env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

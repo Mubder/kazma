@@ -20,6 +20,14 @@ code) and Kazma ran with nobody supervising it.
   server itself only for a guard from before this change -- never a server
   that booted after the request -- and withdraws a request it could not
   apply.
+- **A reload checks the new code first** (2026-11-26, §71): before the
+  running server stops, `run_reload_preflight` runs a child with the
+  server's python in its folder (psycopg and its client library, the app,
+  the docker CLI). A failed or unfinished check keeps the server
+  (`reload_action` `kept_running`, one `guard.reload_waits` card per
+  reason; `--reload` exits 4, "the update waits"). Live that day a
+  reload swapped a working server for one Windows would not let load its
+  database library: read-only for thirty minutes. `--skip-check` skips it.
 - **Deliberate stops are graceful.** Reload, pause and the guard's own
   shutdown send CTRL_BREAK (Windows) / SIGTERM (POSIX) to the child's
   process group and wait `KAZMA_GUARD_GRACEFUL_STOP_S` (60) before the

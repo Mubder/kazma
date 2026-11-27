@@ -95,7 +95,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -280,9 +280,13 @@ GUARD_ACK_S = 20.0
 #   data_folder_move -- leaves a part ``kazma setup data-folder`` is moving
 #                 alone (its journal in the setup record): the database
 #                 service is not started or paged, the engine not started.
+#   reload_preflight -- a reload first checks, in a child process, that the
+#                 code on disk can load its native parts; when it cannot,
+#                 the running server is kept (state ``reload_action``
+#                 ``kept_running`` and ``reload_preflight``).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
                   "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch",
-                  "pager_test", "data_folder_move")
+                  "pager_test", "data_folder_move", "reload_preflight")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -524,10 +528,17 @@ def _write_json_atomic(path: Path, data: dict) -> None:
             time.sleep(0.05)
 
 
-def request_reload() -> float:
-    """Ask the running guard to boot new code. Returns the request's time."""
+def request_reload(*, check: bool = True) -> float:
+    """Ask the running guard to boot new code. Returns the request's time.
+
+    ``check=False`` (``--reload --skip-check``) tells the guard to switch
+    without its preflight (:func:`run_reload_preflight`): the operator's way
+    past a check they know to be wrong."""
     ts = time.time()
-    _write_json_atomic(_reload_path(), {"ts": ts, "pid": os.getpid()})
+    body: dict = {"ts": ts, "pid": os.getpid()}
+    if not check:
+        body["check"] = False
+    _write_json_atomic(_reload_path(), body)
     return ts
 
 
@@ -585,6 +596,244 @@ def consume_reload_request() -> bool:
         return True
     except Exception:
         return False
+
+
+# -- reload preflight: the new code starts here before the old one stops ---
+#
+# Live 2026-11-26 11:30 UTC: Windows' Application Control (Smart App
+# Control) had begun refusing unsigned DLLs half an hour earlier. The running
+# server had loaded psycopg's client library before that, so it kept
+# working; the reload stopped it, and the new process could not load the
+# library: Kazma started read-only for thirty minutes with its database
+# answering the whole time. A reload now asks first, in a child process
+# with the server's interpreter and folder, whether the code on disk can
+# load its native parts; when it cannot, the running server is kept, the
+# reason logged and the owner told, calmly: the update waits, Kazma keeps
+# running. The child, never the guard, imports Kazma (the guard stays
+# standard-library only, AGENTS §39).
+
+#: Run by :func:`run_reload_preflight` in a child process, in the install
+#: folder, with the interpreter that runs the server. It loads ``.env`` the
+#: way the server does (not under pytest: no test reads a real one), imports
+#: what a start imports first -- ``kazma_core`` (which puts the installed
+#: PostgreSQL's own client library within reach when Windows refuses the
+#: bundled one, ``kazma_core.libpq_reach``), psycopg and the client library
+#: it picked (when installed: an install on SQLite has none, and CI's Linux
+#: job neither), the app -- and starts the docker CLI ``find_docker_cli`` picks.
+#: ``docker_cli.py`` is loaded by path, as the guard loads it: the stored
+#: engine choice is then not applied, so no settings store is opened.
+_RELOAD_PREFLIGHT = r"""
+import importlib.util, json, os, subprocess, sys
+out = {"ok": True, "steps": {}}
+def masked(text):
+    try:  # URL passwords and token-shaped values, when Kazma's core loads
+        from kazma_core.security.url_credentials import mask_urls_in_text
+        return mask_urls_in_text(text)
+    except Exception:
+        return text  # the guard masks tokens again with the same table
+def finish(step=None, exc=None):
+    if step is not None:
+        text = masked(" ".join(str(exc).split()))[:300]
+        out.update(ok=False, step=step,
+                   detail=(type(exc).__name__ + ": " + text) if text else type(exc).__name__,
+                   winerror=getattr(exc, "winerror", None))
+    print("KAZMA_RELOAD_PREFLIGHT " + json.dumps(out), flush=True)
+    sys.exit(0)
+try:
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        from kazma_core.env_files import load_env_files
+        load_env_files()
+    import kazma_core
+    out["steps"]["kazma_core"] = "ok"
+except BaseException as exc:
+    finish("kazma_core", exc)
+try:
+    if importlib.util.find_spec("psycopg") is None:
+        out["steps"]["psycopg"] = "not installed"  # an install on SQLite: nothing to load
+    else:
+        import psycopg
+        out["steps"]["psycopg"] = str(psycopg.pq.__impl__)
+except BaseException as exc:
+    finish("psycopg", exc)
+try:
+    import kazma_ui.app
+    out["steps"]["app"] = "ok"
+except BaseException as exc:
+    finish("app", exc)
+try:
+    spec = importlib.util.find_spec("kazma_core.docker_cli")
+    loader = importlib.util.spec_from_file_location("kazma_preflight_docker_cli", spec.origin)
+    docker_cli = importlib.util.module_from_spec(loader)
+    sys.modules[loader.name] = docker_cli
+    loader.loader.exec_module(docker_cli)
+    cmd = docker_cli.docker_command(["--version"])
+except BaseException as exc:
+    finish("docker", exc)
+if cmd is not None:
+    try:
+        subprocess.run(cmd.argv, capture_output=True, timeout=15, check=False, env=cmd.env,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError as exc:
+        finish("docker", exc)
+out["steps"]["docker"] = f"started ({cmd.route})" if cmd is not None else "none found"
+finish()
+"""
+_RELOAD_PREFLIGHT_MARK = "KAZMA_RELOAD_PREFLIGHT "
+#: How long a preflight may take (a cold disk makes the imports slow). Past
+#: it the update waits and the running server is kept: an unproven start is
+#: not swapped for a working server.
+RELOAD_PREFLIGHT_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_PREFLIGHT_TIMEOUT_S", "180"))
+#: How Windows' refusal reads inside an import error ("DLL load failed while
+#: importing pq: An Application Control policy has blocked this file.").
+_WINDOWS_POLICY_WORDS = ("application control policy", "group policy")
+#: The part each step loads, as the owner reads it.
+_PREFLIGHT_PARTS = {
+    "python": "the Python that runs Kazma",
+    "kazma_core": "Kazma's core",
+    "psycopg": "the database client library",
+    "app": "the web app",
+    "docker": "the Docker command-line tool",
+    "timeout": "the new version",
+}
+
+
+def preflight_refused_by_windows(result: dict) -> bool:
+    """True when a failed preflight met Windows' file check (a policy
+    refusal), not an error in the code. A settled result carries the answer
+    (``windows_check``, decided before its detail was masked)."""
+    if "windows_check" in result:
+        return result.get("windows_check") is True
+    if result.get("winerror") in _windows_refusal_codes() and result.get("step") in {"python", "docker"}:
+        return True
+    text = str(result.get("detail") or "").lower()
+    return any(word in text for word in _WINDOWS_POLICY_WORDS)
+
+
+_TOKEN_SHAPES_MODULE = None
+#: What a detail reads when the masker could not load: never shown unmasked.
+DETAIL_WITHHELD = "(the detail is withheld: the masker could not load)"
+
+
+def _mask_tokens(text: str) -> str:
+    """*text* with every token-shaped value masked, by the one table
+    (``kazma_core/security/token_shapes.py``, standard library only, loaded
+    by path: the guard never imports the app). Fails closed."""
+    global _TOKEN_SHAPES_MODULE
+    try:
+        if _TOKEN_SHAPES_MODULE is None:
+            import importlib.util
+
+            path = REPO_ROOT / "kazma-core" / "kazma_core" / "security" / "token_shapes.py"
+            name = "kazma_guard_token_shapes"
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"cannot load {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module  # registered before it runs
+            spec.loader.exec_module(module)
+            _TOKEN_SHAPES_MODULE = module
+        return str(_TOKEN_SHAPES_MODULE.mask_tokens(text))
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return DETAIL_WITHHELD
+
+
+def run_reload_preflight(python: str, cwd: Path, *, timeout_s: float | None = None,
+                         tick: Callable[[], None] | None = None) -> dict:
+    """Can the code on disk start here? Runs :data:`_RELOAD_PREFLIGHT`.
+
+    Returns ``{"ok": bool, "steps": {...}, "seconds": float}`` and, when not
+    ok, ``step`` (``python``, ``kazma_core``, ``psycopg``, ``app``,
+    ``docker`` or ``timeout``), ``detail`` (the error's type and words, for
+    the operator, masked by value: it reaches guard.log, the state file and
+    the owner's card -- review L7, AGENTS §26 F), ``winerror`` and
+    ``windows_check`` (Windows' file check refused a file, decided before
+    the masking). *tick* is called about once a second while the child
+    runs, so the guard keeps its heartbeat. Never raises.
+    """
+    result = _preflight_child(python, cwd, timeout_s=timeout_s, tick=tick)
+    if not result.get("ok"):
+        result["windows_check"] = preflight_refused_by_windows(result)
+        if result.get("detail"):
+            result["detail"] = _mask_tokens(str(result["detail"]))[:300]
+    return result
+
+
+def _preflight_child(python: str, cwd: Path, *, timeout_s: float | None,
+                     tick: Callable[[], None] | None) -> dict:
+    """:func:`run_reload_preflight`'s child process and its raw answer."""
+    limit = RELOAD_PREFLIGHT_TIMEOUT_S if timeout_s is None else timeout_s
+    started = time.monotonic()
+
+    def result(ok: bool, **fields: object) -> dict:
+        return {"ok": ok, "steps": {}, **fields,
+                "seconds": round(time.monotonic() - started, 1)}
+
+    extra: dict = {}
+    if os.name == "nt":
+        extra["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(  # nosec B603 - the server's own interpreter, fixed code
+            [python, "-c", _RELOAD_PREFLIGHT], cwd=str(cwd),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", **extra,
+        )
+    except OSError as exc:
+        return result(False, step="python", winerror=getattr(exc, "winerror", None),
+                      detail=f"{type(exc).__name__}: {exc}"[:300])
+    deadline = started + limit
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=1.0)
+            break
+        except subprocess.TimeoutExpired:
+            if tick is not None:
+                try:
+                    tick()
+                except Exception:  # noqa: BLE001 -- the heartbeat must not end the check
+                    pass
+            if time.monotonic() >= deadline:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=10.0)
+                except Exception:  # noqa: BLE001 -- killed; its output no longer matters
+                    pass
+                return result(False, step="timeout",
+                              detail=f"the check did not finish in {int(limit)} s")
+    for line in reversed((stdout or "").splitlines()):
+        if line.startswith(_RELOAD_PREFLIGHT_MARK):
+            try:
+                data = json.loads(line[len(_RELOAD_PREFLIGHT_MARK):])
+            except ValueError:
+                break
+            if isinstance(data, dict):
+                data["ok"] = data.get("ok") is True
+                data.setdefault("steps", {})
+                data["seconds"] = round(time.monotonic() - started, 1)
+                return data
+            break
+    tail = [ln for ln in (stderr or "").strip().splitlines() if ln.strip()]
+    return result(False, step="python",
+                  detail=f"exit {proc.returncode}: {tail[-1][:240] if tail else 'no output'}")
+
+
+def preflight_words(result: dict) -> tuple[str, str]:
+    """The owner's card for a failed preflight: (title, detail). Calm: the
+    update waits and Kazma keeps running; a Windows file check is Windows
+    doing its job, never a fault of the PC (the owner's rule, 2026-11-26)."""
+    part = _PREFLIGHT_PARTS.get(str(result.get("step") or ""), "a part of the new version")
+    if preflight_refused_by_windows(result):
+        what = (f"Windows checked {part} of the new version and did not allow it to load "
+                "on this PC. Nothing is wrong with the PC: Windows only lets files it "
+                "trusts run, and a later update brings a signed version.")
+    elif result.get("step") == "timeout":
+        what = "The check of the new version did not finish in time."
+    else:
+        what = f"{part[0].upper()}{part[1:]} of the new version did not load."
+    detail = (f"{what} Kazma keeps running the version it had, and nothing is lost; "
+              "the next reload checks again.\nDetail: " + str(result.get("detail") or "")[:300])
+    return "An update waits; Kazma keeps running", detail
 
 
 # A forgotten pause is an outage nobody is looking for -- the exact failure
@@ -2258,6 +2507,10 @@ BROKER_PAGE_AFTER = 3
 BROKER_ENGINE_PAGE_AFTER_S = 600.0
 #: A stop asks the broker to end its jobs and remove their containers first.
 BROKER_STOP_GRACE_S = 45.0
+#: How long a new container engine waits for the broker's running jobs (one
+#: job's longest run, the broker's max_timeout_seconds 600, and a minute):
+#: past it the broker is restarted and the jobs left are stopped.
+BROKER_ENGINE_CHANGE_WAIT_S = 660.0
 #: worker_broker.py's exit codes the guard tells apart.
 BROKER_EXIT_NO_IMAGE, BROKER_EXIT_NO_ENGINE, BROKER_EXIT_NEWER_IMAGE = 4, 5, 6
 #: The address it was given cannot be listened on: the guard moves it.
@@ -2274,9 +2527,21 @@ _BROKER_ENV_KEEP = (
     "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP",
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
     "PROGRAMW6432", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
-    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "LANG", "LC_ALL", "TZ",
+    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "KAZMA_DOCKER_ROUTE", "KAZMA_DOCKER_ENGINE_BY_CHOICE",
+    "LANG", "LC_ALL", "TZ",
 )
 _BROKER_REQUEST_MAGIC = b"KZDB-REQ/1\n"
+#: ``docker_cli.ENGINE_BY_CHOICE_ENV``: the engine choice exported for a
+#: process that never applies it (the broker), when no Windows docker context
+#: carries it.
+_ENGINE_BY_CHOICE_ENV = "KAZMA_DOCKER_ENGINE_BY_CHOICE"
+
+
+def _broker_engine(env: Mapping[str, str]) -> tuple[str | None, str | None]:
+    """What decides the broker's engine: the pinned context and the exported
+    choice. A broker whose pair differs from the guard's is started again
+    (``DocumentBroker.engine_changed``)."""
+    return env.get("DOCKER_CONTEXT") or None, env.get(_ENGINE_BY_CHOICE_ENV) or None
 
 
 def _broker_mode() -> str:
@@ -2524,6 +2789,8 @@ class DocumentBroker:
         self._bad_ports: set[int] = set()
         self._port_moves = 0
         self.token = ""
+        # When an engine change began waiting for running jobs (monotonic).
+        self._engine_wait_since: float | None = None
         self.image_requested = ""
         self.fallback = False
         self.script_sha = ""
@@ -2668,12 +2935,52 @@ class DocumentBroker:
         """The owner chose another container engine: a running broker starts
         its job containers on the old one, so it is started again. Called
         from Dependencies' tick, whose wrapper catches and logs a failure."""
-        if self.proc is not None and self.proc.poll() is None:
-            if os.environ.get("DOCKER_CONTEXT") != getattr(self, "docker_context", None):
-                self.log("info", "broker.engine_changed",
-                         context=os.environ.get("DOCKER_CONTEXT") or "current")
-                self.stop("engine changed")
-                self._start()
+        if self.proc is None or self.proc.poll() is not None:
+            self._engine_wait_ended("the broker is not running; it starts on the engine chosen")
+            return
+        # The pair, not the context alone: with no Windows docker context the
+        # choice reaches the broker only in the export (review M-a2,
+        # 2026-11-27: a choice that arrived or changed never restarted it).
+        if _broker_engine(os.environ) == getattr(self, "docker_engine", None):
+            self._engine_wait_ended("the broker already runs on the engine chosen")
+            return
+        # Jobs running on the old engine finish first: asked again at each
+        # apply (Dependencies' tick), at most BROKER_ENGINE_CHANGE_WAIT_S
+        # (review delta 3, 2026-11-27). A broker that does not answer before
+        # a wait is restarted at once; once a wait has begun, a status that
+        # does not answer keeps it waiting, within the same bound (review
+        # delta 4: one missed status ended it).
+        now = time.monotonic()
+        status = broker_status(self.port, self.token) if self.port and self.token else None
+        answered = isinstance(status, dict)
+        active = int(status.get("active") or 0) if answered else 0
+        since = self._engine_wait_since
+        within = since is None or now - since < BROKER_ENGINE_CHANGE_WAIT_S
+        if within and (active or (since is not None and not answered)):
+            if since is None:
+                self._engine_wait_since = now
+                self.log("info", "broker.engine_change_waits", active=active,
+                         wait_s=int(BROKER_ENGINE_CHANGE_WAIT_S),
+                         note="the jobs running finish on the old engine first")
+            return
+        waited = 0 if since is None else int(now - since)
+        self._engine_wait_since = None
+        # A count only the broker's answer knows (review delta 4).
+        jobs: dict = {"stopped_jobs": active} if answered else {"stopped_jobs": "unknown", "answered": False}
+        self.log("info", "broker.engine_changed",
+                 context=os.environ.get("DOCKER_CONTEXT") or "current",
+                 by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "", waited_s=waited, **jobs)
+        self.stop("engine changed")
+        self._start()
+
+    def _engine_wait_ended(self, reason: str) -> None:
+        """A wait for running jobs ends with no restart (the choice went back
+        to the broker's engine, or the broker stopped meanwhile): said once
+        (review delta 4)."""
+        since, self._engine_wait_since = self._engine_wait_since, None
+        if since is not None:
+            self.log("info", "broker.engine_change_wait_ended", restarted=False,
+                     waited_s=int(time.monotonic() - since), reason=reason)
 
     def on_pause(self) -> None:
         """Maintenance: nothing of Kazma runs while the guard holds."""
@@ -2831,6 +3138,7 @@ class DocumentBroker:
         # The engine the guard pinned (Dependencies.apply_engine): the broker
         # starts its job containers there.
         self.docker_context = env.get("DOCKER_CONTEXT")
+        self.docker_engine = _broker_engine(env)
         kwargs: dict = {"cwd": str(self.guard.cwd), "env": env, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -3148,12 +3456,16 @@ def _valid_container_name(name: object) -> bool:
             and set(name) <= _CONTAINER_NAME_CHARS)
 
 
-def _run_command(cmd: list[str], timeout: float) -> tuple[int, str, str] | None:
-    """(exit code, stdout, stderr) of *cmd*, or None when it could not run."""
+def _run_command(cmd: list[str], timeout: float,
+                 env_extra: Mapping[str, str] | None = None) -> tuple[int, str, str] | None:
+    """(exit code, stdout, stderr) of *cmd*, or None when it could not run.
+    *env_extra* is added to the guard's environment for this call only (what
+    Kazma's docker route adds, :func:`_docker_route_entries`)."""
+    env = {**os.environ, **env_extra} if env_extra else None
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, creationflags=_NO_WINDOW,
+            timeout=timeout, check=False, creationflags=_NO_WINDOW, env=env,
         )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -3188,6 +3500,54 @@ def _docker_cli() -> str | None:
         return _docker_cli_module().find_docker_cli()
     except (OSError, ImportError, SyntaxError, AttributeError):
         return None
+
+
+def _windows_refusal_codes() -> frozenset[int]:
+    """Windows' answers that refuse a file by policy: ``REFUSAL_CODES`` of
+    ``kazma_core/windows_policy.py`` (the one definition), which the docker
+    CLI module loads by path for the guard."""
+    try:
+        return _docker_cli_module().refusal_codes()
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return frozenset()
+
+
+def _docker_cli_refusal(cli: str) -> str | None:
+    """Why Windows does not let *cli* start now (asked fresh), or None."""
+    try:
+        return _docker_cli_module().refused_by_os(cli, fresh=True)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+
+
+def _docker_route_argv(args: list[str]) -> list[str] | None:
+    """``docker <args>`` through wsl.exe when Kazma's own engine is in force
+    (``docker_cli.docker_command``: no Windows docker.exe is needed for it);
+    None when the call takes the Windows CLI instead."""
+    try:
+        cmd = _docker_cli_module().docker_command(args)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+    return cmd.argv if cmd is not None and cmd.route == "wsl" else None
+
+
+def _docker_route_entries() -> dict[str, str]:
+    """What a call on Kazma's wsl.exe route runs with on top of the guard's
+    environment (``docker_cli.WSL_ROUTE_ENV``: wsl.exe's own messages in
+    UTF-8). The guard's own environment is not changed: the server it starts
+    inherits it (review L-b, 2026-11-27)."""
+    try:
+        return dict(_docker_cli_module().WSL_ROUTE_ENV)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return {}
+
+
+def _refused_docker_clis() -> list[str]:
+    """The docker CLIs here that Windows does not allow to start."""
+    try:
+        return list(_docker_cli_module().refused_clis())
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return []
 
 
 #: Kazma's engine's Docker context (``docker_cli.KAZMA_CONTEXT``) and its WSL distro.
@@ -3377,7 +3737,15 @@ class Dependencies:
                 self.log("warn", "deps.engine_choice_failed", error=str(exc)[:200])
             return
         applied_before = self._engine_said == "applied"
+        broker = getattr(self.guard, "broker", None)
         if applied_before and (engine, context) == (self.engine, self.context):
+            # The choice and its context are the same, but what reaches the
+            # broker may not be (Kazma's engine registered while the guard
+            # runs: only the exported choice changes). The broker compares
+            # its own pair and restarts only when it differs (review L-f,
+            # 2026-11-27).
+            if broker is not None:
+                broker.engine_changed()
             return
         # "No choice" is a choice too: a guard that started before the server
         # wrote its record and then reads "kazma" must restart the broker
@@ -3385,7 +3753,6 @@ class Dependencies:
         changed = applied_before
         self.engine, self.context, self._engine_said = engine, context, "applied"
         self.log("info", "deps.engine_choice", engine=engine, context=context or "current")
-        broker = getattr(self.guard, "broker", None)
         if changed and broker is not None:
             broker.engine_changed()
 
@@ -3503,15 +3870,50 @@ class Dependencies:
         if not self.containers and not (broker is not None and broker.wanted):
             self._set("idle", "Kazma uses no container and no document broker")
             return
+        if _docker_route_argv(["version"]) is not None:
+            # Kazma's own engine is reached through wsl.exe: no Windows CLI to
+            # find, and none Windows could refuse. Asked first even when a
+            # Windows CLI was chosen on an earlier tick: a wsl call that times
+            # out is an engine that does not answer, never a refused CLI
+            # (review L3, 2026-11-26).
+            if self._engine_answers():
+                self._engine_is_up(now)
+                if self.containers:
+                    self._check_containers(now)
+            else:
+                self._next_check = now + DEPS_CHECK_DOWN_S
+                self._engine_is_down(now)
+            self._write()
+            return
         if self.cli is None:
             self.cli = _docker_cli()
         if self.cli is None:
+            refused = _refused_docker_clis()
+            if refused:
+                self._cli_waits(refused)
+                return
             if not self._cli_said:
                 self._cli_said = True
                 self.log("warn", "deps.no_docker_cli", wanted=self.containers)
             self._set("no_docker_cli", "the docker CLI was not found")
             return
-        if self._engine_answers():
+        answered = self._engine_answers()
+        if answered is None:
+            # The CLI itself did not start. Windows' file check refusing it
+            # (live 2026-11-26, 10:56 UTC) is not an engine that is down: the
+            # guard ran the KazmaEngine task and restarted Docker in it again
+            # and again while the engine answered. Take the next CLI Windows
+            # allows, or wait calmly; the engine is never touched for it.
+            why = _docker_cli_refusal(self.cli)
+            if why is not None:
+                refused_cli, self.cli = self.cli, _docker_cli()
+                if self.cli is None or self.cli == refused_cli:
+                    self.cli = None
+                    self._cli_waits([refused_cli], why)
+                    return
+                self.log("info", "deps.cli_replaced", refused=refused_cli, cli=self.cli, detail=why)
+                answered = self._engine_answers()
+        if answered:
             self._engine_is_up(now)
             if self.containers:
                 self._check_containers(now)
@@ -3520,9 +3922,45 @@ class Dependencies:
             self._engine_is_down(now)
         self._write()
 
-    def _engine_answers(self) -> bool:
-        got = _run_command([self.cli or "docker", "version", "--format", "{{.Server.Version}}"], 15)
-        return bool(got and got[0] == 0 and got[1].strip())
+    def _run_docker(self, timeout: float, *args: str) -> tuple[int, str, str] | None:
+        """``docker <args>``: through wsl.exe for Kazma's own engine (the
+        distro's docker, outside Windows' file check, with the route's
+        entries), else the CLI chosen."""
+        routed = _docker_route_argv(list(args))
+        if routed is not None:
+            return _run_command(routed, timeout, env_extra=_docker_route_entries())
+        return _run_command([self.cli or "docker", *args], timeout)
+
+    def _engine_answers(self) -> bool | None:
+        """True when the engine answers, False when it does not, None when
+        the docker CLI itself could not be started."""
+        got = self._run_docker(15, "version", "--format", "{{.Server.Version}}")
+        if got is None:
+            return None
+        return bool(got[0] == 0 and got[1].strip())
+
+    def _cli_waits(self, refused: list[str], why: str = "") -> None:
+        """Windows' file check does not let a docker CLI start here, and no
+        other one is installed: what needs Docker waits for a signed CLI (an
+        update, or Docker Desktop's). Never "the engine is down": nothing is
+        started or restarted for it, and one calm card names the feature."""
+        self._down_since = None
+        self.engine_up = None
+        state_changed = self.state != "cli_refused"
+        self._set("cli_refused", "Windows' file check did not allow the docker command-line tool on "
+                                 "this PC, and no other one is installed; running code and containers "
+                                 "waits for a signed one (the engine is not restarted for it)")
+        if not state_changed:
+            return
+        self.log("info", "deps.cli_refused", clis=refused[:4], detail=why[:300], wanted=self.containers,
+                 note="Windows' file check, not an engine outage: nothing is restarted")
+        self.guard._page(
+            "warn", "Kazma could not keep a feature working on this PC",
+            "Running code and containers waits: Windows checked the docker command-line tool and did "
+            "not allow it on this PC, and no signed one is installed here. An update brings a signed "
+            "version; everything else keeps working, and nothing is wrong with the PC."
+            + (f"\nDetail: {why[:200]}" if why else ""),
+            kind="deps.docker_cli_waits", fingerprint="deps:cli_refused", force=True)
 
     def _set(self, state: str, detail: str) -> None:
         changed = state != self.state
@@ -3729,8 +4167,7 @@ class Dependencies:
 
     def _container_states(self) -> dict[str, str]:
         """{name: status} for the recorded containers Docker knows."""
-        got = _run_command([self.cli or "docker", "inspect", "--format",
-                            "{{.Name}}|{{.State.Status}}", *self.containers], 15)
+        got = self._run_docker(15, "inspect", "--format", "{{.Name}}|{{.State.Status}}", *self.containers)
         states: dict[str, str] = {}
         if got is None:
             return states
@@ -3773,7 +4210,7 @@ class Dependencies:
             self._start_container(name, now)
 
     def _start_container(self, name: str, now: float) -> None:
-        got = _run_command([self.cli or "docker", "start", name], 60)
+        got = self._run_docker(60, "start", name)
         if got is not None and got[0] == 0:
             self.log("warn", "deps.container_started", container=name)
             self._exited_seen.pop(name, None)
@@ -5176,7 +5613,7 @@ class Guard:
         problem): Kazma waits for Docker, and the watch sees the engine down."""
         deps = getattr(self, "deps", None)
         return bool("docker" in waits and deps is not None and deps.owns_engine_alerts()
-                    and deps.engine_up is False)
+                    and (deps.engine_up is False or deps.state == "cli_refused"))
 
     def _note_waiting(self, waits: tuple[str, ...], detail: str) -> None:
         """Kazma is up and waits for a dependency outside it (``waits_for``:
@@ -5711,12 +6148,72 @@ class Guard:
             self.log("info", "reload.already_satisfied", age_s=age_s,
                      note="requested before the running server was started")
             return False
-        _update_state(reload_ack=requested_at, reload_action="restarting")
         assert self.proc is not None
+        if req.get("check", True) is not False:
+            # The new code must be able to start HERE before the running
+            # server stops (live 2026-11-26: Windows refused the new process
+            # a library the old one had loaded; Kazma started read-only).
+            _update_state(reload_ack=requested_at, reload_action="checking")
+            checked = self._reload_preflight()
+            if not checked.get("ok"):
+                self._keep_running(requested_at, checked)
+                return False
+        else:
+            self.log("info", "guard.reload_preflight_skipped", note="--reload --skip-check")
+        _update_state(reload_ack=requested_at, reload_action="restarting", reload_preflight=None)
         self.log("info", "guard.reload_requested", pid=self.proc.pid, age_s=age_s)
         self._stopped_for_reload = True
         self._last_stop_graceful = stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
+        self._reload_waits_paged = set()  # the update went through: a later wait is new
         return True
+
+    def _reload_preflight(self) -> dict:
+        """Run :func:`run_reload_preflight` with the server's interpreter in
+        its folder, keeping the heartbeat and the watches going meanwhile."""
+        python = getattr(self, "server_python", None) or sys.executable
+        cwd = Path(getattr(self, "cwd", None) or REPO_ROOT)
+        self.log("info", "guard.reload_preflight", python=python)
+
+        def tick() -> None:
+            self._beat()
+            self._broker_tick()
+
+        checked = run_reload_preflight(python, cwd, tick=tick)
+        if checked.get("ok"):
+            self.log("info", "guard.reload_preflight_ok", seconds=checked.get("seconds"),
+                     **{f"step_{k}": v for k, v in (checked.get("steps") or {}).items()})
+        return checked
+
+    def _keep_running(self, requested_at: float, checked: dict) -> None:
+        """The new code cannot start here: keep the running server, say why
+        in guard.log, the state file (``--reload`` and ``--status`` read it)
+        and one page per reason until an update goes through."""
+        by_windows = preflight_refused_by_windows(checked)
+        record = {
+            "at": time.time(),
+            "step": checked.get("step"),
+            "detail": str(checked.get("detail") or "")[:300],
+            "windows_check": by_windows,
+        }
+        _update_state(reload_ack=requested_at, reload_action="kept_running",
+                      reload_preflight=record)
+        self.log("warn", "guard.reload_preflight_failed", step=record["step"],
+                 detail=record["detail"], windows_check=by_windows,
+                 seconds=checked.get("seconds"),
+                 note="the update waits; the running server is kept")
+        paged = getattr(self, "_reload_waits_paged", None)
+        if paged is None:
+            paged = self._reload_waits_paged = set()
+        reason = f"{record['step']}\n{record['detail']}"
+        if reason in paged:
+            return
+        paged.add(reason)
+        title, detail = preflight_words(checked)
+        try:
+            self._page("info", title, detail, kind="guard.reload_waits",
+                       fingerprint=f"reload_waits:{reason}", force=True)
+        except Exception:  # noqa: BLE001 -- the kept server matters, the card is best effort
+            self.log("debug", "guard.reload_waits.notify_failed")
 
     def _fresh_reload_request(self) -> bool:
         """After a child exit: was it stopped for a reload by an older --reload?
@@ -6423,10 +6920,29 @@ def _cmd_status() -> int:
         print(line)
     for line in _outside_status_lines(state):
         print(line)
+    for line in _update_status_lines(state):
+        print(line)
     if not ok and not (result.answered and result.needs_setup):
         # REMAINING 3.1: wherever Kazma is unwell, the way to tell someone.
         print(REPORT_HINT)
     return 0
+
+
+def _update_status_lines(state: dict) -> list[str]:
+    """What --status says when the last reload was kept back by its
+    preflight: the update waits, Kazma keeps running (and why, for the
+    operator)."""
+    rec = state.get("reload_preflight")
+    if state.get("reload_action") != "kept_running" or not isinstance(rec, dict):
+        return []
+    when = rec.get("at")
+    at = (datetime.fromtimestamp(float(when), UTC).strftime("%Y-%m-%d %H:%M UTC")
+          if isinstance(when, (int, float)) else "?")
+    part = _PREFLIGHT_PARTS.get(str(rec.get("step") or ""), "a part of the new version")
+    lines = [f"update      : waits since {at}; Kazma keeps running the version it had ({part})"]
+    if rec.get("detail"):
+        lines.append(f"  detail    : {str(rec.get('detail'))[:200]}")
+    return lines
 
 
 #: What --status says when Kazma is not healthy (setup waiting for its owner
@@ -6839,6 +7355,47 @@ def _wait_for_reload_ack(requested_at: float, timeout_s: float) -> bool:
         time.sleep(0.5)
 
 
+#: ``--reload``'s answer when the guard kept the running server because the
+#: new code could not start here (its preflight): nothing failed, the update
+#: waits.
+RELOAD_WAITS_EXIT = 4
+
+
+def _wait_for_preflight(requested_at: float, log: GuardLog) -> dict | None:
+    """After the guard took the request: wait while it checks the new code.
+
+    Returns the guard's preflight record when it kept the running server
+    (``reload_action`` ``kept_running``), else None: it is restarting Kazma,
+    or it is a guard from before the preflight, which restarts at once."""
+    deadline = time.monotonic() + RELOAD_PREFLIGHT_TIMEOUT_S + 30.0
+    said = False
+    while True:
+        state = _read_state()
+        ack = state.get("reload_ack")
+        ours = isinstance(ack, (int, float)) and abs(float(ack) - requested_at) < 1e-6
+        action = state.get("reload_action") if ours else None
+        if action == "kept_running":
+            record = state.get("reload_preflight")
+            return record if isinstance(record, dict) else {}
+        if action != "checking" or time.monotonic() >= deadline:
+            return None
+        if not said:
+            said = True
+            print("The guard is checking that the new code can start on this PC…")
+            log("info", "reload.preflight_wait")
+        time.sleep(0.5)
+
+
+def _say_update_waits(record: dict, log: GuardLog) -> int:
+    """``--reload``'s words when the guard kept the running server."""
+    title, detail = preflight_words(record)
+    print(f"{title}.")
+    for line in detail.splitlines():
+        print(f"  {line}")
+    log("info", "reload.waits", step=record.get("step"), detail=str(record.get("detail") or "")[:300])
+    return RELOAD_WAITS_EXIT
+
+
 def _old_server_serving(health_url: str, requested_at: float) -> bool:
     """A server that booted before the request is still answering."""
     boot = server_started_at(health_url, 5.0)
@@ -6927,7 +7484,8 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
     return 2
 
 
-def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> int:
+def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0,
+                check: bool = True) -> int:
     """Operator deploy: have the supervisor boot the code on disk.
 
     The RUNNING GUARD does the stop. It owns the child and runs with the
@@ -6943,7 +7501,10 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
          clears the old server with its own rights);
       4. waits for a guard to take the request -- and only if none does
          (a guard from before this change), stops the server from here;
-      5. waits until a server that booted AFTER the request answers ready.
+      5. while the guard checks that the new code can start on this PC
+         (its preflight), waits; when it kept the running server, says why
+         and returns RELOAD_WAITS_EXIT;
+      6. waits until a server that booted AFTER the request answers ready.
 
     A request no guard will act on is never left behind.
     """
@@ -6957,8 +7518,8 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
     if clear_pause():
         print("Cleared leftover pause so the supervisor can respawn.")
         log("info", "reload.cleared_pause")
-    requested_at = request_reload()
-    log("info", "reload.requested")
+    requested_at = request_reload() if check else request_reload(check=False)
+    log("info", "reload.requested", check=check)
 
     ack_wait = GUARD_ACK_S
     if _guard_alive():
@@ -6999,6 +7560,9 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
             log("error", "reload.not_applied",
                 note="old server still serving; request withdrawn")
             return 1
+    kept = _wait_for_preflight(requested_at, log)
+    if kept is not None:
+        return _say_update_waits(kept, log)
     return _wait_for_new_boot(health, requested_at, before, log)
 
 
@@ -7080,6 +7644,9 @@ def main() -> int:
                     help="show whether supervision is active or paused")
     ap.add_argument("--reload", action="store_true",
                     help="have the supervisor boot new code (the guard stops the server)")
+    ap.add_argument("--skip-check", action="store_true",
+                    help="with --reload: switch without first checking that the new "
+                         "code can start on this PC")
     ap.add_argument("--when-idle", action="store_true",
                     help="with --reload or --pause --stop: first wait until no "
                          "chat turn is running")
@@ -7105,7 +7672,8 @@ def main() -> int:
     if args.install:
         return _cmd_install()
     if args.reload:
-        return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout)
+        return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout,
+                           check=not args.skip_check)
     if args.pause:
         return _cmd_pause(
             args.reason, args.ttl, stop_now=args.stop,

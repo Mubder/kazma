@@ -100,6 +100,14 @@ class Runner:
         self.parts = pb._parse_dsn(self.dsn)
         self.env = {**os.environ, **pb._libpq_env(self.parts)}
 
+    @staticmethod
+    def _route():
+        """``docker_cli``'s exec recognition and ``-e NAME`` carrying, for
+        either docker route (the wsl.exe route's argv[0] is ``wsl.exe``)."""
+        from kazma_core.docker_cli import carry_env, is_docker_exec
+
+        return carry_env, is_docker_exec
+
     def _cmd(self, tool: str, args: list[str], dbname: str) -> list[str]:
         pb = self._pb
         prefix = list(pb._resolve_tool(tool))
@@ -111,8 +119,9 @@ class Runner:
 
     def psql(self, sql: str, dbname: str, timeout: float = 120) -> tuple[bool, str]:
         cmd = self._cmd("psql", ["-tAc", sql], dbname)
+        carry_env, _ = self._route()
         proc = subprocess.run(
-            cmd, env=self.env, capture_output=True, text=True,
+            cmd, env=carry_env(cmd, self.env), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
         )
         out = (proc.stdout or "").strip()
@@ -134,11 +143,12 @@ class Runner:
 
         # The same host-path trap the drill hit: a containerised pg_restore
         # cannot see the host's file, so the archive goes over stdin.
-        via_docker = bool(prefix) and "docker" in prefix[0].lower()
+        carry_env, is_docker_exec = self._route()
+        via_docker = is_docker_exec(prefix)
         print(f"  $ {_redact(cmd)}{'  < ' + dump.name if via_docker else ''}")
         if via_docker:
             with dump.open("rb") as fh:
-                proc = subprocess.run(cmd, stdin=fh, env=self.env,
+                proc = subprocess.run(cmd, stdin=fh, env=carry_env(cmd, self.env),
                                       capture_output=True, text=True,
                                       encoding="utf-8", errors="replace",
                                       timeout=timeout)

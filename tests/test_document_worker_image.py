@@ -388,7 +388,7 @@ def test_the_build_script_tags_and_labels_the_build(tmp_path, monkeypatch):
         state["after"] = True
         return call(argv, cwd)
 
-    monkeypatch.setattr(module, "find_docker_cli", lambda: "docker")
+    monkeypatch.setattr(module, "docker_argv", lambda args, context=None: ["docker", *args])
     monkeypatch.setattr(module, "_image", image)
     monkeypatch.setattr(module, "_built", lambda docker: [])
     monkeypatch.setattr(module.subprocess, "call", call_then_built)
@@ -455,7 +455,7 @@ def _image_script(monkeypatch, *, built_now: bool):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         raise AssertionError(args)
 
-    monkeypatch.setattr(module, "find_docker_cli", lambda: "docker")
+    monkeypatch.setattr(module, "docker_argv", lambda args, context=None: ["docker", *args])
     monkeypatch.setattr(module, "_image", image)
     monkeypatch.setattr(module, "_built", lambda docker: list(images))
     monkeypatch.setattr(module, "_run", run)

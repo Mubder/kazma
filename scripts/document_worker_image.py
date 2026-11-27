@@ -33,30 +33,32 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "kazma-core"))
 
-from kazma_core.docker_cli import find_docker_cli  # noqa: E402
+from kazma_core.container_services import docker_call  # noqa: E402
+from kazma_core.docker_cli import docker_argv  # noqa: E402
 from kazma_core.documents import worker_image  # noqa: E402
 from kazma_core.documents.worker_bundle import code_fingerprint  # noqa: E402
 
 DOCKERFILE = Path("deploy") / "document-worker" / "Dockerfile"
 
 
-def _docker() -> str:
-    docker = find_docker_cli()
-    if not docker:
-        print("The docker CLI was not found (PATH, KAZMA_DOCKER_BIN, Docker's install folders).",
-              file=sys.stderr)
+def _docker():
+    """Kazma's one docker route (``docker_cli.docker_argv``: its engine
+    through wsl.exe, else the docker CLI)."""
+    if docker_argv(["version"]) is None:
+        print("No Docker engine can be reached (Kazma's engine, or a docker CLI on PATH, "
+              "KAZMA_DOCKER_BIN or Docker's install folders).", file=sys.stderr)
         raise SystemExit(2)
-    return docker
+    return docker_argv
 
 
-def _run(docker: str, *args: str, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 - fixed argv, docker CLI found by docker_cli, no shell
-        [docker, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+def _run(docker, *args: str, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603 - fixed argv, docker by docker_cli's route, no shell
+        docker_call(docker, list(args)), capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout, check=False,
     )
 
 
-def _image(docker: str, ref: str) -> dict | None:
+def _image(docker, ref: str) -> dict | None:
     """``{id, created, labels}`` of a local image, or None."""
     # The whole object: Docker 29 leaves ``Labels`` out of ``.Config`` for an
     # unlabelled image, and a template naming it fails (worker_broker).
@@ -74,7 +76,7 @@ def _image(docker: str, ref: str) -> dict | None:
     return {"id": str(data.get("Id") or ""), "created": str(data.get("Created") or ""), "labels": labels}
 
 
-def _built(docker: str) -> list[str]:
+def _built(docker) -> list[str]:
     """Every image this script built, newest first, as ``repository:tag``."""
     result = _run(docker, "image", "ls", "--filter", f"label={worker_image.SOURCE_LABEL}",
                   "--format", "{{.Repository}}:{{.Tag}}")
@@ -127,12 +129,15 @@ def cmd_build(args: argparse.Namespace) -> int:
             _prune_older(docker, tag, keep_older=1)
         return 0
     print(f"Building {tag} for the code in {REPO} ...", flush=True)
-    argv = [docker, "build", "-f", str(DOCKERFILE), "-t", tag,
-            "--label", f"{worker_image.SOURCE_LABEL}={source}",
-            "--label", f"{worker_image.DOCUMENTS_LABEL}={documents}"]
+    # Absolute paths: through wsl.exe they are read as the engine's distro
+    # names them (G:\x -> /g/x, docker_cli.docker_command).
+    build = ["build", "-f", str((REPO / DOCKERFILE).resolve()), "-t", tag,
+             "--label", f"{worker_image.SOURCE_LABEL}={source}",
+             "--label", f"{worker_image.DOCUMENTS_LABEL}={documents}"]
     if args.no_cache:
-        argv.append("--no-cache")
-    argv.append(".")
+        build.append("--no-cache")
+    build.append(str(REPO.resolve()))
+    argv = docker_call(docker, build)
     code = subprocess.call(argv, cwd=str(REPO))  # nosec B603 - fixed argv, no shell
     if code != 0:
         print(f"The build failed (docker exit {code}).", file=sys.stderr)
@@ -179,7 +184,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prune_older(docker: str, tag: str, *, keep_older: int) -> int:
+def _prune_older(docker, tag: str, *, keep_older: int) -> int:
     """Remove the builds of other code, keeping this code's (*tag*), what the
     guard's broker serves or asks for, and the *keep_older* newest others (a
     revert finds its image). An image still in use (a job's container) is

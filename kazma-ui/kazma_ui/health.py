@@ -574,9 +574,12 @@ def _check_code_execution() -> dict[str, Any]:
     if not code_exec.local_exec_forbidden():
         return {"status": "ok", "component": "code_execution", "backend": "trusted_host",
                 "isolated": False}
-    docker = code_exec._docker_cli()
-    # Read after the CLI lookup: its first call in a process pins the chosen
-    # engine (docker_cli.find_docker_cli).
+    # The child's environment is tool_child_env's (no secret reaches docker),
+    # with the route's own entries on top (WSL_UTF8 on the wsl.exe route, so
+    # its messages are UTF-8 and not UTF-16: review L-3, 2026-11-27).
+    docker = code_exec._docker_command(["info", "--format", "{{.ServerVersion}}"], env=tool_child_env())
+    # Read after the lookup: its first call in a process pins the chosen
+    # engine (docker_cli.find_docker_cli, through docker_cli.docker_command).
     engine = engine_in_force()
     label = engine_label()
 
@@ -594,8 +597,8 @@ def _check_code_execution() -> dict[str, Any]:
         return waiting("has no docker CLI on this machine")
     if code_exec.use_docker_jail():
         try:
-            probe = subprocess.run([docker, "info", "--format", "{{.ServerVersion}}"],
-                                   capture_output=True, text=True, timeout=2, env=tool_child_env())
+            probe = subprocess.run(docker.argv, capture_output=True, text=True, timeout=2,
+                                   env=tool_child_env(docker.env))
             if probe.returncode == 0 and probe.stdout.strip():
                 _docker_answered_at = time.monotonic()
                 _say_docker_answers(label)

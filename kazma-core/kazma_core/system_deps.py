@@ -278,11 +278,20 @@ def _check_node(run: Runner, which: Callable[[str], str | None]) -> DepState:
     return DepState("node", True, f"Node.js {text.strip()}")
 
 
-def _check_docker(run: Runner, find: Callable[[], str | None], os_name: str = "") -> DepState:
-    exe = find()
-    if not exe:
+def _check_docker(run: Runner, find: Callable[[], str | None] | None, os_name: str = "") -> DepState:
+    """*find* names a docker CLI (the tests'); None: Kazma's one route
+    (``docker_cli.docker_argv``: its engine through wsl.exe, else the CLI)."""
+    version = ["version", "--format", "{{.Server.Version}}"]
+    if find is None:
+        from kazma_core.docker_cli import docker_argv
+
+        argv = docker_argv(version)
+    else:
+        exe = find()
+        argv = [exe, *version] if exe else None
+    if not argv:
         return DepState("docker", False, "Docker is not installed", ["docker"])
-    code, text = _out(run, [exe, "version", "--format", "{{.Server.Version}}"], timeout=20)
+    code, text = _out(run, argv, timeout=20)
     if code != 0 and os_name in _LINUX and "permission denied" in text.lower():
         # The engine runs; this account may not use its socket (Kazma runs as
         # this account, so every container of Kazma's would fail).
@@ -306,8 +315,6 @@ def check_all(platform: Platform, *, run: Runner = subprocess.run,
     comes after."""
     if soffice is None:
         from kazma_core.documents.binaries import find_soffice as soffice
-    if docker is None:
-        from kazma_core.docker_cli import find_docker_cli as docker
     if house_font is None:
         from kazma_core.house_font_install import HouseFont
 

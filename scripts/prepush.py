@@ -491,39 +491,60 @@ def run_browser(part: Part, files: list[str], processes: int) -> None:
 
 # ── Linux, Python 3.11, no psycopg ───────────────────────────────────────
 
-def _docker_candidates() -> list[str]:
-    """PATH's docker, then Docker Desktop's and Kazma's own engine's install folders."""
-    out = [shutil.which("docker") or ""]
-    if os.name == "nt":
-        roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")] + [r"C:\Program Files"]
-        out += [str(Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe") for r in roots if r]
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            out.append(str(Path(local) / "Kazma" / "engine" / "bin" / "docker.exe"))
-    return [c for c in dict.fromkeys(out) if c]
-
-
 _DOCKER: list[str] = []
+_DOCKER_CLI = None
+
+
+def _docker_cli_module():
+    """``kazma_core/docker_cli.py``, loaded by path as the guard loads it:
+    this script never imports Kazma, and keeps no copy of its own of how a
+    docker CLI is found or what Windows' refusal looks like (the audit's
+    F6/F7, 2026-11-26)."""
+    global _DOCKER_CLI
+    if _DOCKER_CLI is None:
+        import importlib.util
+
+        path = REPO / "kazma-core" / "kazma_core" / "docker_cli.py"
+        spec = importlib.util.spec_from_file_location("prepush_docker_cli", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _DOCKER_CLI = module
+    return _DOCKER_CLI
 
 
 def docker_exe() -> str:
-    """The first docker CLI that starts (2026-11-26: Windows' Application
-    Control began refusing the copy Kazma's engine put first on PATH, and the
-    Linux part found no Docker). As ``kazma_core.docker_cli`` does, a CLI the
-    system refuses is passed over; this script does not import Kazma."""
+    """The docker CLI Kazma would pick (``KAZMA_DOCKER_BIN``, Kazma's engine,
+    PATH, Docker's install folders; one Windows refuses is passed over,
+    2026-11-26), else ``docker``."""
     if not _DOCKER:
-        for candidate in _docker_candidates():
-            try:
-                subprocess.run([candidate, "--version"], capture_output=True, timeout=15, check=False)
-            except subprocess.TimeoutExpired:
-                pass
-            except OSError:
-                continue
-            _DOCKER.append(candidate)
-            break
-        else:
+        try:
+            _DOCKER.append(_docker_cli_module().find_docker_cli() or "docker")
+        except (OSError, ImportError, SyntaxError, AttributeError):
             _DOCKER.append("docker")
     return _DOCKER[0]
+
+
+def docker_route(context: str):
+    """``docker <args>`` on *context*, the way Kazma runs it
+    (``docker_cli.docker_command``: Kazma's engine through wsl.exe, Docker
+    Desktop through the Windows CLI; a folder here as the engine reads it)."""
+
+    def argv(args: list[str]) -> list[str]:
+        try:
+            cmd = _docker_cli_module().docker_command(args, context=context)
+        except (OSError, ImportError, SyntaxError, AttributeError):
+            cmd = None
+        if cmd is None:
+            return [docker_exe(), "--context", context, *args]
+        # Every docker call here inherits this process's environment: what
+        # the route adds (WSL_UTF8) goes there (review L-b, 2026-11-27).
+        os.environ.update(cmd.route_entries())
+        return cmd.argv
+
+    return argv
 
 
 def docker_context() -> str:
@@ -531,7 +552,7 @@ def docker_context() -> str:
     (the live install's Neo4j and SearXNG run there). Never started here."""
     for context in CONTEXTS:
         with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            done = subprocess.run([docker_exe(), "--context", context, "info", "--format", "{{.OSType}}"],
+            done = subprocess.run(docker_route(context)(["info", "--format", "{{.OSType}}"]),
                                   capture_output=True, text=True, timeout=15)
             if done.returncode == 0 and done.stdout.strip() == "linux":
                 return context
@@ -557,14 +578,14 @@ def ensure_image(context: str, log: Path) -> str:
     dockerfile = (REPO / "deploy" / "prepush" / "Dockerfile").read_text(encoding="utf-8").replace("\r\n", "\n")
     requirements = locked_requirements()
     tag = image_tag(dockerfile, requirements)
-    docker = [docker_exe(), "--context", context]
-    if subprocess.run([*docker, "image", "inspect", tag], capture_output=True).returncode == 0:
+    docker = docker_route(context)
+    if subprocess.run(docker(["image", "inspect", tag]), capture_output=True).returncode == 0:
         return tag
     print(f"[prepush] linux: building {tag} (once per uv.lock)", flush=True)
     with tempfile.TemporaryDirectory(prefix="kazma-prepush-image-") as folder:
         (Path(folder) / "Dockerfile").write_text(dockerfile, encoding="utf-8", newline="\n")
         (Path(folder) / "requirements.txt").write_text(requirements, encoding="utf-8", newline="\n")
-        code, output = run_logged([*docker, "build", "-t", tag, "--label", "io.kazma.prepush=image", folder], log,
+        code, output = run_logged(docker(["build", "-t", tag, "--label", "io.kazma.prepush=image", folder]), log,
                                   timeout=3600)
     if code:
         raise RuntimeError("the image did not build:\n" + "\n".join(output.splitlines()[-25:]))
@@ -597,7 +618,7 @@ def send_file(docker: list[str], name: str, source: Path, target: str) -> str:
     """Copy *source* into the container as *target* (``docker cp`` reaches no
     tmpfs); what went wrong, or nothing."""
     with open(source, "rb") as data:
-        sent = subprocess.run([*docker, "exec", "-i", name, "sh", "-c", f"cat > {target}"], stdin=data, capture_output=True)
+        sent = subprocess.run(docker(["exec", "-i", name, "sh", "-c", f"cat > {target}"]), stdin=data, capture_output=True)
     return sent.stderr.decode(errors="replace") or "the copy failed" if sent.returncode else ""
 
 
@@ -611,17 +632,17 @@ def run_linux(part: Part, files: list[str], processes: int, whole: bool = False,
     except (RuntimeError, OSError) as exc:
         part.failures = str(exc)
         return
-    docker = [docker_exe(), "--context", context]
+    docker = docker_route(context)
     name = f"kazma-prepush-{os.getpid()}"
     memory = f"{int(processes * LINUX_GB + LINUX_FILES_GB + 1)}g"
     part.failures = "the container could not be prepared"
     try:
         # --rm and a bounded sleep: whatever happens here, it goes away.
-        code, output = run_logged([*docker, "run", "-d", "--rm", "--init", "--name", name, "--label", "io.kazma.prepush=run",
+        code, output = run_logged(docker(["run", "-d", "--rm", "--init", "--name", name, "--label", "io.kazma.prepush=run",
                                    "--memory", memory, "--memory-swap", memory, "--cpus", str(LINUX_CPUS),
                                    "--cpu-shares", "256", "--pids-limit", "4096",
                                    *(word for mount in LINUX_TMPFS for word in ("--tmpfs", mount)),
-                                   tag, "sleep", "5400"], part.log)
+                                   tag, "sleep", "5400"]), part.log)
         if code:
             part.failures = "\n".join(output.splitlines()[-10:])
             return
@@ -636,7 +657,7 @@ def run_linux(part: Part, files: list[str], processes: int, whole: bool = False,
                    "git reset -q --hard FETCH_HEAD; rm /work/repo.bundle; mkdir -p .pytest-tmp; "
                    "pip install -q --no-deps --no-build-isolation --root-user-action=ignore -e .; "
                    "! python -c 'import psycopg' 2>/dev/null")
-        code, output = run_logged([*docker, "exec", name, "sh", "-c", prepare], part.log, timeout=600)
+        code, output = run_logged(docker(["exec", name, "sh", "-c", prepare]), part.log, timeout=600)
         if code:
             part.failures = "the container could not be prepared:\n" + "\n".join(output.splitlines()[-15:])
             return
@@ -644,15 +665,15 @@ def run_linux(part: Part, files: list[str], processes: int, whole: bool = False,
         if problem:
             part.failures = problem
             return
-        code, output = run_logged([*docker, "exec", "-w", "/work/kazma", name, "python", "scripts/fast_test.py",
+        code, output = run_logged(docker(["exec", "-w", "/work/kazma", name, "python", "scripts/fast_test.py",
                                    *([] if whole else ["--files-from", ".pytest-tmp/files.txt"]), "--chunks", str(processes),
-                                   "--files-per-process", "40"], part.log, timeout=5000)
+                                   "--files-per-process", "40"]), part.log, timeout=5000)
         part.failures = ""
         judge(part, code, output, near, lambda ids: run_logged(
-            [*docker, "exec", "-w", "/work/kazma", name, "python", "-m", "pytest", *ids, *ALONE],
+            docker(["exec", "-w", "/work/kazma", name, "python", "-m", "pytest", *ids, *ALONE]),
             part.log.with_name("linux-alone.log")))
     finally:
-        subprocess.run([*docker, "rm", "-f", name], capture_output=True)
+        subprocess.run(docker(["rm", "-f", name]), capture_output=True)
 
 
 # ── the rest of CI's quick jobs ──────────────────────────────────────────

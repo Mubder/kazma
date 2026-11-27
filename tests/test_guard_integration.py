@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -578,6 +579,39 @@ def test_a_reload_is_carried_out_by_the_guard_and_is_graceful(tmp_path):
         assert gens.count("graceful_exit") == 1, gens
         assert gens.count("spawned") == 2, gens
         assert not (tmp_path / "guard.reload").exists()
+
+
+def test_a_reload_whose_new_code_cannot_start_keeps_the_server_running(tmp_path):
+    """Live 2026-11-26 11:30 UTC: Windows' Application Control refused the
+    new process a library the running server had loaded, and the reload left
+    Kazma read-only for thirty minutes. The real guard runs its preflight (a
+    child with the server's python, in its folder) first: with Windows'
+    refusal planted there, the server is kept and ``--reload`` says the
+    update waits. The control is the same guard once the plant is gone: the
+    next reload switches servers."""
+    port = _free_port()
+    pkg = tmp_path / "psycopg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(
+        "raise ImportError('DLL load failed while importing pq: An Application Control "
+        "policy has blocked this file.')\n", encoding="utf-8")
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        done = _reload_cli(g)
+        assert done.returncode == 4, done.stdout + done.stderr
+        assert "An update waits; Kazma keeps running." in done.stdout
+        ev = g.wait_for("guard.reload_preflight_failed", timeout=30)
+        assert ev.get("step") == "psycopg" and ev.get("windows_check") is True
+        names = g.event_names()
+        assert "guard.reload_requested" not in names and "guard.operator_reload" not in names
+        assert [x["event"] for x in g.generations()].count("spawned") == 1, "the server was replaced"
+        # Control: the same guard switches once the new code can start.
+        shutil.rmtree(pkg)  # the check's import may have left a __pycache__ there (Linux)
+        done = _reload_cli(g)
+        assert done.returncode == 0, done.stdout + done.stderr
+        g.wait_for("guard.operator_reload", timeout=60)
+        gens = g.wait_generations("spawned", 2)
+        assert gens.count("spawned") == 2, gens
 
 
 def test_a_server_that_ignores_the_stop_request_is_killed_after_the_grace(tmp_path):
