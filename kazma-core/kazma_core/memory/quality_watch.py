@@ -107,7 +107,7 @@ def ops_conn(*, create: bool = True) -> sqlite3.Connection | None:
     from kazma_core.config_store import apply_sqlite_pragmas
     from kazma_core.paths import memory_ops_db
 
-    path = str(memory_ops_db())
+    path = str(memory_ops_db(create=create))
     if not create and not Path(path).is_file():
         return None
     conn = sqlite3.connect(path, timeout=5)

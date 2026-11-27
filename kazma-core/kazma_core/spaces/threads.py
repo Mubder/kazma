@@ -66,6 +66,7 @@ __all__ = [
     "forget_thread",
     "record_new_thread",
     "record_of",
+    "stored_record",
     "record_thread",
     "release_thread",
     "space_threads",
@@ -131,11 +132,14 @@ def new_web_thread_id(session_id: str) -> str:
     return session_id if require_tenant_id() == _scope.OWNER_SPACE_ID else str(uuid.uuid4())
 
 
-def thread_scopes_db() -> str:
-    """The path of the thread record store, in the data folder."""
-    from kazma_core.paths import data_dir
+def thread_scopes_db(*, create: bool = True) -> str:
+    """The path of the thread record store, in the data folder.
 
-    return str(Path(data_dir()) / "thread_scopes.db")
+    ``create=False`` does not make the data folder.
+    """
+    from kazma_core.paths import _data_folder
+
+    return str(Path(_data_folder(create=create)) / "thread_scopes.db")
 
 
 _schema_lock = threading.Lock()
@@ -176,6 +180,35 @@ def _row(row: tuple | None) -> ThreadRecord | None:
         return None
     return ThreadRecord(thread_id=row[0], space_id=row[1], opener=row[2], created_at=row[3],
                         copied_at=float(row[4]) if row[4] is not None else None)
+
+
+def stored_record(thread_id: str) -> ThreadRecord | None:
+    """The record on disk, without creating the store or its schema.
+
+    ``None`` when the file is not there: a thread from before Spaces has no
+    record and stays the owner's (N19). ``NotReadableError`` when the file is
+    there and cannot be read as it stands. Does not remember the row: a
+    receipt must not change this process's thread map.
+    """
+    if not thread_id:
+        return None
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
+
+    path = Path(thread_scopes_db(create=False))
+    if not path.is_file():
+        return None
+    conn = connect_read_only(path)
+    try:
+        found = conn.execute(
+            "SELECT thread_id, space_id, opener, created_at, copied_at FROM thread_scopes "
+            "WHERE thread_id = ?",
+            (str(thread_id),),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise NotReadableError("thread_scopes") from exc
+    finally:
+        conn.close()
+    return _row(found)
 
 
 def record_of(thread_id: str) -> ThreadRecord | None:

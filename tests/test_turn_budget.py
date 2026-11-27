@@ -523,7 +523,8 @@ def web_session(tmp_path, monkeypatch):
     from kazma_ui.active_turns import reset_active_turns
     from kazma_ui.session_manager import get_session_manager, reset_session_manager
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    # data_dir takes create=: a turn opens thread_scopes.db through it.
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda *, create=True: tmp_path)
     reset_session_manager()
     reset_active_turns()
     session = get_session_manager().get_or_create("sess-" + uuid.uuid4().hex[:8])

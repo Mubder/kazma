@@ -43,6 +43,7 @@ __all__ = [
     "refusal_message",
     "error_payload",
     "verbose_errors",
+    "is_arabic_credential_label",
 ]
 
 #: Exception type → stable error code. Anything unlisted becomes
@@ -76,7 +77,8 @@ _PATH_FRAGMENTS = r"""
 _SECRET_FRAGMENTS = r"""
         "[^"\s]*(?:password|passwd|secret|token(?!s)|api[_-]?key|private[_-]?key|authorization)[^"\s]*"
           \s*:\s*"[^"]*"                                # a JSON member ("password": "x")
-      | (?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*\S+
+      | (?:password|passwd|secret|api[_-]?key)(?:\s*[=:]\s*\S+|\s+\S*[0-9_-]\S*)
+      | token\s*[=:]\s*\S+
       | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
 """
 _REDACTED = "<redacted>"
@@ -84,6 +86,59 @@ _REDACTED = "<redacted>"
 _REDACT_PATTERN = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
 #: The secrets alone, for a message whose path is the answer (below).
 _REDACT_SECRETS = re.compile("(" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+#: Arabic names of a credential. ``re.VERBOSE`` drops spaces, so a label of
+#: more than one word cannot live in ``_SECRET_FRAGMENTS``. The words are the
+#: same ones the English pattern knows: a password, a secret key, and a PIN.
+_ARABIC_CREDENTIAL_LABELS = (
+    "كلمة السر",
+    "كلمة المرور",
+    "الرمز السري",
+    "مفتاح سري",
+    "الرقم السري",
+)
+#: Marks (shadda, other tashkeel, tatweel) may sit on any letter of a label.
+_ARABIC_MARKS = re.compile(r"[\u064B-\u065F\u0670\u0640]")
+_ARABIC_MARK = r"[\u064B-\u065F\u0670\u0640]*"
+
+
+def _arabic_label_pattern(label: str) -> str:
+    """*label* with optional marks after each letter. A space matches whitespace."""
+    parts: list[str] = []
+    for char in label:
+        if char.isspace():
+            parts.append(r"\s+")
+        else:
+            parts.append(re.escape(char) + _ARABIC_MARK)
+    return "".join(parts)
+
+
+_ARABIC_LABEL = "(?:" + "|".join(_arabic_label_pattern(label) for label in _ARABIC_CREDENTIAL_LABELS) + ")"
+#: A colon, or no colon when the next word carries a digit, hyphen, or underscore.
+_ARABIC_SECRET = re.compile(
+    _ARABIC_LABEL + r"(?:\s*[=:]\s*\S+|\s+\S*[0-9_-]\S*)",
+)
+#: ``"كلمة المرور": "x"``. The English JSON member is in ``_SECRET_FRAGMENTS``.
+_ARABIC_JSON_SECRET = re.compile('"' + _ARABIC_LABEL + r'"\s*:\s*"[^"]*"')
+
+
+def is_arabic_credential_label(text: str) -> bool:
+    """True when *text* is an Arabic name of a credential. Marks are ignored."""
+    bare = " ".join(_ARABIC_MARKS.sub("", str(text)).split())
+    return bare in _ARABIC_CREDENTIAL_LABELS
+
+
+def _mask_labels(text: str, pattern: re.Pattern[str], replacement: str) -> str:
+    """*pattern* (paths and English labels), then Arabic labels and JSON keys."""
+    stepped = pattern.sub(replacement, str(text))
+    stepped = _ARABIC_SECRET.sub(replacement, stepped)
+    return _ARABIC_JSON_SECRET.sub(replacement, stepped)
+
+
+def _mask_secret_text(text: str, pattern: re.Pattern[str], replacement: str) -> str:
+    """Label forms, then token shapes (``security.token_shapes``)."""
+    from kazma_core.security.token_shapes import mask_tokens
+
+    return mask_tokens(_mask_labels(text, pattern, replacement), replacement)
 
 
 class _Redactor:
@@ -94,9 +149,7 @@ class _Redactor:
         self._pattern = pattern
 
     def sub(self, replacement: str, text: str) -> str:
-        from kazma_core.security.token_shapes import mask_tokens
-
-        return mask_tokens(self._pattern.sub(replacement, str(text)), replacement)
+        return _mask_secret_text(text, self._pattern, replacement)
 
 
 _REDACT = _Redactor(_REDACT_PATTERN)
@@ -109,11 +162,13 @@ def redact_secrets(text: str) -> str:
     that would not start ("No such file: C:\\...\\npx.cmd") -- where
     :func:`validation_error`'s path redaction would remove the answer. A key
     is still never shown: an HTTP failure quotes its URL, query and all; a
-    token is found by its shape too (``security.token_shapes``).
+    token is found by its shape too (``security.token_shapes``). An Arabic
+    credential label is masked the same way as ``password`` or ``secret``:
+    with or without a colon, with marks on the letters, and as a JSON key.
     """
     from kazma_core.security.token_shapes import mask_tokens
 
-    return mask_tokens(_REDACT_SECRETS.sub(_REDACTED, str(text)), _REDACTED)
+    return mask_tokens(_mask_labels(text, _REDACT_SECRETS, _REDACTED), _REDACTED)
 
 _MAX_VERBOSE_CHARS = 300
 

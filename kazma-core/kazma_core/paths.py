@@ -47,7 +47,10 @@ __all__ = [
     "knowledge_graph_db",
     "legacy_user_home",
     "log_file",
+    "hitl_gates_db",
+    "llm_calls_db",
     "memory_ops_db",
+    "tool_effects_db",
     "merge_legacy_hub_if_empty",
     "migrate_legacy_user_home",
     "preferences_path",
@@ -175,6 +178,18 @@ def _self_check_reading() -> bool:
     return self_check_reading()
 
 
+def _data_folder(*, create: bool) -> Path:
+    """The data folder a store path is built from.
+
+    The common path calls :func:`data_dir` with no arguments, so a test that
+    stubs it as a zero-argument function still answers. ``create=False`` is
+    only a reader that must not make the folder.
+    """
+    if create:
+        return data_dir()
+    return data_dir(create=False)
+
+
 def vector_memory_path() -> str:
     """ChromaDB vector memory path."""
     env = os.environ.get("KAZMA_VECTOR_PATH")
@@ -205,17 +220,33 @@ def primary_memory_db() -> str:
     return str(data_dir() / "memory_state.db")
 
 
-def memory_ops_db() -> str:
+def memory_ops_db(*, create: bool = True) -> str:
     """Memory V2 operational database path.
 
     Holds the durable ``memory_task_queue`` and the immutable
     ``memory_audit_log``. Split from :func:`primary_memory_db` to keep
-    queue/audit writes off the hot read path.
+    queue/audit writes off the hot read path. ``create=False`` does not
+    make the data folder: a read must not create the file it then reads.
     """
     env = os.environ.get("KAZMA_MEMORY_OPS_DB")
     if env:
         return str(Path(env).expanduser().resolve())
-    return str(data_dir() / "memory_ops.db")
+    return str(_data_folder(create=create) / "memory_ops.db")
+
+
+def tool_effects_db(*, create: bool = True) -> str:
+    """The effect-receipt journal (``tool_effects.db``)."""
+    return str(_data_folder(create=create) / "tool_effects.db")
+
+
+def llm_calls_db(*, create: bool = True) -> str:
+    """The model-call ledger (``llm_calls.db``)."""
+    return str(_data_folder(create=create) / "llm_calls.db")
+
+
+def hitl_gates_db(*, create: bool = True) -> str:
+    """The approval registry (``hitl_gates.db``)."""
+    return str(_data_folder(create=create) / "hitl_gates.db")
 
 
 def memory_forget_journal_db() -> str:

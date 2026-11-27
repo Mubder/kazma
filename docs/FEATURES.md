@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, those of **2026-11-21** that day, and `kazma self-check` on **2026-11-27**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, those of **2026-11-21** that day, and `kazma self-check` and `kazma receipt` on **2026-11-27**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -186,6 +186,7 @@ Every line below describes that setup.
 | OpenSSF Best Practices passing badge (100%) and an OpenSSF Scorecard published weekly | Shipped | [bestpractices.dev](https://www.bestpractices.dev/projects/16743), the README's badges |
 | A defensive security review of the whole code base, every gap it found fixed with a test | Shipped — 2026-11-15; the independent outside review is still to come | [Safety design](docs/docs/security/safety-design.md) |
 | A read-only report you run: health, the security report, whether the latest backup can be restored now, the installed skills' signatures, the release signature, and which known gaps match this install's settings | Shipped — you run it; it does not run at startup. A check that did not run is reported as not run, never as passed. Where this install keeps no signature bundle, the release check is not applicable (a release install is not called a source checkout); a bundle that is present is still checked. The dependency check says so when it asked OSV. An empty or mistyped data folder is reported and not created | [`kazma self-check`](docs/guide/cli-reference.md#kazma-self-check) |
+| A signed receipt of one run (`kazma receipt`), and a check of that file (`kazma verify-receipt`) with a public key or this install's key | Partial — one run is one turn, and the turn journal lives in the server process, so a separate command says the turn was not recorded instead of listing the whole chat; a memory record is keyed by a hash the command cannot rebuild; values are masked by name, by shape (including Arabic credential labels) and by vault value; a commitment result is a digest. A valid signature proves the key's holder wrote the file and it is unchanged, and does not prove an outside effect happened exactly once. The key is made once for this install and stays in the vault. With Spaces enforced, another space's run is refused. This is not signed delegation between agents | [CLI reference](docs/guide/cli-reference.md#kazma-receipt) |
 
 ## Not built
 

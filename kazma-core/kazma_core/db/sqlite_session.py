@@ -25,17 +25,48 @@ import sqlite3
 import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["committed_and_closed", "write_transaction"]
+__all__ = ["NotReadableError", "committed_and_closed", "connect_read_only", "write_transaction"]
 
 #: One lock per connection: two groups on one connection wait for each other
 #: instead of the second failing with "cannot start a transaction within a
 #: transaction". Weak keys: a closed store's entry goes with its connection.
 _GROUP_LOCKS: weakref.WeakKeyDictionary[object, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+class NotReadableError(Exception):
+    """A store is on disk but cannot be read without changing it.
+
+    Not a :class:`sqlite3.Error`: a reader that treats database errors as
+    "nothing stored" must still be able to say the file is not readable.
+    """
+
+
+def connect_read_only(path: Path | str) -> sqlite3.Connection:
+    """Open *path* for reading. The database file itself never changes.
+
+    A ``-wal`` file that is already there is read with ``mode=ro``, so rows
+    committed into that log are visible. ``mode=ro`` with no ``-wal`` would
+    create ``-wal`` and ``-shm``, so that case stays ``immutable=1``.
+
+    The read can still leave a sidecar. A crashed writer leaves ``-wal`` and
+    no ``-shm``: this open creates ``-shm`` and leaves it. If ``-wal``
+    disappears between the check and the open, ``mode=ro`` creates both
+    ``-wal`` and ``-shm`` and leaves them. Neither case changes the database
+    file. There is no schema step, and the connection cannot insert, create
+    a table or checkpoint. On a read-only folder the crashed-writer case
+    fails to open; the caller reports that as not readable. The caller
+    closes the connection.
+    """
+    resolved = Path(path).resolve()
+    wal = resolved.with_name(resolved.name + "-wal")
+    mode = "mode=ro" if wal.is_file() else "immutable=1"
+    return sqlite3.connect(f"{resolved.as_uri()}?{mode}", uri=True, timeout=5)
 
 
 @contextmanager

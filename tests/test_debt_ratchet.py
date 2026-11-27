@@ -124,7 +124,8 @@ STRUCTURAL_BASELINE = {
     # from kazma_ui/chat_runs_end.py).
     # 511 since 2026-11-27 (merged with self-check): self-check's gap-page reader and the hardening
     # payload are private. detect_install_type gained its caller.
-    "module_local_public_symbols": 508,
+    # 507 since 2026-11-28 (merged with kazma receipt): receipt calls list_by_thread, which had no other caller.
+    "module_local_public_symbols": 507,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

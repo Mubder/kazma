@@ -68,10 +68,16 @@ def key_is_secret(key: str) -> bool:
     """True when *key* names a credential, at any nesting depth.
 
     Combines the local fragment list with ``is_sensitive_config_key`` (which
-    also drives vault routing) so both layers agree on what a secret is, and
-    an environment variable's ``*_KEY`` (:func:`env_name_is_secret`).
+    also drives vault routing) so both layers agree on what a secret is, an
+    environment variable's ``*_KEY`` (:func:`env_name_is_secret`), and an
+    Arabic credential name (:func:`kazma_core.errors.is_arabic_credential_label`).
     """
     if env_name_is_secret(key):
+        return True
+    # One list of Arabic credential names (``errors``). Marks are not part of the name.
+    from kazma_core.errors import is_arabic_credential_label
+
+    if is_arabic_credential_label(key):
         return True
     normalised = str(key).lower().replace("-", "_")
     if _SENSITIVE_KEY_RE.search(normalised):

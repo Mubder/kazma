@@ -160,6 +160,12 @@ def _p_redact_secrets(text):
     return redact_secrets(text)
 
 
+def _p_mask_secret_text(text):
+    from kazma_core.errors import _REDACT_SECRETS, _mask_secret_text
+
+    return _mask_secret_text(text, _REDACT_SECRETS, "<redacted>")
+
+
 def _p_problem_report(text):
     from kazma_core.support.problem_report import redacted
 
@@ -280,6 +286,7 @@ def _p_self_check_mask(text):
 
 PROBES = {
     "kazma-core/kazma_core/errors.py::redact_secrets": _p_redact_secrets,
+    "kazma-core/kazma_core/errors.py::_mask_secret_text": _p_mask_secret_text,
     "kazma-core/kazma_core/support/problem_report.py::redacted": _p_problem_report,
     "kazma-skills/kazma_skills/native/system_health_monitor/tools.py::_sanitize_log_text": _p_system_logs,
     "kazma-core/kazma_core/security/url_credentials.py::mask_urls_in_text": _p_urls_in_text,

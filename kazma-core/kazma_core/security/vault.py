@@ -136,6 +136,11 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # The pairing token of the Kazma Watch `kazma observer setup` deployed
     # (2026-11-14): read by the CLI, with no tenant bound.
     ("observer.", "global"),
+    # The receipt signing key (`kazma receipt`, 2026-11-27): made on first
+    # use and read by `kazma verify-receipt`, with no tenant bound. A later
+    # save must not replace it (`store_install_once`): files already signed
+    # would stop verifying. The private half never leaves the vault.
+    ("receipt.", "global"),
     # Password hashes inside the identity store's registry (Spaces S1-01):
     # written in an admin's request, read by sign-in before any tenant is
     # bound.
@@ -1123,6 +1128,110 @@ class SecretVault:
         """
         refuse_write("vault", name)
         return self._write_install_scoped(name, value, category, None)[0]
+
+    def store_install_once(
+        self, name: str, value: str, category: str = "general",
+    ) -> str | None:
+        """Store *name* for the install only when no global row exists.
+
+        A receipt key written twice would make every file the first key
+        signed fail to verify. Returns the value now stored: the one already
+        there, or *value* when this call wrote it. ``None`` when a global row
+        exists but does not open with this vault key — it is left as it is,
+        not replaced. *name* must be install-scoped (``ValueError`` otherwise).
+        """
+        if not is_install_scoped_secret(name):
+            raise ValueError(f"{name} is not an install-scoped secret")
+        refuse_write("vault", name)
+        from cryptography.exceptions import InvalidTag
+
+        with self._lock:
+            # One transaction, not only this process's lock: two first-use
+            # processes would each see no row and each write a key.
+            self._conn.execute("BEGIN IMMEDIATE")
+            committed = False
+            try:
+                row = self._conn.execute(
+                    """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
+                       WHERE name = ? AND tenant_id IS NULL
+                       ORDER BY rowid DESC LIMIT 1""",
+                    (name,),
+                ).fetchone()
+                if row is not None:
+                    try:
+                        opened = self._open_row(row)
+                    except (InvalidTag, ValueError, UnicodeError):
+                        logger.warning(
+                            "[Vault] '%s' is stored but does not open with this key; left as it is",
+                            name,
+                        )
+                        opened = None
+                    self._conn.execute("COMMIT")
+                    committed = True
+                    return opened
+                # Not _write_install_scoped: that starts its own transaction.
+                ct, nonce, key_id = self._seal(name, value, None)
+                meta = self._stamped_metadata(name, None, None)
+                now = datetime.now(UTC).isoformat()
+                new_id = _secrets.token_hex(16)
+                self._conn.execute(
+                    """INSERT INTO secrets
+                       (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at, key_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (new_id, name, ct, nonce, category, meta, None, now, now, key_id),
+                )
+                stored = self._conn.execute(
+                    """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
+                       WHERE name = ? AND tenant_id IS NULL
+                       ORDER BY rowid DESC LIMIT 1""",
+                    (name,),
+                ).fetchone()
+                try:
+                    opened = self._open_row(stored) if stored is not None else None
+                except (InvalidTag, ValueError, UnicodeError):
+                    logger.warning("[Vault] '%s' was stored but does not open with this key", name)
+                    opened = None
+                self._conn.execute("COMMIT")
+                committed = True
+            finally:
+                if not committed:
+                    self._conn.execute("ROLLBACK")
+                    self._space_keys.clear()
+            logger.info("[Vault] Stored secret '%s' at install scope (first writer)", name)
+            return opened
+
+    def mask_stored_values(self, text: str, *, minimum: int = 8) -> str:
+        """*text* with each stored secret's plaintext replaced by ``<redacted>``.
+
+        A value shorter than *minimum* is left: it would match ordinary words.
+        Longest first, so a value that contains another is replaced whole.
+        A value that does not open is skipped. The plaintext is never logged.
+        """
+        if not text:
+            return text
+        from cryptography.exceptions import InvalidTag
+
+        values: list[str] = []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets"
+            ).fetchall()
+            for row in rows:
+                try:
+                    opened = self._open_row(row)
+                except (InvalidTag, ValueError, UnicodeError, TypeError, SpaceKeyMissing):
+                    continue
+                if isinstance(opened, str) and len(opened) >= minimum:
+                    values.append(opened)
+        seen: set[str] = set()
+        out = str(text)
+        for opened in sorted(values, key=len, reverse=True):
+            if opened in seen or opened not in out:
+                seen.add(opened)
+                continue
+            seen.add(opened)
+            out = out.replace(opened, "<redacted>")
+        return out
 
     def _write_install_scoped(
         self, name: str, value: str, category: str, metadata: dict[str, Any] | None,

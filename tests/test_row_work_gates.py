@@ -741,6 +741,7 @@ def test_a_planted_loop_is_found(source: str, found: bool) -> None:
 #: after it checked the membership.
 BINDERS: dict[str, str] = {
     "kazma-cli/kazma_cli/history_import.py": "the owner's: the command is the owner's",
+    "kazma-cli/kazma_cli/receipt.py": "the owner's: the command is the owner's",
     "kazma-core/kazma_core/backup/cloud_sync.py": "the owner's: the install's backups are the owner's",
     "kazma-core/kazma_core/chat_files.py": "a chat move's two spaces, whose rule was asked",
     "kazma-core/kazma_core/cron/scheduler.py": "the job's own space and creator (work_scope)",

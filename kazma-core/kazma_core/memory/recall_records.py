@@ -48,6 +48,7 @@ __all__ = [
     "RETENTION_DAYS",
     "judge_used",
     "record_recall",
+    "shown_record",
     "signals",
     "turn_key",
 ]
@@ -76,6 +77,126 @@ def turn_key(thread_id: Any, messages: list[Any]) -> str | None:
 
     turn = current_turn_id() or f"{user_turn_index(messages)}\x00{extract_latest_user_text(messages)}"
     return hashlib.sha256(f"{thread}\x00{turn}".encode("utf-8", "replace")).hexdigest()
+
+
+def _shown_from_row(row: Any) -> dict[str, Any] | None:
+    shown = json.loads(row["shown_json"] or "{}")
+    if not isinstance(shown, dict):
+        return None
+    ids: dict[str, list[str]] = {}
+    for kind in ("episodes", "beliefs", "summaries"):
+        raw = shown.get(kind)
+        if isinstance(raw, list):
+            ids[kind] = [str(item) for item in raw if isinstance(item, (str, int))]
+        else:
+            ids[kind] = []
+    used_raw = row["used"]
+    used = None if used_raw is None else bool(int(used_raw))
+    return {
+        "shown": ids,
+        "shown_count": int(row["shown_count"] or 0),
+        "empty": bool(int(row["empty"] or 0)),
+        "degraded": str(row["degraded"] or ""),
+        "failed": bool(int(row["failed"] or 0)),
+        "latency_ms": int(row["latency_ms"] or 0),
+        "used": used,
+    }
+
+
+def _shown_immutable(key: str, tenant_id: str | None) -> dict[str, Any] | None:
+    """:func:`shown_record` with no schema step.
+
+    The database file itself does not change. A crashed writer's leftover
+    ``-wal`` can leave a new ``-shm``, and a race that removes ``-wal``
+    before the open can leave both.
+    """
+    from pathlib import Path
+
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
+    from kazma_core.paths import memory_ops_db
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    path = Path(memory_ops_db(create=False))
+    if not path.is_file():
+        return None
+    conn = connect_read_only(path)
+    try:
+        conn.row_factory = sqlite3.Row
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(memory_recall_records)")}
+        needed = {"turn_key", "shown_json", "shown_count", "empty", "degraded", "failed", "latency_ms", "used"}
+        if tenant_id is not None:
+            needed.add("tenant_id")
+        if not needed <= columns:
+            raise NotReadableError("memory_recall_records")
+        sql = (
+            "SELECT shown_json, shown_count, empty, degraded, failed, latency_ms, used "
+            "FROM memory_recall_records WHERE turn_key = ?"
+        )
+        args: list[Any] = [key]
+        if tenant_id is not None:
+            if tenant_id == OWNER_SPACE_ID:
+                sql += " AND (tenant_id = ? OR tenant_id = '' OR tenant_id IS NULL)"
+            else:
+                sql += " AND tenant_id = ?"
+            args.append(tenant_id)
+        row = conn.execute(sql, args).fetchone()
+    except NotReadableError:
+        raise
+    except sqlite3.Error as exc:
+        raise NotReadableError("memory_recall_records") from exc
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return _shown_from_row(row)
+
+
+def shown_record(
+    key: str | None, *, tenant_id: str | None = None, read_only: bool = False,
+) -> dict[str, Any] | None:
+    """Ids and flags of one turn's recall record. Never the memory text.
+
+    ``None`` when *key* is empty, no row is stored, or (unless *read_only*)
+    the database cannot be read. ``used`` is ``None`` when that column is
+    NULL: not recorded, not unused. Does not create the database and does
+    not write (``judge_used`` is the writer of ``used``). The asker and the
+    tenant stay in the row. *read_only* opens the file read-only and raises
+    ``NotReadableError`` instead of migrating it. *tenant_id* keeps another
+    space's row out; the owner's id also matches an empty tenant (N19).
+    """
+    if not key:
+        return None
+    if read_only:
+        return _shown_immutable(key, tenant_id)
+    from kazma_core.diagnostic_scope import DiagnosticWriteRefused
+    from kazma_core.memory.quality_watch import ops_conn
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    try:
+        conn = ops_conn(create=False)
+        if conn is None:
+            return None
+        with closing(conn):
+            sql = (
+                "SELECT shown_json, shown_count, empty, degraded, failed, latency_ms, used "
+                "FROM memory_recall_records WHERE turn_key = ?"
+            )
+            args: list[Any] = [key]
+            if tenant_id is not None:
+                if tenant_id == OWNER_SPACE_ID:
+                    sql += " AND (tenant_id = ? OR tenant_id = '' OR tenant_id IS NULL)"
+                else:
+                    sql += " AND tenant_id = ?"
+                args.append(tenant_id)
+            row = conn.execute(sql, args).fetchone()
+        if row is None:
+            return None
+        return _shown_from_row(row)
+    except DiagnosticWriteRefused:
+        raise
+    except (sqlite3.Error, OSError, ValueError, TypeError, LookupError, UnicodeError):
+        logger.warning("[recall_records] a turn's recall record could not be read", exc_info=True)
+        return None
 
 
 def record_recall(
