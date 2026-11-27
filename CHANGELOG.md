@@ -428,6 +428,18 @@
   Every other command, option or operand goes to the approval card with
   the exact command shown. A word naming one of Kazma's files is refused,
   and a network path given to git is refused before anything touches it.
+- **A git read with no approval takes no program or file from the
+  repository's settings**: the IDE's git, the agent's git reads and the
+  check before a git command's approval card pass their settings to git
+  whole, through one helper, and switch off the signature programs, every
+  filter driver the configuration defines, an attributes file or mailmap
+  the settings name, the fetch a partial clone would start, and any look
+  into a submodule's own work tree. A read is cut at its time limit along
+  with any program git started. A read that fails says so in a sentence,
+  in English or Arabic, and git's own message goes to Kazma's log only; a
+  diff asked to report differences by its exit code says it found them.
+  Card-less blame does not apply a project's `.git-blame-ignore-revs`, and
+  a submodule with changes inside it no longer shows as modified.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

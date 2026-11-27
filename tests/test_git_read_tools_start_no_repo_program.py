@@ -87,12 +87,16 @@ def test_the_read_tools_start_none_of_the_repository_programs(armed_repo):
 
 
 def test_the_filter_drivers_are_found_in_the_configuration(armed_repo):
+    """Each filter key git lists is emptied whole, in the environment
+    (``git_read.read_config_env``): no driver name is parsed."""
+    from kazma_core.safety.git_read import FILTER_KEYS, read_config_env
+
     repo, _marker = armed_repo
-    listing = _git(repo, "config", "--get-regexp",
-                   r"^filter\..*\.(clean|smudge|process)$").stdout
-    overrides = git_tools._filter_driver_overrides(listing)
-    assert "filter.keep.clean=" in overrides
-    assert "filter.keep.process=" in overrides
+    env = read_config_env({}, _git(repo, *FILTER_KEYS).stdout)
+    pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+             for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert pairs["filter.keep.clean"] == ""
+    assert pairs["filter.keep.smudge"] == ""
 
 
 def test_control_the_old_commands_start_them(armed_repo):

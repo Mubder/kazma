@@ -837,9 +837,13 @@ def test_every_force_flag_has_a_control() -> None:
     forced = {*git_read.READ_GLOBALS, *git_kazma_files.NO_NOTES, *git_kazma_files.SECTION_SHAPE}
     with_a_program = {"--no-ext-diff", "--no-textconv"}
     through_a_junction = {"--default-prefix", "--no-color"}
+    # Their controls start the promisor's transport and a submodule's own
+    # filter: tests/test_git_settings_start_nothing_and_quote_no_file.py.
+    in_the_settings_gate = {"--no-lazy-fetch", "--ignore-submodules=dirty"}
     # --no-relative: the IDE reads at the top (--work-tree=<root>, the
     # ceiling at its parent), where diff.relative changes nothing.
-    assert forced == set(_FORCED) | with_a_program | through_a_junction | {"--no-relative"}
+    assert forced == (set(_FORCED) | with_a_program | through_a_junction | in_the_settings_gate
+                      | {"--no-relative"})
 
 
 @pytest.mark.parametrize("flag", sorted(_FORCED))
@@ -1051,16 +1055,16 @@ def _another_owner(root: Path, patch: pytest.MonkeyPatch) -> None:
     _commit(root, "src")
     empty = root.parent / "no-config"
     empty.write_text("", encoding="utf-8")
-    real = subprocess.run
+    from kazma_core.safety import git_read
 
-    def run(argv: Any, *args: Any, **kwargs: Any) -> Any:
-        env = dict(kwargs.get("env") or os.environ)
-        env.update({"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "GIT_CONFIG_GLOBAL": str(empty),
-                    "GIT_CONFIG_NOSYSTEM": "1"})
-        kwargs["env"] = env
-        return real(argv, *args, **kwargs)
+    real = git_read.run_git  # every git process of a card-less read
 
-    patch.setattr(subprocess, "run", run)
+    def run(argv: Any, *, env: dict[str, str], **kwargs: Any) -> Any:
+        env = {**env, "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "GIT_CONFIG_GLOBAL": str(empty),
+               "GIT_CONFIG_NOSYSTEM": "1"}
+        return real(argv, env=env, **kwargs)
+
+    patch.setattr(git_read, "run_git", run)
 
 
 _TURNED_DOWN = {"a broken HEAD": _broken_head, "an unknown extension": _unknown_extension,

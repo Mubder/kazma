@@ -160,9 +160,14 @@ def _dotted(rel: str) -> str:
 
 
 def _reads_directly(func: ast.AST) -> bool:
-    """Whether *func*'s own body reads a file (the census's primitives)."""
+    """Whether *func*'s own body reads a file (the census's primitives) or
+    starts a process, whose output is read too (``git_read.run_git``: until
+    2026-11-27 a process started through a helper was not counted)."""
     for node in ast.walk(func):
         if isinstance(node, ast.Attribute) and node.attr in ("read_text", "read_bytes"):
+            return True
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and (node.value.id, node.attr) in _PROCESS_STARTS):
             return True
         if isinstance(node, ast.Call):
             fn = node.func
@@ -270,7 +275,7 @@ def test_every_ide_read_is_declared_with_its_check() -> None:
 def test_control_the_census_finds_an_undeclared_read() -> None:
     planted = {
         "kazma-core/kazma_core/ide/planted.py": (
-            "from kazma_core.tools.planted_reader import slurp as take, label\n"
+            "from kazma_core.tools.planted_reader import slurp as take, label, start\n"
             "class Peek:\n"
             "    def look(self, p):\n"
             "        return p.read_text()\n"
@@ -283,12 +288,16 @@ def test_control_the_census_finds_an_undeclared_read() -> None:
             "        return take(p)\n"
             "    def names_it(self, p):\n"
             "        return label(p)\n"
+            "    def through_a_process_helper(self, p):\n"
+            "        return start(['git', 'show', p])\n"
         ),
         "kazma-core/kazma_core/tools/planted_reader.py": (
             "def slurp(p):\n"
             "    return p.read_bytes()\n"
             "def label(p):\n"
             "    return p.name\n"
+            "def start(argv):\n"
+            "    return subprocess.Popen(argv).communicate()\n"
         ),
         "kazma-ui/kazma_ui/planted_front.py": (
             "import asyncio\n"
@@ -305,12 +314,14 @@ def test_control_the_census_finds_an_undeclared_read() -> None:
     assert ide_read_sites(planted) == {
         "kazma-core/kazma_core/ide/planted.py::Peek.look",
         "kazma-core/kazma_core/ide/planted.py::Peek.through_a_helper",
+        "kazma-core/kazma_core/ide/planted.py::Peek.through_a_process_helper",
         "kazma-ui/kazma_ui/planted_front.py::show",
         "kazma-ui/kazma_ui/planted_front.py::peek_with_git",
         "kazma-ui/kazma_ui/planted_front.py::peek_off_the_loop",
     }
     assert ("kazma_core.tools.planted_reader", "slurp") in read_helpers(planted)
     assert ("kazma_core.tools.planted_reader", "label") not in read_helpers(planted)
+    assert ("kazma_core.tools.planted_reader", "start") in read_helpers(planted)
 
 
 def test_every_declared_read_has_a_probe() -> None:

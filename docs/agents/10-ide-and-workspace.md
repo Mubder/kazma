@@ -107,8 +107,19 @@ workspace. Three new modules; understanding their interaction is essential.
   (`kazma_operand_refusal`, the one predicate); a network or device operand
   is never resolved here. `safety/git_kazma_files.run_card_less` runs a
   form, every question with the read's own argv and environment
-  (`--no-replace-objects` in `READ_GLOBALS`, no lazy fetch, hooks, pager,
-  fsmonitor; git's own variables
+  (`safety/git_read.py`: `READ_GLOBALS`, `--no-lazy-fetch` and
+  `--no-replace-objects`; the settings in the environment, never as `-c`,
+  through one helper, `read_config_env`, which both doors and the check
+  before a git command's card (`git_tree_writes`) use: `read_settings()`
+  -- no hooks, fsmonitor or pager, each signature program a path that
+  cannot start (`NO_PROGRAM_KEYS`), no attributes file or mailmap from the
+  settings -- and each filter driver key the configuration lists, taken
+  whole and emptied; status and the diff family with
+  `--ignore-submodules=dirty` on the command line (`NO_SUBMODULE_TREES`,
+  `STATUS_SHAPE`), which no `ignore` setting overrides, so no submodule's
+  work tree is looked into; blame with `BLAME_SHAPE`,
+  `--no-ignore-revs-file` among it; each git command run by `run_git`,
+  whose timeout holds for the programs git starts; git's own variables
   dropped), and first judges one that prints contents: only in a work tree
   git itself accepts; every revision of a diff or show, and of a log with a
   patch, a commit (`<rev>^{commit}`) reachable from HEAD, a branch, a tag
@@ -127,15 +138,43 @@ workspace. Three new modules; understanding their interaction is essential.
   or show with no path of its own keeps every commit it walks
   (`--full-history --sparse`). The shape is fixed (`SECTION_SHAPE`:
   `--no-color`, `--default-prefix`, `--no-relative`, `--submodule=short`,
-  `--no-ext-diff`, `--no-textconv`; `NO_NOTES` for log and show). The web
+  `--no-ext-diff`, `--no-textconv`, `--ignore-submodules=dirty`; `NO_NOTES`
+  for log and show). The web
   route admits a card-less form as a read (`ide_effects`), so a read the
   repository check sends on comes back `needs_approval` and the page sends
   its command through `/api/ide/run`; chat and the TUI go to the card
-  directly, and the agent's tools answer with the command to ask for. Gate:
+  directly, and the agent's tools answer with the command to ask for. The
+  answer is what git printed on its output; a read that fails says so in a
+  sentence (`ide.git_read_failed`, EN and AR; the agent's tools give the
+  exit code), and git's own error text goes to the log only, masked by
+  shape (it can quote what a file holds). A diff asked with `--exit-code`
+  or `--quiet` that finds differences answers them with a sentence
+  (`ide.git_read_differences`), not a failure. Gates:
   `tests/test_git_reads_print_no_kazma_file.py` (the allowlist enumerated
   from `CARD_LESS`; every verb git lists and every option outside it asks;
   each way a file reaches what git prints, both doors; the old rule, each
-  piece, a planted extra form and each dropped force flag as controls).
+  piece, a planted extra form and each dropped force flag as controls) and
+  `tests/test_git_settings_start_nothing_and_quote_no_file.py` (git's own
+  list of settings as data, `tests/fixtures/git_config_keys.json`, each
+  that names a program or a file classified from git's documentation; all
+  of them planted at once with signed commits of each format, every
+  card-less form and the agent's tools run; then, by behaviour rather than
+  by name, every setting git lists at once, at a program and at the Kazma
+  file (those git refuses a text value for are data); filter drivers of
+  names `-c` cannot carry, through both doors and the check before the
+  card; the settings that reopen a submodule's work tree, from the
+  configuration, an included file and `.gitmodules`; a submodule's own
+  settings, a partial clone, settings that move what git reads; a read
+  that never ends, cut with what it started; the installed git's list
+  checked against the data; each override dropped as a control, the `-c`
+  form, a bare timeout and the old answer as controls).
+  The costs of the settings switched off, said plainly: a read that fails
+  shows the sentence and its exit code, not git's reason (that is in the
+  log); a project's `.git-blame-ignore-revs` is not applied by card-less
+  blame; a submodule with changes inside it does not show as modified; the
+  user's own `mailmap.file` and global attributes file are not applied (the
+  work tree's `.mailmap` and `.gitattributes` are); the agent's reads need
+  git 2.44 or newer.
   The cost: a user's own `.env`, databases and secret-named files are
   hidden from card-less reads too, and counted. The census counts as a read a
   process an IDE module starts (called or handed to a thread) and a call of

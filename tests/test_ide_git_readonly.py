@@ -41,14 +41,14 @@ async def test_git_status_does_not_call_shell_exec(
 
     monkeypatch.setattr(IdeService, "run", _no_shell)
 
-    def _fake_run(*a, **k):  # noqa: ARG001
-        if "--name-only" in a[0]:
-            return subprocess.CompletedProcess(args=a[0], returncode=1, stdout="", stderr="")
-        return subprocess.CompletedProcess(
-            args=["git", "status", "-sb"], returncode=0, stdout="## main\n", stderr=""
-        )
+    def _fake_run(argv, **k):  # noqa: ARG001 -- git_read.run_git: every git the IDE's read starts
+        if "--name-only" in argv:
+            return 1, "", ""
+        return 0, "## main\n", ""
 
-    monkeypatch.setattr(subprocess, "run", _fake_run)
+    from kazma_core.safety import git_read
+
+    monkeypatch.setattr(git_read, "run_git", _fake_run)
     ide = IdeService()
     out = await ide.git("status -sb")
     assert called == []
@@ -83,6 +83,7 @@ async def test_read_command_unsafe_options_never_spawn_or_write(monkeypatch, tmp
         calls.append(args)
         raise AssertionError("a read outside the card-less forms must not start git here")
     monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)  # git_read.run_git
     ide = IdeService()
     card = AsyncMock(return_value={"ok": False, "error": "waits for its approval card", "output": ""})
     monkeypatch.setattr(ide, "run", card)
@@ -103,6 +104,7 @@ async def test_read_git_paths_cannot_escape_workspace(monkeypatch, tmp_path, com
     def forbidden(*args, **kwargs):
         raise AssertionError("outside path must not start git before its card")
     monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)  # git_read.run_git
     ide = IdeService()
     card = AsyncMock(return_value={"ok": False, "error": "waits for its approval card", "output": ""})
     monkeypatch.setattr(ide, "run", card)
@@ -268,13 +270,15 @@ async def test_git_without_no_lazy_fetch_support_refuses_before_read(monkeypatch
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
     calls = []
 
-    def old_git(args, **kwargs):
+    def old_git(args, **kwargs):  # git_read.run_git: every git the IDE's read starts
         calls.append(args)
         assert "--no-lazy-fetch" in args
         assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
-        return subprocess.CompletedProcess(args, 129, "", "unknown option: --no-lazy-fetch\n")
+        return 129, "", "unknown option: --no-lazy-fetch\n"
 
-    monkeypatch.setattr(subprocess, "run", old_git)
+    from kazma_core.safety import git_read
+
+    monkeypatch.setattr(git_read, "run_git", old_git)
     ide = IdeService()
     gate = AsyncMock()
     monkeypatch.setattr(ide, "run", gate)

@@ -269,6 +269,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أمر Git هذا ليس من القراءات التي يشغّلها Kazma دون موافقة، فهو يذهب إلى بطاقة الموافقة التي تعرض الأمر كما هو.",
         "en": "This git command is not a read Kazma runs without an approval, so it goes to the approval card, which shows the exact command.",
     },
+    # A card-less read that fails: git's own error text stays in Kazma's
+    # log (it can quote what a file holds), the reader gets these.
+    "ide.git_read_failed": {
+        "ar": "لم يُكمل Git هذه القراءة (رمز الخروج {code}). التفاصيل في سجل Kazma.",
+        "en": "Git could not complete this read (exit code {code}). The details are in Kazma's log.",
+    },
+    # A diff asked with --exit-code or --quiet that exits 1: an answer.
+    "ide.git_read_differences": {
+        "ar": "وجد Git فروقات (رمز الخروج 1).",
+        "en": "Git found differences (exit code 1).",
+    },
+    "ide.git_read_timed_out": {
+        "ar": "استغرقت قراءة Git وقتًا أطول من المسموح فتوقفت.",
+        "en": "This git read took longer than allowed and was stopped.",
+    },
+    "ide.git_read_not_found": {
+        "ar": "تعذّر تشغيل Git من مسار الأدوات الموثوق.",
+        "en": "Git could not be started from the trusted tool path.",
+    },
+    "ide.git_read_needs_newer_git": {
+        "ar": "قراءات Git دون موافقة تحتاج إصدارًا أحدث من Git يدعم ‎--no-lazy-fetch. حدّث Git، أو شغّل الأمر عبر بطاقة الموافقة.",
+        "en": "Git reads without an approval need a Git that supports --no-lazy-fetch: upgrade Git, or run the command through the approval card.",
+    },
     # The sections of Kazma's own files a card-less git read left out.
     "ide.git_items_not_shown.zero": {
         "ar": "(لم يُترك شيء من ملفات Kazma الخاصة.)",
