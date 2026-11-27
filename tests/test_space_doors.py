@@ -406,6 +406,10 @@ def test_the_memory_mirror_counts_kazmas_own_database_only(monkeypatch: pytest.M
 
     kazmas = "postgresql://kazma@db.example:5432/kazma"
     monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: kazmas)
+    # Another address is told by its server's identity (step 5 review M1): here
+    # another database on Kazma's server.
+    monkeypatch.setattr("kazma_core.db.availability.server_identity",
+                        lambda dsn: ("7712779680233943083", dsn.rsplit("/", 1)[-1]))
     backend = PostgresStateBackend(kazmas if same else "postgresql://kazma@db.example:5432/memory")
     monkeypatch.setattr(backend, "_open_connection", lambda: "a connection")
     assert backend._connect() == "a connection"
@@ -420,6 +424,10 @@ def test_pgvector_counts_kazmas_own_database_only(monkeypatch: pytest.MonkeyPatc
 
     kazmas = "postgresql://kazma@db.example:5432/kazma"
     monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: kazmas)
+    # Another address is told by its server's identity (step 5 review M1): here
+    # another server.
+    monkeypatch.setattr("kazma_core.db.availability.server_identity",
+                        lambda dsn: ("2" if "other." in dsn else "1", "kazma"))
     backend = PgvectorBackend(dsn=kazmas if same else "postgresql://kazma@other.example:5432/kazma")
     monkeypatch.setattr(psycopg, "connect", lambda *a, **k: "a connection")
     with install_statements("a ping of the vectors"):
@@ -493,7 +501,7 @@ def test_the_mirror_knows_whose_database_it_is_before_it_says_it_knows(monkeypat
         seen.append(backend._ours)  # what another thread would read now
         return True
 
-    monkeypatch.setattr(availability, "is_kazma_database", answer)
+    monkeypatch.setattr(availability, "kazma_database", answer)  # the one answer (step 5 review M1)
     monkeypatch.setattr(backend, "_open_connection", lambda: "a connection")
     assert backend._connect() == "a connection"
     assert seen == [None, None], "_ours is set last"

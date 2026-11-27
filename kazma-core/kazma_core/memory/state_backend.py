@@ -217,15 +217,23 @@ class PostgresStateBackend:
         from kazma_core.db import availability, space_doors
 
         if self._ours is None:
-            ours = availability.is_kazma_database(self._dsn, or_its_server=True)
-            # This first: a thread that finds _ours set finds this set too.
-            self._kazmas_database = availability.is_kazma_database(self._dsn)
-            self._ours = ours
-        ours = self._ours
-        held = _armed_door(self._kazmas_database)
+            # The one answer (``availability.kazma_database``: by identity
+            # too, S4-01 step 5 review M1), kept once it is known.
+            on_its_server = availability.kazma_database(self._dsn, or_its_server=True)
+            database = availability.kazma_database(self._dsn)
+            if on_its_server is None or database is None:
+                ours, kazmas = bool(on_its_server), bool(database)  # asked again next time
+            else:
+                # This first: a thread that finds _ours set finds this set too.
+                self._kazmas_database = database
+                self._ours = on_its_server
+                ours, kazmas = on_its_server, database
+        else:
+            ours, kazmas = self._ours, self._kazmas_database
+        held = _armed_door(kazmas)
         if held is not None:
             return held
-        if self._kazmas_database:
+        if kazmas:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
             space_doors.checkout("memory mirror")

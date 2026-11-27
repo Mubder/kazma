@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Spaces: Kazma's own database has one answer (2026-11-27)
+
+- Memory's copies on Postgres (the mirror and pgvector) now know Kazma's own
+  database the way the rules script does: by the server it is on and the
+  database's name, whatever address reaches it. Once Spaces' second lock is
+  switched on (nothing switches it on yet), they reach it through the same
+  door as the rest of Kazma, so another address for the same database no
+  longer shows them every space's memory.
+- A copy of the database made from its files (a clone, a promoted standby)
+  counts as Kazma's own. Spaces on replicas is not covered.
+- Putting the rules in place no longer holds the tables' lock while it gives
+  older saved state its space.
+- Kazma stopping while a chat's database connection opens no longer leaves
+  that connection open.
+
 ## A process's start is told by what no clock step moves (2026-11-27)
 
 - **The failure**: prepush's Linux part failed once on

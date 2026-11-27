@@ -37,10 +37,11 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from tests._as_request import as_owner, bound_like_a_request, not_armed
+from tests._as_request import as_owner, bound_like_a_request
 from tests._no_models import finish_turn_memory, keep_models_out
 
 
@@ -121,10 +122,24 @@ async def test_the_postgres_store_going_down_ends_honestly(name: str, tmp_path: 
     dsn = _postgres_dsn()
     if not dsn:
         pytest.skip("needs KAZMA_DB_BACKEND=postgres and KAZMA_DATABASE_URL (a disposable server)")
-    # The case's own database never had the second lock's rules put in place,
-    # and a start arms only after putting them in place on its database and
-    # proving them (S4-01 step 6): a process on this one is not armed.
-    not_armed(monkeypatch)
+    from kazma_core.db import row_security
+
+    if row_security.armed():
+        # Armed (KAZMA_TEST_SECOND_LOCK=armed), the case's own database gets
+        # what a start gives its database before it arms: every store's
+        # schema, then the second lock's rules -- so the outage is the armed
+        # one, space half and owner both refused (S4-01 step 5 review L3).
+        made = swarm_chaos._PgDatabase.__init__
+
+        def with_the_rules(self: Any, admin_dsn: str) -> None:
+            from tests.test_pg_app_role import _every_store_set_up
+
+            made(self, admin_dsn)
+            _every_store_set_up(self.dsn)
+            done = row_security.apply(self.dsn, tables=list(row_security.rules("")), vector_table="")
+            assert done.complete, (done.refused, done.left, done.unresolved)
+
+        monkeypatch.setattr(swarm_chaos._PgDatabase, "__init__", with_the_rules)
     out = await swarm_chaos.run_case(name, tmp_path, timing=FAST, dsn=dsn)
     assert out.honest, (out.problems, out.returned, out.stored, out.recovered)
     if out.counted is not None:
@@ -240,7 +255,6 @@ def test_the_page_hears_an_unrecorded_approval(monkeypatch, unrecorded, status, 
     """The approve route answers an approval the store did not take -- or one
     deferred because Temporal is required and down (SW-E16) -- with 503 (the
     checkpoint still pending, try again), never the stale card's 409."""
-    from typing import Any
 
     from fastapi import APIRouter, FastAPI
     from fastapi.testclient import TestClient
@@ -282,7 +296,6 @@ def test_the_panel_answers_a_store_refusal_with_503(monkeypatch, tmp_path: Path)
     shows it from the stream); once the store is back the same request runs."""
     import sqlite3
     import time as _time
-    from typing import Any
 
     import kazma_core.swarm.engine as engine_module
     import kazma_gateway.agent_handler as ah

@@ -26,6 +26,7 @@ import re
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 CI = REPO / ".github" / "workflows" / "ci.yml"
@@ -59,6 +60,69 @@ def test_the_ci_job_runs_the_marked_suite():
         "a hand-kept file list is back in the Postgres job -- mark the tests instead"
     )
     assert 'KAZMA_TEST_ALLOW_REAL_DB: "1"' in job, "without it conftest pins SQLite"
+
+
+SUITE = "python scripts/postgres_suite.py"
+
+
+def armed_run_problems(job: dict) -> list[str]:
+    """Why the Postgres job does not also run the suite with Spaces' second
+    lock armed (S4-01 step 5 review M2): a second run of the script with
+    ``KAZMA_TEST_SECOND_LOCK=armed``, on a database of its own made by an
+    earlier step, run even when the unarmed run failed."""
+    steps = job.get("steps") or []
+    runs = [s for s in steps if str(s.get("run") or "").strip() == SUITE]
+    plain = [s for s in runs if "KAZMA_TEST_SECOND_LOCK" not in (s.get("env") or {})]
+    armed = [s for s in runs if str((s.get("env") or {}).get("KAZMA_TEST_SECOND_LOCK") or "").lower() == "armed"]
+    problems = [] if plain else ["the suite does not run unarmed"]
+    if not armed:
+        return [*problems, "the suite does not run armed"]
+    for step in armed:
+        env = step.get("env") or {}
+        url = str(env.get("KAZMA_DATABASE_URL") or "")
+        if env.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
+            problems.append("the armed run lacks KAZMA_TEST_ALLOW_REAL_DB: conftest pins SQLite")
+        if url in {str((p.get("env") or {}).get("KAZMA_DATABASE_URL") or "") for p in plain}:
+            problems.append("the armed run reuses the unarmed run's database")
+        made = steps[:steps.index(step)]
+        if not any(f"CREATE DATABASE {url.rsplit('/', 1)[-1]}" in str(s.get("run") or "") for s in made):
+            problems.append("no earlier step makes the armed run's database")
+        if "!cancelled()" not in str(step.get("if") or ""):
+            problems.append("an unarmed failure skips the armed run")
+    return problems
+
+
+def _ci_postgres_job() -> dict:
+    import yaml
+
+    return yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["postgres"]
+
+
+def test_the_ci_job_runs_the_suite_armed_too():
+    assert armed_run_problems(_ci_postgres_job()) == []
+
+
+def test_control_each_armed_run_rule_finds_what_it_is_for():
+    job = _ci_postgres_job()
+    steps = job["steps"]
+    armed = next(s for s in steps if (s.get("env") or {}).get("KAZMA_TEST_SECOND_LOCK"))
+    made = next(s for s in steps if "CREATE DATABASE" in str(s.get("run") or ""))
+    plain_url = next(s for s in steps if str(s.get("run") or "").strip() == SUITE)["env"]["KAZMA_DATABASE_URL"]
+
+    def _changed(step: dict, **change: Any) -> dict:
+        return {**job, "steps": [{**s, **change} if s is step else s for s in steps]}
+
+    assert armed_run_problems({**job, "steps": [s for s in steps if s is not armed]}) == [
+        "the suite does not run armed"]
+    assert armed_run_problems({**job, "steps": [s for s in steps if s is not made]}) == [
+        "no earlier step makes the armed run's database"]
+    assert armed_run_problems(_changed(armed, env={**armed["env"], "KAZMA_DATABASE_URL": plain_url})) == [
+        "the armed run reuses the unarmed run's database", "no earlier step makes the armed run's database"]
+    assert armed_run_problems(_changed(armed, env={**armed["env"], "KAZMA_TEST_ALLOW_REAL_DB": "0"})) == [
+        "the armed run lacks KAZMA_TEST_ALLOW_REAL_DB: conftest pins SQLite"]
+    without_if = {k: v for k, v in armed.items() if k != "if"}
+    assert armed_run_problems({**job, "steps": [without_if if s is armed else s for s in steps]}) == [
+        "an unarmed failure skips the armed run"]
 
 
 def test_the_marker_is_registered():

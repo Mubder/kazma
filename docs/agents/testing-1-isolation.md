@@ -110,6 +110,18 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   found it, 2026-11-14); a test that sets its own `LOCALAPPDATA` gets that
   folder. Gate: `tests/test_real_docker_marker.py` (the marked and unmarked
   tests are each other's control).
+- **A test process switches its Kazma database with
+  `tests/_pg_child.use_database`** (2026-11-27, S4-01 step 5 review): it lets
+  go of the shared pool and the settings store before it points the
+  environment at the new database. A child that switched by the environment
+  alone kept the ones it had opened on the old database: on the `docker
+  exec` route, finding pg_restore reads the stored container-engine choice,
+  which opens both, so the restore-order drill read the base database
+  instead of the restored one ("Document is unavailable" whenever pg_dump
+  ran through docker, passing with a local pg_dump). Gate:
+  `tests/test_pg_child_switches_database.py` (any other switch of
+  `KAZMA_DATABASE_URL` in the tests; planted switches and the old copies'
+  behaviour as controls).
 - **A file a child process publishes is renamed into place and read with
   `tests/_published_files.read_published_text`** (2026-11-14): a child that
   wrote in place was read empty, and on Windows a file just renamed can be

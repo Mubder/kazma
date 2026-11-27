@@ -32,6 +32,7 @@ from typing import Any
 
 import pytest
 
+from tests._as_request import lock_armed, not_armed
 from tests.test_pg_app_role import SCRIPT, _every_store_set_up, _with
 
 try:
@@ -115,7 +116,7 @@ def lock(monkeypatch: pytest.MonkeyPatch) -> Any:
     from kazma_core.db import row_security
     from kazma_core.spaces import scope
 
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     monkeypatch.setattr(scope, "_enforced", False)
     monkeypatch.setattr(row_security, "_in_place", row_security.in_place())  # given back after
     return row_security
@@ -217,14 +218,14 @@ def test_a_space_reads_and_changes_its_own_threads_only(db: dict[str, str], lock
             await _put(saver, a)
         with statements_of("sb"):
             await _put(saver, b)
-        monkeypatch.setattr(lock, "_armed", armed)
+        lock_armed(monkeypatch, armed)
         with statements_of("sa"):
             seen["own"] = await saver.aget_tuple(_config(a))
             seen["theirs"] = await saver.aget_tuple(_config(b))
             seen["listed"] = {c.config["configurable"]["thread_id"] async for c in saver.alist(None)}
             await saver.adelete_thread(b)  # B's, asked from A
             seen["own_written"] = await _put(saver, a)
-        monkeypatch.setattr(lock, "_armed", False)
+        not_armed(monkeypatch)
 
     _saver_on(db["app"], _work)
     assert seen["own"] is not None and seen["own_written"]
@@ -250,14 +251,14 @@ def test_armed_nothing_said_is_refused_and_the_install_reads_every_space(db: dic
     async def _work(saver: Any) -> None:
         with statements_of("sa"):
             await _put(saver, a)
-        monkeypatch.setattr(lock, "_armed", True)
+        lock_armed(monkeypatch, True)
         try:
             with pytest.raises(NoSpaceBound):
                 await saver.aget_tuple(_config(a))
             with install_statements("a test: the install's listing of every thread"):
                 seen["all"] = {c.config["configurable"]["thread_id"] async for c in saver.alist(None)}
         finally:
-            monkeypatch.setattr(lock, "_armed", False)
+            not_armed(monkeypatch)
 
     _saver_on(db["app"], _work)
     assert a in seen["all"]
@@ -287,12 +288,12 @@ def test_the_backfill_gives_old_rows_their_threads_space(db: dict[str, str], loc
     seen: dict[str, Any] = {}
 
     async def _read(saver: Any) -> None:
-        monkeypatch.setattr(lock, "_armed", True)
+        lock_armed(monkeypatch, True)
         try:
             with statements_of("sa"):
                 seen["tuple"] = await saver.aget_tuple(_config(old))
         finally:
-            monkeypatch.setattr(lock, "_armed", False)
+            not_armed(monkeypatch)
 
     _saver_on(db["app"], _read)
     assert seen["tuple"] is None, "the control: before the backfill A cannot see its own old thread"
@@ -320,7 +321,7 @@ def test_pruning_to_the_latest_is_refused_in_a_space(db: dict[str, str], lock: A
         with statements_of("sa"):
             await _put(saver, a)
             await _put(saver, a)
-            monkeypatch.setattr(lock, "_armed", armed)
+            lock_armed(monkeypatch, armed)
             try:
                 if enforced:
                     with pytest.raises(lock._KeepLatestRefused):
@@ -329,7 +330,7 @@ def test_pruning_to_the_latest_is_refused_in_a_space(db: dict[str, str], lock: A
                 else:  # the control: Spaces off, as before
                     await saver.aprune([a])
             finally:
-                monkeypatch.setattr(lock, "_armed", False)
+                not_armed(monkeypatch)
 
     _saver_on(db["app"], _work)
     count = _sql(db["app"], "SELECT count(*) FROM checkpoints WHERE thread_id = %s", (a,))[0][0]
@@ -415,16 +416,40 @@ def test_this_installs_own_database_by_another_name_is_backfilled(db: dict[str, 
     and the script said the rules were in place. It is told by its server
     identity now. Another database on the same server stays another (the M2
     test above)."""
-    from kazma_core.db.availability import is_kazma_database
+    from kazma_core.db import availability
     from kazma_core.spaces import scope, threads
 
     monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own address
     alias = _another_name_for(db["app"])
-    assert not is_kazma_database(alias), "by its address alone it is another"
+    assert not availability._same_as_kazmas(alias, availability._database_of), "by its address alone, another"
     threads.record_thread(f"t-{uuid.uuid4().hex[:8]}", "sa", scope.OWNER_ACCOUNT_ID)
     stray = _stamped_row(db, "sd")  # a space no record names: a whole pass gives it back to the owner
     done = lock.apply(alias, vector_table="")
     assert _stamps(db, stray) == {None} and not done.not_backfilled, done
+
+
+def test_telling_the_database_apart_leaves_the_apply_outside_a_transaction(db: dict[str, str], lock: Any,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 5 review L1: by another name, the identity was read on the
+    apply's own connection outside a transaction block, so it was left in
+    one: each table's transaction after it was a savepoint, and the schema
+    lock and the rows' locks were held across the whole backfill."""
+    from kazma_core.spaces import scope, threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    threads.record_thread(f"t-{uuid.uuid4().hex[:8]}", "sa", scope.OWNER_ACCOUNT_ID)
+    stray = _stamped_row(db, "sd")
+    seen: list[Any] = []
+    real = lock._backfill_table
+
+    def watched(conn: Any, table: str, *args: Any, **kwargs: Any) -> bool:
+        seen.append(conn.info.transaction_status)
+        return real(conn, table, *args, **kwargs)
+
+    monkeypatch.setattr(lock, "_backfill_table", watched)
+    lock.apply(_another_name_for(db["app"]), vector_table="")
+    assert seen and set(seen) == {psycopg.pq.TransactionStatus.IDLE}, seen
+    assert _stamps(db, stray) == {None}
 
 
 # ── the step 4 delta review: where the backfill runs, and its timeout (N4) ──

@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._pg_child import use_database
+
 pytestmark = pytest.mark.real_docker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,13 +51,8 @@ _FENCED, _PUBLISHED = 7, 0
 # ── this host's side (children, each with the drill database) ─────────────
 
 def _bootstrap(dsn: str) -> None:
-    os.environ["KAZMA_DB_BACKEND"] = "postgres"
-    os.environ["KAZMA_DATABASE_URL"] = dsn
-    os.environ["KAZMA_DOCUMENTS_METADATA_BACKEND"] = "postgres"
-    os.environ["KAZMA_DOCUMENTS_JOBS_BACKEND"] = "postgres"
-    from kazma_core.config_store import get_config_store
-
-    get_config_store().set("documents.enabled", True, category="documents")
+    """This child on *dsn*: the pool and settings it opened before let go (tests/_pg_child.py)."""
+    use_database(dsn)
 
 
 def _host(dsn: str, root: str, tenant: str, action: str):

@@ -33,17 +33,16 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.postgres
+from tests._pg_child import use_database
+
+# real_docker: pg_dump/pg_restore through ``docker exec`` when KAZMA_DB_CONTAINER names one, as
+# tests/test_document_pg_backup_restore.py -- the route on which this drill read the wrong database.
+pytestmark = [pytest.mark.postgres, pytest.mark.real_docker]
 
 
 def _bootstrap(dsn: str) -> None:
-    os.environ["KAZMA_DB_BACKEND"] = "postgres"
-    os.environ["KAZMA_DATABASE_URL"] = dsn
-    os.environ["KAZMA_DOCUMENTS_METADATA_BACKEND"] = "postgres"
-    os.environ["KAZMA_DOCUMENTS_JOBS_BACKEND"] = "postgres"
-    from kazma_core.config_store import get_config_store
-
-    get_config_store().set("documents.enabled", True, category="documents")
+    """This child on *dsn*: the pool and settings it opened before let go (tests/_pg_child.py)."""
+    use_database(dsn)
 
 
 def _service(root: str):

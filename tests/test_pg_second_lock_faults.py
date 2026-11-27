@@ -32,6 +32,7 @@ from kazma_core.spaces import scope
 from kazma_core.spaces.row_work import install_statements, statements_of
 from kazma_core.spaces.scope import bind_scope
 
+from tests._as_request import not_armed
 from tests.test_pg_armed_flows import _install, armed, documents  # noqa: F401  (fixtures)
 
 try:
@@ -181,13 +182,12 @@ def _probes() -> dict[str, Any]:
 
 
 def test_the_health_probes_answer_the_same_armed(armed: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811 - the armed flows' fixture
-    from kazma_core.db import row_security
 
     answered = _probes()
     deep_status, deep = answered["deep"]
     # They reach Postgres armed: the settings' roundtrip and the database's ping.
     assert deep_status == 200 and deep["database"] == "ok" and deep["config_roundtrip"] == "ok", answered
     assert answered["ready"]["database"]["status"] == "ok", answered
-    monkeypatch.setattr(row_security, "_armed", False)
+    not_armed(monkeypatch)
     monkeypatch.setattr(scope, "_enforced", True)
     assert _probes() == answered, "armed, a probe saw less than before"

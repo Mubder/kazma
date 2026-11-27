@@ -706,16 +706,21 @@ class PgvectorBackend:
         self._kazmas_database: bool | None = None
 
     def _connect(self) -> Any:
-        if self._kazmas_database is None:
-            from kazma_core.db.availability import is_kazma_database
+        kazmas = self._kazmas_database
+        if kazmas is None:
+            # The one answer (by identity too, S4-01 step 5 review M1), kept
+            # once it is known.
+            from kazma_core.db.availability import kazma_database
 
-            self._kazmas_database = is_kazma_database(self._dsn)
+            answer = kazma_database(self._dsn)
+            self._kazmas_database = answer
+            kazmas = bool(answer)
         from kazma_core.memory.state_backend import _armed_door
 
-        held = _armed_door(self._kazmas_database)
+        held = _armed_door(kazmas)
         if held is not None:
             return held
-        if self._kazmas_database:
+        if kazmas:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
             from kazma_core.db import space_doors
