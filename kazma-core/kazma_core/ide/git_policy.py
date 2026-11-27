@@ -33,7 +33,10 @@ _FLAGS: dict[str, frozenset[str]] = {
     "version": frozenset({"--build-options"}),
     "branch": frozenset({"--list", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "-av", "-rv", "--show-current", "--no-color"}),
     "remote": frozenset({"-v", "--verbose", "--all", "--push"}),
-    "stash": _DIFF_FLAGS | {"--oneline", "--include-untracked"},
+    # The latest entry, its tracked files only: older entries live in the
+    # stash's reflog, and its untracked files in a third parent, neither of
+    # which a read checks (safety.git_kazma_files).
+    "stash": _DIFF_FLAGS | {"--oneline"},
 }
 _VALUES: dict[str, frozenset[str]] = {
     "status": frozenset({"--porcelain", "--untracked-files", "--ignored"}),
@@ -135,25 +138,46 @@ def is_a_repository(root: Path) -> bool:
     return dot.is_dir() and (dot / "HEAD").is_file() and (dot / "objects").is_dir() and (dot / "refs").is_dir()
 
 
+#: A reflog selector (``HEAD@{1}``, ``main@{yesterday}``): a commit the
+#: repository's refs may no longer reach. ``@{u}``, ``@{upstream}``,
+#: ``@{push}`` and ``@{-N}`` name branches, whose tips a read checks.
+_REFLOG_SELECTOR = re.compile(r"@\{(?!(?:u|upstream|push|-\d+)\})", re.IGNORECASE)
+
+
 def validate_read_paths(parts: list[str], root: Path) -> None:
     """Check path-shaped operands even when Git also accepts revision syntax.
 
     Every operand is confined to the workspace and asked
     ``store_registry.is_kazma_store``: a read runs with no approval card, and
-    Kazma's own stores and secret files are opened by no door. ``diff`` runs
-    only in a repository: outside one git compares its operands as files.
+    Kazma's own stores and secret files are opened by no door. A network or
+    device path is refused on its text, before anything resolves it
+    (resolving one connects to its host). ``diff`` runs only in a
+    repository: outside one git compares its operands as files. What the
+    repository itself holds is checked where the read runs
+    (``safety.git_kazma_files.read_refusal``); a reflog selector and a stash
+    entry but the latest name commits that check does not cover.
     """
+    from kazma_core.workspace.remote_paths import remote_path_reason
+
     operands = read_operands(parts)
     if parts[0] == "diff" and not is_a_repository(root):
         raise ValueError("git diff compares a repository's versions, and this workspace is not a git repository")
+    if parts[0] == "stash" and operands:
+        raise ValueError("Read-only git stash reads the latest entry only")
     for operand in operands:
         if operand.startswith(":(") or operand.startswith(":/"):
             raise ValueError("Git pathspec magic is unsupported in workspace reads")
+        if _REFLOG_SELECTOR.search(operand):
+            raise ValueError("Read-only git does not read the reflog")
         path = operand
         # HEAD:path reads an object; validate the path part as well. Drive
         # letters remain filesystem paths on Windows.
         if ":" in path and not (len(path) > 1 and path[1] == ":" and os.name == "nt"):
             path = path.split(":", 1)[1]
+        # On the text, before anything below builds or resolves a path from it.
+        remote = remote_path_reason(operand) or (remote_path_reason(path) if path else None)
+        if remote:
+            raise ValueError(remote)
         if not path:
             continue
         candidate = Path(path)

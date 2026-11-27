@@ -68,6 +68,14 @@ def ensure_index(root: Path | None = None) -> dict[str, int]:
     updated = 0
     try:
         known = listed_files(conn)
+        # What the index already holds of one of Kazma's files (read before
+        # the rule, or before the file became Kazma's) goes now, not when the
+        # file next changes: the screened predicate, a string test a row.
+        from kazma_core.store_registry import kazma_paths_among
+
+        for rel in kazma_paths_among(root, list(known)):
+            drop_file(conn, rel)
+            known.pop(rel, None)
         seen: set[str] = set()
         walked = 0
         for path in iter_source_files(root):

@@ -97,6 +97,11 @@ def _kazma_file_refusal(target: Path, *, write: bool) -> str | None:
     return store_refusal(target, door="the IDE")
 
 
+class _ReadRefused(Exception):
+    """A read-only git content read refused before it ran; the text is the
+    sentence for the page (``safety.git_kazma_files.read_refusal``)."""
+
+
 def _is_readonly_git(subcommand: str) -> bool:
     """True for git verbs that do not mutate the repo or remotes."""
     from kazma_core.ide.git_policy import read_operands, split_git_command
@@ -642,7 +647,10 @@ class IdeService:
         import os
         import subprocess
 
+        from collections.abc import Sequence
+
         from kazma_core.ide.git_policy import split_git_command, validate_read_paths
+        from kazma_core.safety.git_kazma_files import CONTENT_VERBS, read_refusal
         from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
@@ -700,6 +708,21 @@ class IdeService:
                 if key:
                     value = "false" if key.endswith(".required") else ""
                     overrides.extend(["-c", f"{key}={value}"])
+            if parts[0] in CONTENT_VERBS:
+                # A content read runs only in a work tree git itself accepts
+                # and in a repository that holds none of Kazma's files, both
+                # asked with this read's own argv and environment.
+                def _ask(args: Sequence[str]) -> tuple[int, str]:
+                    asked = subprocess.run(
+                        [*base_argv, *overrides, *args], cwd=cwd, env=env,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                        timeout=max(0.001, deadline - time.monotonic()),
+                    )
+                    return asked.returncode, asked.stdout or ""
+
+                refusal = read_refusal(root, _ask)
+                if refusal:
+                    raise _ReadRefused(refusal)
             return subprocess.run(
                 [*base_argv, *overrides, *parts],
                 cwd=cwd,
@@ -712,6 +735,8 @@ class IdeService:
 
         try:
             proc = await asyncio.to_thread(_run)
+        except _ReadRefused as refused:
+            return {"ok": False, "error": str(refused), "output": ""}
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "git timed out", "output": ""}
         except OSError as exc:

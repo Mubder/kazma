@@ -26,7 +26,11 @@
   and was dismissed; the owner reopens it.
 - **The IDE's read-only git reads the repository's versions only**: no
   `--no-index`, `git diff` only in a repository, and none of Kazma's own
-  files as an operand.
+  files as an operand. Git with no approval (the IDE's, `/ide git`, the
+  agent's `git_diff`) shows a file's contents only in a work tree git
+  itself accepts and a repository that holds none of Kazma's files; the
+  answer says why in English or Arabic. A network path given to git is
+  refused before anything touches it.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

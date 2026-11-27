@@ -860,7 +860,10 @@ function ideApp() {
         var data = await this._get('/api/ide/checkpoints/' + encodeURIComponent(cid) + '/review');
         if (!data || !data.ok) return;
         var changed = (data.files || []).filter(function (f) { return f.changed; });
-        if (!changed.length) {
+        // Held files that are Kazma's own now are left out by the server
+        // (not_shown); the review says so instead of hiding it.
+        var notShown = Number(data.not_shown) || 0;
+        if (!changed.length && !notShown) {
           this.reviewOpen = false;
           return;
         }
@@ -875,7 +878,7 @@ function ideApp() {
             };
           });
         });
-        this.review = { id: data.id, files: changed };
+        this.review = { id: data.id, files: changed, notShown: notShown };
         this.reviewOpen = true;
       } catch (err) { /* ignore */ }
     },

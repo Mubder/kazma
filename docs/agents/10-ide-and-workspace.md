@@ -90,18 +90,32 @@ workspace. Three new modules; understanding their interaction is essential.
   `read_file` / `search_code` and the TUI's file preview ask the same
   predicate. A save, a patch or a delete resolves with `write=True`, so
   Kazma's configuration (readable by every door) is refused before the
-  tool and its card run. The IDE's read-only git (`/api/ide/git`, the chat
-  command `/ide git`; it runs with no card) reads the repository's versions
-  only (`ide/git_policy.validate_read_paths`): `--no-index` is not a read
-  option, `diff` runs only when the workspace is a repository
-  (`is_a_repository`: outside one git compares its operands as files), and
-  every operand, inside the workspace, is asked `is_kazma_store` too. The
-  census counts as a read a process an IDE module starts, and a call of a
-  helper of the packages that reads a file itself (`read_exact` and its
+  tool and its card run. **Git with no card** (the IDE's read-only git:
+  `/api/ide/git`, the chat command `/ide git`; the agent's `git_diff`):
+  `ide/git_policy.validate_read_paths` allows read verbs and flags only (no
+  `--no-index`), operands inside the workspace and asked `is_kazma_store`,
+  a network or device operand refused on its text before anything resolves
+  it, no reflog selector and no stash entry but the latest. A content read
+  (`diff`, `show`, `log`, `blame`, `stash`) then runs only when
+  `safety/git_kazma_files.read_refusal` lets it: git itself accepts the
+  workspace as a work tree (`rev-parse --is-inside-work-tree`, the read's
+  own argv and environment; `is_a_repository` is only the early, cheap
+  refusal), and the repository holds none of Kazma's files -- no path in
+  its index or in the tree of any ref tip (`store_registry.kazma_paths_among`:
+  the predicate's rules screened on the text, then the predicate). Git prints
+  a file it holds by forms that never name it, so naming cannot be the rule.
+  A file only in older history is not looked for: this repository's own
+  history holds early `kazma-data/*.db`, and a history-wide rule refused
+  every read on an install whose workspace is its clone. The refusal is a
+  catalog sentence in English and Arabic. The census counts as a read a
+  process an IDE module starts (called or handed to a thread) and a call of
+  a helper of the packages that reads a file itself (`read_exact` and its
   kin). Paths read again later ask again: the checkpoint review
-  (`FileCheckpointStore.review`, `check_path_access` before each held
-  path is read), and the code index (`indexer._kazmas_own`, asked before a
-  file is read, not at every stat: about a millisecond a file). A path
+  (`FileCheckpointStore.review`, `check_path_access` before each held path
+  is read; `not_shown` counts what it leaves out, and the page says so),
+  and the code index (`indexer._kazmas_own` before a file is read, not at
+  every stat: about a millisecond a file; every `ensure_index` drops what it
+  already held of a Kazma file, screened). A path
   `resolve` answers outside the workspace is asked in the caller's mode, a
   save's in write mode. Gate: `tests/test_ide_reads_refuse_kazma_files.py`
   (a census of every file read in `kazma_core/ide/` and every module that

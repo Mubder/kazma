@@ -256,6 +256,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "رفض هذا الجزء",
         "en": "Reject hunk",
     },
+    # The checkpoint review leaves out a held path that names one of Kazma's
+    # own files now (FileCheckpointStore.review).
+    "ide.review_not_shown": {
+        "ar": "بعض الملفات التي تحفظها نقطة الاستعادة هذه صارت من ملفات Kazma الخاصة، فلا تُعرض هنا.",
+        "en": "Some files this checkpoint holds are Kazma's own files now, so they are not shown here.",
+    },
+    # Read-only git with no approval card (the IDE's git, /ide git, the
+    # agent's git_diff): safety.git_kazma_files.read_refusal.
+    "ide.git_not_a_repository": {
+        "ar": "لا يقرأ Kazma بـ Git دون موافقة إلا مستودعاً يقبله Git نفسه، وGit لا يقبل مساحة العمل هذه مستودعاً؛ لم يُقرأ شيء.",
+        "en": "Kazma reads with git, without an approval, only a repository git itself accepts, and git does not accept this workspace as one; nothing was read.",
+    },
+    "ide.git_unlisted": {
+        "ar": "تعذّر على Git أن يسرد ما يحفظه هذا المستودع، فلم يُقرأ شيء.",
+        "en": "Git could not list what this repository holds, so nothing was read.",
+    },
+    "ide.git_holds_kazma_files": {
+        "ar": "يحفظ هذا المستودع بعض ملفات Kazma الخاصة (أسراراً أو مخازن): {files}. لذلك لا يعرض Kazma شيئاً من محتواه عبر Git دون موافقة. أخرِجها من المستودع، أو شغّل Git في طرفية.",
+        "en": "This repository holds some of Kazma's own files (secrets or stores): {files}. So Kazma shows none of its contents through git without an approval. Take them out of the repository, or run git in a terminal.",
+    },
     "ide.undo_patch": {
         "ar": "تراجع عن الرقعة",
         "en": "Undo patch",
