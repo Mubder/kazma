@@ -4,7 +4,8 @@ Read-only. A record that is missing or only partly there is "not recorded":
 this command does not guess, and it does not copy a decision out of a second
 store. The turn journal lives in the server process, so a separate ``kazma
 receipt`` usually cannot see it. The signing key is made once, kept in the
-vault, and never written into the file.
+vault, and never written into the file. This command does not create
+``vault.db`` or ``settings.db``.
 """
 
 from __future__ import annotations
@@ -962,10 +963,48 @@ def _render(body: dict[str, Any], kind: str) -> str:
     return _text(body)
 
 
-def _vault() -> Any:
+def _imported_get_vault():
     from kazma_core.security.vault import get_vault
 
-    return get_vault()
+    return get_vault
+
+
+#: The opener this module was imported with. A test replaces ``get_vault``;
+#: the real one creates the file, the schema and a salt, and this command
+#: must not do that when ``vault.db`` is not already there.
+_REAL_GET_VAULT = _imported_get_vault()
+
+
+def _settings_file_absent() -> bool:
+    """True when settings are the sqlite file and that file is not there.
+
+    A postgres install keeps settings in its database, so the readers still
+    run. The file is the one :class:`kazma_core.config_store.ConfigStore`
+    will open (fixed when that module was imported). Asking ``settings_db()``
+    again would look in a different folder after ``KAZMA_DATA_DIR`` changes,
+    and opening the store would create the file.
+    """
+    from kazma_core.config_store import _DEFAULT_DB
+    from kazma_core.db.backend import DatabaseBackend, get_backend
+
+    if get_backend() is not DatabaseBackend.SQLITE:
+        return False
+    return not Path(_DEFAULT_DB).is_file()
+
+
+def _vault_file_absent() -> bool:
+    from kazma_core.paths import data_dir
+
+    return not (data_dir(create=False) / "vault.db").is_file()
+
+
+def _vault() -> Any:
+    from kazma_core.security import vault as vault_mod
+
+    getter = vault_mod.get_vault
+    if getter is _REAL_GET_VAULT and _vault_file_absent():
+        return None
+    return getter()
 
 
 def _load_private(pem: str) -> Ed25519PrivateKey:
@@ -1092,10 +1131,11 @@ def _marked(payload: bytes, label: str) -> str:
 
 
 def _verify_bytes(data: bytes, public: Ed25519PublicKey | None = None) -> tuple[int, list[str]]:
-    """Check *data*. *public* is the only key used, and the vault is not opened.
+    """Check *data*. *public* is the only key the signature is verified with.
 
     Without *public*, this install's key is used, and the answer says so.
-    The trailer is not a trust root: with *public* it is ignored.
+    The trailer is not the verification key. A trailer byte that is not that
+    key fails the check. The vault is not opened when *public* is given.
     """
     parsed = _split_file(data)
     if parsed is None:
@@ -1117,6 +1157,8 @@ def _verify_bytes(data: bytes, public: Ed25519PublicKey | None = None) -> tuple[
         public = private.public_key()
         if not _same_key(stated, _public_b64(public)):
             return 1, [_MISMATCH_EN, _MISMATCH_AR]
+    elif not _same_key(stated, _public_b64(public)):
+        return 1, [_CHANGED_EN, _CHANGED_AR]
     try:
         sig = base64.b64decode(sig_b64, validate=True)
         public.verify(sig, signed)
@@ -1161,7 +1203,13 @@ def _write_out(path: str, blob: bytes) -> int:
 
 def _ledger_on() -> bool:
     """The model-ledger switch. Read outside the diagnostic: inside it, a
-    refused settings write is swallowed and the switch looks on."""
+    refused settings write is swallowed and the switch looks on.
+
+    No settings file yet: the shipped default is on. Opening the store
+    would create ``settings.db``.
+    """
+    if _settings_file_absent():
+        return True
     from kazma_core.agent.nonstop import get_nonstop_config
 
     return bool(get_nonstop_config().ledger_enabled)
@@ -1182,17 +1230,43 @@ def _caller_scope() -> Any:
         spaces_enforced,
     )
 
-    identity.prime_enforcement()
+    if not _settings_file_absent():
+        identity.prime_enforcement()
     if spaces_enforced() and current_scope() is None:
         return bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID)
     return nullcontext()
 
 
+def _work_refusal(message: str) -> str | None:
+    """``runs_refusal``, without creating ``settings.db`` on a fresh install.
+
+    No settings file means no platform users. ``KAZMA_MULTI_USER`` and a
+    Spaces switch already in this process are still honoured. The env words
+    are the ones :func:`kazma_core.security.platform_rbac.multi_user_enabled`
+    reads before it opens the store.
+    """
+    if _settings_file_absent():
+        import os
+
+        from kazma_core.runs.spaces import NO_SPACE_REFUSAL
+        from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+        if spaces_enforced():
+            return None if current_scope() is not None else NO_SPACE_REFUSAL
+        forced = (os.environ.get("KAZMA_MULTI_USER") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
+        return message if forced else None
+    from kazma_core.runs.spaces import runs_refusal
+
+    return runs_refusal(message)
+
+
 def _emit(args: argparse.Namespace) -> int:
     from kazma_core.diagnostic_scope import read_only_diagnostic
-    from kazma_core.runs.spaces import NO_SPACE_REFUSAL, runs_refusal
+    from kazma_core.runs.spaces import NO_SPACE_REFUSAL
 
-    reason = runs_refusal("A receipt is shown for one install.")
+    reason = _work_refusal("A receipt is shown for one install.")
     if reason:
         arabic = _NO_SPACE_AR if reason == NO_SPACE_REFUSAL else _MULTI_AR
         _say([reason, arabic], err=True)
@@ -1308,7 +1382,7 @@ def run_verify(argv: list[str] | None = None) -> int:
     try:
         data = Path(args.file).read_bytes()
     except OSError as exc:
-        info = described_error("The receipt could not be read", exc)
+        info = described_error("The receipt could not be read", exc, level=logging.WARNING)
         _say([str(info), "تعذّر قراءة الإيصال."], err=True)
         return 1
     public = None

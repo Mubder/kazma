@@ -168,7 +168,8 @@ class _EffectJournal:
     ) -> list[dict[str, Any]]:
         """Read receipt metadata without exposing results or changing state.
 
-        ``immutable=1``: no ``-wal`` or ``-shm``, and no schema step. *turn_ids*
+        No schema step and no new ``-wal`` or ``-shm``. A log already beside
+        the file is read, so a committed row still in it counts. *turn_ids*
         or *space* on a file that has no such column raises
         :class:`~kazma_core.db.sqlite_session.NotReadableError`. With neither, an
         older file is read as it stands.

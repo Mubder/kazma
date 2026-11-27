@@ -183,7 +183,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MISSION_MAX_ROUNDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_MISSION_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_MODEL` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_MULTI_USER` | (none) | `kazma_core.security.platform_rbac`, `kazma_ui.auth` | yes |
+| `KAZMA_MULTI_USER` | (none) | `kazma_cli.receipt`, `kazma_core.security.platform_rbac`, `kazma_ui.auth` | yes |
 | `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
 | `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.container_services`, `kazma_core.memory.backends` | yes |
 | `KAZMA_NEO4J_URL` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |

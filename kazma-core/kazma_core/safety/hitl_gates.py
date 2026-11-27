@@ -953,7 +953,7 @@ def thread_decisions(
     ``live_gates`` and ``display_gates`` leave settled decisions out. The
     decision and the actor are who decided (§30). ``None`` when the registry
     file is not there: a missing file is not an empty history. Does not
-    create the database and does not migrate it (``immutable=1``). A file
+    create the database and does not migrate it. A file
     that cannot be read as it stands raises ``NotReadableError``. *turn_ids* and
     *space* (the row's ``tenant_id``) narrow the read. Arguments, payloads
     and who asked are not returned; the message is the row's own text,

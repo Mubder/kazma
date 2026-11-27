@@ -406,13 +406,13 @@ What only the machine Kazma runs on may do to an account.
 
 A signed receipt of one run, from the records Kazma already keeps. The run id is `kind:native` (a chat turn is `chat_turn:<thread id>`). A run is one turn. Effects, approvals and commitment checks are that turn's rows, and only when this process's turn journal carries the turn id. A separate `kazma receipt` usually has no journal, so those sections say **not recorded** / **غير مسجّل** rather than listing the whole chat. A count of zero is not a record: when the ledger is switched off, the file is missing, or the rows were kept for their retention and then removed, the section says not recorded and says why. It does not say "0 calls".
 
-The command only reads. It opens each store immutable, so it creates no `-wal` or `-shm` and runs no schema step. A file that would need a migration says it is not readable. An immutable read does not see a row that is still only in the write-ahead log.
+The command only reads. When a store already has a `-wal` file, the read is `mode=ro`: it sees rows committed into that write-ahead log and creates no new sidecar. When there is no `-wal` file, the read is `immutable=1`, which creates no `-wal` or `-shm`. Either way it runs no schema step. A file that would need a migration says it is not readable.
 
 The receipt is in English and Arabic. `--json` and `--html` are two other renderings of the same record; each is signed over its own bytes. The signed body carries `key_id` (the public key) and `issued_at` (when it was signed). The HTML page has no scripts. The page is English (`lang="en"`); the Arabic section is `lang="ar"` and `dir="rtl"`, and every preformatted block is `dir="ltr"`. Secret values are masked by their name, by their shape (including a password in a URL and an Arabic credential label), and by any value this install's vault can open. A commitment's result and its evidence are a short digest (how many characters, and a hash), never the tool's output. The model-instruction fence is not added: this file is for a person.
 
 When Spaces is enforced, the command reads the switch the way the rest of Kazma does. A thread in another space is refused, and every section is limited to the run's own space. When Spaces is off, a thread is not refused and rows are not filtered by space.
 
-The signing key is an Ed25519 key made once, the first time a receipt is signed, and kept in the vault under `receipt.signing_key`. The first write is one immediate transaction, so two processes cannot each create a key. It is an install-scoped vault row in the existing vault, not a new store. The private half is never printed and never written into the file. A later run does not replace the key.
+The signing key is an Ed25519 key kept in the vault under `receipt.signing_key`. This command does not create `vault.db` or `settings.db`: a fresh install with no vault file is not given one, and a receipt cannot be signed until that file exists. When the vault file is already there, the key is made once, the first time a receipt is signed. The first write is one immediate transaction, so two processes cannot each create a key. It is an install-scoped vault row in the existing vault, not a new store. The private half is never printed and never written into the file. A later run does not replace the key.
 
 | Command | What it does |
 |---|---|
@@ -440,7 +440,7 @@ Checks a receipt file. It does not read the run again, and it does not make a ke
 
 | Command | What it does |
 |---|---|
-| `kazma verify-receipt <file> --public-key <file or text>` | Checks the file with that Ed25519 public key only. The vault is not opened, and the key written in the trailer is not trusted. The signed body's `key_id` must be this key, and `issued_at` must be present. |
+| `kazma verify-receipt <file> --public-key <file or text>` | Checks the file with that Ed25519 public key only. The vault is not opened. The key written in the trailer is not the verification key; a byte of it that is not the given key fails the check. The signed body's `key_id` must be this key, and `issued_at` must be present. |
 | `kazma verify-receipt <file>` | The same check with this install's key. The answer says the install's key was used. Exit 1 when this install has no signing key, or the vault key is not set, and the message does not say a receipt cannot be signed. |
 
 A valid signature proves the holder of that key wrote this file and it is unchanged. It does not prove that an outside effect happened exactly once. Both sentences are in the file and in the check's output, in English and Arabic. Any changed byte fails the check. A file signed by another key does not pass.

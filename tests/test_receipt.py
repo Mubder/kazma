@@ -866,7 +866,7 @@ def test_verify_with_a_public_key_does_not_open_the_vault(install, monkeypatch, 
     assert "فُحص بمفتاح هذا التثبيت." in out
 
 
-def test_calm_errors_not_a_traceback(install, monkeypatch, capsys):
+def test_calm_errors_not_a_traceback(install, monkeypatch, capsys, caplog):
     assert not __import__("os").environ.get("KAZMA_VERBOSE_ERRORS")
     _use_journal(monkeypatch)
     (install["data"] / "tool_effects.db").write_bytes(b"x")
@@ -908,33 +908,55 @@ def test_calm_errors_not_a_traceback(install, monkeypatch, capsys):
     assert "تعذّر كتابة الإيصال." in shown
     assert "Traceback" not in shown
 
-    code = run_verify([str(install["root"] / "missing-receipt.txt")])
+    import logging
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        code = run_verify([str(install["root"] / "missing-receipt.txt")])
     shown = "".join(capsys.readouterr())
     assert code == 1
     assert "The receipt could not be read" in shown
     assert "تعذّر قراءة الإيصال." in shown
     assert "Traceback" not in shown
     assert "AttributeError" not in shown
+    assert caplog.records
+    assert "Traceback" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        code = run_verify([str(install["root"])])
+    shown = "".join(capsys.readouterr())
+    assert code == 1
+    assert "The receipt could not be read" in shown
+    assert "تعذّر قراءة الإيصال." in shown
+    assert "Traceback" not in shown
+    assert "Traceback" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_ledger_off_says_not_recorded(install, monkeypatch):
     from kazma_core.config_store import get_config_store
 
-    get_config_store().set("agent.nonstop.ledger.enabled", False)
-    _ledger_on_disk(
-        monkeypatch, install["data"], thread_id="thr", turn_id="turn-9",
-        prompt_tokens=8, completion_tokens=1, model="should-not-be-a-zero",
-    )
-    _use_journal(monkeypatch)
-    code, blob = _write(install["root"], "off.json", ["chat_turn:thr", "--json"])
-    assert code == 0
-    text = blob.decode("utf-8")
-    ledger = _section(_payload(blob), "llm")
-    assert ledger["status"] == "not_recorded"
-    assert "switched off" in ledger["detail_en"]
-    assert "مطفأ" in ledger["detail_ar"]
-    assert "0 calls" not in text
-    assert "calls" not in ledger
+    store = get_config_store()
+    store.set("agent.nonstop.ledger.enabled", False)
+    try:
+        _ledger_on_disk(
+            monkeypatch, install["data"], thread_id="thr", turn_id="turn-9",
+            prompt_tokens=8, completion_tokens=1, model="should-not-be-a-zero",
+        )
+        _use_journal(monkeypatch)
+        code, blob = _write(install["root"], "off.json", ["chat_turn:thr", "--json"])
+        assert code == 0
+        text = blob.decode("utf-8")
+        ledger = _section(_payload(blob), "llm")
+        assert ledger["status"] == "not_recorded"
+        assert "switched off" in ledger["detail_en"]
+        assert "مطفأ" in ledger["detail_ar"]
+        assert "0 calls" not in text
+        assert "calls" not in ledger
+    finally:
+        store.set("agent.nonstop.ledger.enabled", True)
 
 
 def test_out_refuses_a_kazma_store(install, monkeypatch, capsys):
@@ -982,3 +1004,163 @@ def test_two_connections_store_one_signing_key(tmp_path, monkeypatch):
     finally:
         first.close()
         second.close()
+
+
+def _rows_immutable(path: Path, sql: str) -> list:
+    """The old open: ``immutable=1`` does not see a row that is only in the WAL."""
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?immutable=1", uri=True)
+    try:
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
+def test_a_live_wal_is_counted(install, monkeypatch):
+    """A writer left open keeps recent rows in the WAL. The receipt counts them.
+
+    The schema and the first row are checkpointed by closing that first
+    connection. Nothing checkpoints the rows written after that: ``_settle``
+    would, and that is what hid the miss.
+    """
+    from kazma_core.config_store import _DEFAULT_DB, get_config_store
+    from kazma_core.observability import llm_ledger
+    from kazma_core.paths import tool_effects_db
+
+    # A neighbour test may have switched the ledger off in the shared store.
+    # Touch that file only when it is already there: this test must not create it.
+    if Path(_DEFAULT_DB).is_file():
+        get_config_store().set("agent.nonstop.ledger.enabled", True)
+    _use_journal(monkeypatch, turn_id="turn-9")
+    _effect("thr", "turn-9", "e1", "shell_exec", result={"ok": True})
+    effects = Path(tool_effects_db())
+    assert _rows_immutable(effects, "SELECT effect_id FROM tool_effects ORDER BY effect_id") == [("e1",)]
+    assert not Path(str(effects) + "-wal").exists()
+
+    ledger_path = install["data"] / "llm_calls.db"
+    monkeypatch.setattr(llm_ledger, "_conn", None)
+    first = llm_ledger._get_conn(str(ledger_path))
+    llm_ledger.record_llm_call(thread_id="thr", turn_id="turn-9", prompt_tokens=1, completion_tokens=1)
+    first.close()
+    monkeypatch.setattr(llm_ledger, "_conn", None)
+    assert _rows_immutable(ledger_path, "SELECT COUNT(*) FROM llm_calls") == [(1,)]
+    assert not Path(str(ledger_path) + "-wal").exists()
+
+    writer = sqlite3.connect(effects)
+    ledger = None
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        for effect_id in ("e2", "e3"):
+            writer.execute(
+                "INSERT INTO tool_effects "
+                "(effect_id, request_hash, thread_id, tool, state, result_json, "
+                "started_at, completed_at, turn_id, space) "
+                "VALUES (?, ?, 'thr', 'shell_exec', 'completed', '{}', ?, ?, 'turn-9', '')",
+                (effect_id, "h-" + effect_id, 1_700_000_000.0, 1_700_000_000.0),
+            )
+        writer.commit()
+        assert Path(str(effects) + "-wal").is_file()
+        assert _rows_immutable(
+            effects, "SELECT effect_id FROM tool_effects ORDER BY effect_id",
+        ) == [("e1",)]
+
+        ledger = llm_ledger._get_conn(str(ledger_path))
+        ledger.execute("PRAGMA wal_autocheckpoint=0")
+        for _ in range(4):
+            llm_ledger.record_llm_call(
+                thread_id="thr", turn_id="turn-9", prompt_tokens=1, completion_tokens=1,
+            )
+        assert Path(str(ledger_path) + "-wal").is_file()
+        assert _rows_immutable(ledger_path, "SELECT COUNT(*) FROM llm_calls") == [(1,)]
+
+        before = {
+            path.name: {item.name for item in path.parent.iterdir() if item.name.startswith(path.name)}
+            for path in (effects, ledger_path)
+        }
+        code, blob = _write(install["root"], "wal.json", ["chat_turn:thr", "--json"])
+        assert code == 0
+        body = _payload(blob)
+        effect_ids = sorted(item["effect_id"] for item in _section(body, "effects")["items"])
+        assert effect_ids == ["e1", "e2", "e3"]
+        ledger_section = _section(body, "llm")
+        assert ledger_section["status"] == "recorded", ledger_section
+        assert ledger_section["items"][0]["calls"] == 5
+        assert ledger_section["turn"]["status"] == "recorded", ledger_section["turn"]
+        assert ledger_section["turn"]["items"][0]["calls"] == 5
+        # The read did not checkpoint: the old open still misses the WAL rows.
+        assert _rows_immutable(
+            effects, "SELECT effect_id FROM tool_effects ORDER BY effect_id",
+        ) == [("e1",)]
+        assert _rows_immutable(ledger_path, "SELECT COUNT(*) FROM llm_calls") == [(1,)]
+        for path in (effects, ledger_path):
+            names = {item.name for item in path.parent.iterdir() if item.name.startswith(path.name)}
+            assert names == before[path.name]
+    finally:
+        writer.close()
+        if ledger is not None:
+            ledger.close()
+            monkeypatch.setattr(llm_ledger, "_conn", None)
+
+
+def test_a_changed_trailer_key_fails_with_the_public_key(install, monkeypatch, capsys):
+    _use_journal(monkeypatch, text="hello-from-the-journal")
+    code, blob = _write(install["root"], "signed.json", ["chat_turn:thr", "--json"])
+    assert code == 0
+    signed, pub, sig = _trailer_parts(blob)
+    assert run_verify([str(install["root"] / "signed.json"), "--public-key", pub]) == 0
+    capsys.readouterr()
+    flipped = _flip_b64(pub)
+    assert flipped != pub
+    changed = install["root"] / "trailer-key.json"
+    changed.write_bytes(signed + f".kazma-receipt-ed25519 {flipped} {sig}\n".encode("ascii"))
+    assert run_verify([str(changed), "--public-key", pub]) == 1
+    out = capsys.readouterr().out
+    assert _CHANGED[0] in out
+    assert _CHANGED[1] in out
+
+
+def test_a_fresh_install_creates_no_store(tmp_path, monkeypatch, capsys):
+    data = tmp_path / "fresh"
+    data.mkdir()
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(data))
+    monkeypatch.setenv("KAZMA_DB_BACKEND", "sqlite")
+    monkeypatch.setenv("KAZMA_VAULT_KEY", "c" * 64)
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("KAZMA_MULTI_USER", raising=False)
+    from kazma_core.config_store import _DEFAULT_DB, reset_config_store
+    from kazma_core.security.vault import reset_vault
+    from kazma_core.spaces.scope import set_enforced
+
+    reset_config_store()
+    reset_vault()
+    set_enforced(False)
+    store_path = Path(_DEFAULT_DB)
+    store_existed = store_path.is_file()
+    try:
+        code = run(["chat_turn:thr"])
+        shown = "".join(capsys.readouterr())
+        assert code == 1
+        assert "no vault key" in shown
+        assert not (data / "vault.db").exists()
+        assert not (data / "settings.db").exists()
+
+        assert run(["--public-key"]) == 1
+        capsys.readouterr()
+        assert not (data / "vault.db").exists()
+        assert not (data / "settings.db").exists()
+
+        # A trailer-shaped file reaches the vault. A file that is not a receipt
+        # returns before that, which would not show whether the vault was opened.
+        note = tmp_path / "note.txt"
+        note.write_bytes(b'{"kazma_receipt": 1}\n.kazma-receipt-ed25519 AAAA BBBB\n')
+        code = run_verify([str(note)])
+        shown = "".join(capsys.readouterr())
+        assert code == 1
+        assert "vault key is not set" in shown
+        assert not (data / "vault.db").exists()
+        assert not (data / "settings.db").exists()
+        assert store_path.is_file() == store_existed
+    finally:
+        reset_vault()
+        reset_config_store()
+        set_enforced(False)

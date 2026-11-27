@@ -486,12 +486,24 @@ def _names_person(case: tuple[str, str]) -> bool:
 
 
 def _credential_masked(text: str) -> bool:
-    """A credential label hides the value in either language. True when it did."""
+    """A credential label hides the value in either language. True when it did.
+
+    A JSON object is also masked by key name (``mask_deep``), which is how a
+    dict reaches the receipt before the text masker sees it.
+    """
+    import json
+
     from kazma_core.errors import _REDACT, redact_secrets
 
     secret = "arpw-AR99" if "arpw-AR99" in text else "envplain-EE11"
     for masked in (redact_secrets(text), _REDACT.sub("<redacted>", text)):
         if secret in masked or "<redacted>" not in masked:
+            return False
+    if text.lstrip().startswith("{"):
+        from kazma_core.security.config_mask import mask_deep
+
+        dumped = json.dumps(mask_deep(json.loads(text)), ensure_ascii=False)
+        if secret in dumped or "***" not in dumped:
             return False
     return True
 
@@ -843,6 +855,16 @@ PAIRS: list[Pair] = [
          "api_key: envplain-EE11", "مفتاح سري: arpw-AR99", _credential_masked, True),
     Pair("credential_label_plain_sentence", (M + "errors.py",),
          "The room is ready for the meeting.", "الغرفة جاهزة للاجتماع.", _plain_sentence_unchanged, True),
+    Pair("credential_label_shadda", (M + "errors.py",),
+         "password: envplain-EE11", "كلمة الس\u0651ر: arpw-AR99", _credential_masked, True),
+    Pair("credential_json_key", (M + "errors.py",),
+         '{"password": "envplain-EE11"}', '{"كلمة المرور": "arpw-AR99"}', _credential_masked, True),
+    Pair("credential_label_pin", (M + "errors.py",),
+         "secret: envplain-EE11", "الرقم السري: arpw-AR99", _credential_masked, True),
+    Pair("credential_label_no_colon", (M + "errors.py",),
+         "password envplain-EE11", "كلمة المرور arpw-AR99", _credential_masked, True),
+    Pair("credential_word_in_a_sentence", (M + "errors.py",),
+         "I forgot the password yesterday.", "نسيت كلمة المرور أمس.", _plain_sentence_unchanged, True),
 ]
 
 

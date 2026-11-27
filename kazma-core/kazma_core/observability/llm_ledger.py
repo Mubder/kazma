@@ -493,9 +493,10 @@ def recorded_usage(
     """Tokens, cost and call count, read without creating or migrating the ledger.
 
     ``None`` when the file is not there. ``NotReadableError`` when the file is
-    there but cannot be summed as it stands (``immutable=1``, so a row still
-    only in the WAL is not in this read). *space* the owner's id also matches
-    a row with an empty space (work from before Spaces, N19).
+    there but cannot be summed as it stands. A ``-wal`` already beside the
+    file is included, so a committed row still in that log is in the sum.
+    *space* the owner's id also matches a row with an empty space (work from
+    before Spaces, N19).
     """
     from pathlib import Path
 

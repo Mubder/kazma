@@ -48,15 +48,18 @@ class NotReadableError(Exception):
 
 
 def connect_immutable(path: Path | str) -> sqlite3.Connection:
-    """Open *path* so the read cannot create ``-wal`` or ``-shm``.
+    """Open *path* without creating a sidecar and without a schema step.
 
-    ``mode=ro`` on a WAL database still creates those sidecars.
-    ``immutable=1`` does not, and it does not look at a WAL file, so a row
-    that has not been checkpointed yet is not in this read. The caller
-    closes the connection. This function does not run a schema step.
+    A ``-wal`` file that is already there is read with ``mode=ro``: rows
+    committed into that log are visible, and the read creates no new sidecar.
+    ``mode=ro`` when no ``-wal`` exists would create ``-wal`` and ``-shm``,
+    so that case stays ``immutable=1``, which creates neither. The caller
+    closes the connection.
     """
     resolved = Path(path).resolve()
-    return sqlite3.connect(f"{resolved.as_uri()}?immutable=1", uri=True, timeout=5)
+    wal = resolved.with_name(resolved.name + "-wal")
+    mode = "mode=ro" if wal.is_file() else "immutable=1"
+    return sqlite3.connect(f"{resolved.as_uri()}?{mode}", uri=True, timeout=5)
 
 
 @contextmanager
