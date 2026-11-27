@@ -380,13 +380,17 @@
   which the run patches. **The refusal** reads the store itself
   (`store_unfinished`: the merge's errors or a twin left current, the same
   words on the same day; a week left, queued or a summary to be written
-  again), not only the done file; rounds whose deep pass was never answered
+  again, the weeks left read by the product's own `_due_periods` on the
+  store at the question's time, so a store whose summaries were deleted is
+  refused), not only the done file; rounds whose deep pass was never answered
   are said with every number (`written_with`: 144 of 12,089 on the pilot,
   the extraction's failed passes). A question whose sweeps do not settle
   says so (`--sweeps`), apart from a failed call. **The replay** finds a
   reply's "replaces fN" by subject, value and a name of the same statement
-  (`fact_names.same_statement`; cross-name matches counted: none on the
-  pilot), hands the pass a fact held but not shown (`refs_added`), counts a
+  (`fact_names.same_statement`; cross-name matches: none, counted on a
+  replay at the L1 code, `ed313074-w6-5r-qwen`, whose counts equal the
+  measured facts run's in every other column; the evidence writes null
+  where a run did not count them), hands the pass a fact held but not shown (`refs_added`), counts a
   number it cannot place (`refs_lost`) and a round with no kept reply
   (`no_reply`). The pilot's map (`facts-pilot/map-qwen`, 24 Nov) was made by
   a scratch script of step 1's, not kept: it ran the extraction's code over
@@ -410,6 +414,13 @@
   gain, is the step's value. It found a recall fault, fixed with it
   (`recall._room_by_rank`, §15 F): a summary no step could fit still shrank
   the excerpts (822 -> 623 characters, gpt4_1d80365e and gpt4_61e13b3c).
+  Rebuilt with the fix, 7 written and 5 facts-only blocks differ from the
+  answered ones (eb58ed364's): the same memories and lines, a wider first
+  conversation (619-629 -> 709-926 characters), the answer's words in each
+  as before; the evidence's note names them. Labels and months of a summary
+  come from its key ("2026-W23", "2026-06"), so a week a server wrote in its
+  own local time keeps its name and month in any operator zone (the delta
+  review's B).
   Counts: `docs/audits/evidence/memory_ingestion/pilot_written.json`, made by
   `longmemeval_written.py --evidence`. Gates: `tests/test_longmemeval_written.py`
   (a scripted model: facts, one summary and the merge in the block and the

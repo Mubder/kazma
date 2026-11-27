@@ -1,16 +1,17 @@
 {
- "what": "The memory plan's W6 step 5: each question's memory as Kazma writes it (written), the facts store alone (facts) and the episodes alone (episodes); per question the stores' counts, the summaries sweep's, and each block's memories, lines, tokens and whether the answer's words are in it. Ids and counts only. Made by scripts/longmemeval_written.py evidence.",
+ "what": "The memory plan's W6 step 5: each question's memory as Kazma writes it (written), the facts store alone (facts) and the episodes alone (episodes); per question the stores' counts, the summaries sweep's, and each block's memories, lines, tokens and whether the answer's words are in it. Ids and counts only. Made by scripts/longmemeval_written.py --evidence.",
  "facts": "facts run ed313074-w6-5-qwen",
  "written": "w6-5-qwen",
  "summaries": {
   "model": "qwen3.8-flash",
-  "calls": 1303
+  "calls": 1333,
+  "usd_all_runs": 1.1272
  },
  "answers": [
   "tests/fixtures/longmemeval/answers_dev_w6-5.json",
   "tests/fixtures/longmemeval/answers_dev_w6-5-noise.json"
  ],
- "answers_note": "Answered on eb58ed364's blocks, before the step 5 review's M1 fix to recall: there gpt4_1d80365e and gpt4_61e13b3c showed no summary yet had shorter excerpts; with the fix their blocks equal the facts-only ones and these 20 changed blocks are the 20 that show a summary.",
+ "answers_note": "Answered on eb58ed364's blocks, before the step 5 review's M1 fix to recall. Rebuilt with the fix, 7 written blocks (8550ddae, 28dc39ac, gpt4_1d80365e, gpt4_61e13b3c, 5a7937c8, gpt4_a56e767c, 6613b389) and 5 facts-only blocks (29f2956b, 28dc39ac, 5a7937c8, gpt4_a56e767c, 6613b389) differ from the answered ones: the same memories and lines, a wider first conversation (619-629 -> 709-926 characters), and the answer's words in each as before. The 20 changed blocks (written against facts) are the 20 that show a summary.",
  "questions": [
   {
    "id": "gpt4_2655b836",
@@ -26,7 +27,7 @@
     "dated_events": 13,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -84,7 +85,7 @@
     "dated_events": 15,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 30,
@@ -142,7 +143,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 31,
@@ -200,7 +201,7 @@
     "dated_events": 25,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 16,
@@ -258,7 +259,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 28,
@@ -316,7 +317,7 @@
     "dated_events": 13,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 31,
@@ -374,7 +375,7 @@
     "dated_events": 12,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 31,
@@ -432,7 +433,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 40,
@@ -490,7 +491,7 @@
     "dated_events": 17,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 30,
@@ -548,7 +549,7 @@
     "dated_events": 21,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 33,
@@ -606,7 +607,7 @@
     "dated_events": 22,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 26,
@@ -664,7 +665,7 @@
     "dated_events": 16,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -722,7 +723,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 25,
@@ -780,7 +781,7 @@
     "dated_events": 13,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 30,
@@ -838,7 +839,7 @@
     "dated_events": 21,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 29,
@@ -896,7 +897,7 @@
     "dated_events": 13,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 25,
@@ -954,7 +955,7 @@
     "dated_events": 16,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -1012,7 +1013,7 @@
     "dated_events": 21,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 42,
@@ -1070,7 +1071,7 @@
     "dated_events": 19,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 28,
@@ -1128,7 +1129,7 @@
     "dated_events": 16,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 35,
@@ -1186,7 +1187,7 @@
     "dated_events": 13,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 23,
@@ -1244,7 +1245,7 @@
     "dated_events": 29,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 30,
@@ -1302,7 +1303,7 @@
     "dated_events": 23,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 25,
@@ -1360,7 +1361,7 @@
     "dated_events": 20,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 32,
@@ -1418,7 +1419,7 @@
     "dated_events": 20,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 38,
@@ -1476,7 +1477,7 @@
     "dated_events": 11,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -1534,7 +1535,7 @@
     "dated_events": 16,
     "refs_added": 1,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 42,
@@ -1592,7 +1593,7 @@
     "dated_events": 11,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 31,
@@ -1650,7 +1651,7 @@
     "dated_events": 9,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 36,
@@ -1708,7 +1709,7 @@
     "dated_events": 12,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 39,
@@ -1766,7 +1767,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 33,
@@ -1824,7 +1825,7 @@
     "dated_events": 11,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 41,
@@ -1882,7 +1883,7 @@
     "dated_events": 17,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 33,
@@ -1940,7 +1941,7 @@
     "dated_events": 26,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 29,
@@ -1998,7 +1999,7 @@
     "dated_events": 10,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 26,
@@ -2056,7 +2057,7 @@
     "dated_events": 18,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 36,
@@ -2114,7 +2115,7 @@
     "dated_events": 16,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 31,
@@ -2172,7 +2173,7 @@
     "dated_events": 20,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 35,
@@ -2230,7 +2231,7 @@
     "dated_events": 19,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 38,
@@ -2288,7 +2289,7 @@
     "dated_events": 23,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 34,
@@ -2346,7 +2347,7 @@
     "dated_events": 25,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -2404,7 +2405,7 @@
     "dated_events": 11,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 32,
@@ -2462,7 +2463,7 @@
     "dated_events": 22,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 34,
@@ -2520,7 +2521,7 @@
     "dated_events": 14,
     "refs_added": 1,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -2578,7 +2579,7 @@
     "dated_events": 24,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -2636,7 +2637,7 @@
     "dated_events": 9,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 29,
@@ -2694,7 +2695,7 @@
     "dated_events": 19,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 38,
@@ -2752,7 +2753,7 @@
     "dated_events": 21,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -2810,7 +2811,7 @@
     "dated_events": 20,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,
@@ -2868,7 +2869,7 @@
     "dated_events": 15,
     "refs_added": 0,
     "refs_lost": 0,
-    "refs_cross_name": 0
+    "refs_cross_name": null
    },
    "written_store": {
     "weekly": 0,

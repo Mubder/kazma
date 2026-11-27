@@ -855,14 +855,18 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
     """What a written store shows undone, read from the store and the steps'
     own counts (the step 5 review, M2): the nightly merge's errors, or a
     twin it left (one fact twice, current); a week left unsummarised at the
-    question's time, or a week or summary still queued or to be written
-    again. Empty when every step is done."""
+    question's time (the sweep's own count, and the product's
+    ``topic_summaries._due_periods`` run on the store at ``steps["at"]``: the
+    step 5 delta review's E), or a week or summary still queued or to be
+    written again. Empty when every step is done."""
     out = []
     merge, summaries = steps.get("merge") or {}, steps.get("summaries") or {}
     if int(merge.get("errors") or 0):
         out.append("the nightly merge failed")
     if int(summaries.get("weeks_left") or 0):
         out.append("a week left unsummarised")
+    if steps.get("at") and weeks_due(store, parse_date(str(steps["at"]))):
+        out.append("a week the store holds unsummarised at the question's time")
     conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
     try:
         def one(sql: str) -> int:
@@ -885,6 +889,25 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
     finally:
         conn.close()
     return out
+
+
+def weeks_due(store: Path, now: float) -> list[Any]:
+    """The weeks the summaries sweep would still queue on *store* at *now*,
+    read by the product's own ``topic_summaries._due_periods`` in UTC, the
+    zone the written run reads weeks in (``longmemeval_written.in_utc``)."""
+    from unittest import mock
+
+    from kazma_core.memory import topic_summaries
+
+    conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
+            return topic_summaries._due_periods(conn, now, topic_summaries._config()["min_turns"])
+    except sqlite3.OperationalError:
+        return []  # a store with no episodes table holds no week
+    finally:
+        conn.close()
 
 
 def deep_pass_gaps(steps: dict[str, Any]) -> dict[str, int]:

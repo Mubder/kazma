@@ -339,7 +339,9 @@ def _summary(text: str) -> RecallHit:
                      metadata={"level": "week", "display": "Week of May 1, 2023 -- " + text})
 
 
-def _with_and_without(language: str, budget: int) -> tuple[str, str]:
+def _with_and_without(language: str, budget: int, unfit: str = "summary") -> tuple[str, str]:
+    """The same recall at *budget* with one more line no step can fit (a long
+    weekly summary, or a long last conversation) and without it."""
     if language == "en":
         episodes, terms, long = _five(), _terms("Which orchid code for room 0?"), FILLER_EN * 80
     else:
@@ -348,9 +350,31 @@ def _with_and_without(language: str, budget: int) -> tuple[str, str]:
                        metadata={}) for i in range(5)]
     without = format_recall_block(RecallResult(beliefs=facts, episodes=episodes, focus_terms=terms),
                                   max_tokens=budget)
-    with_one = format_recall_block(RecallResult(beliefs=facts, episodes=episodes, summaries=[_summary(long)],
-                                                focus_terms=terms), max_tokens=budget)
-    return with_one, without
+    if unfit == "summary":
+        more = RecallResult(beliefs=facts, episodes=episodes, summaries=[_summary(long)], focus_terms=terms)
+    else:
+        # a conversation with no sides is shown whole, at its own length
+        last = _hit("e_long", "a long conversation", long, sides=False)
+        more = RecallResult(beliefs=facts, episodes=[*episodes, last], focus_terms=terms)
+    return format_recall_block(more, max_tokens=budget), without
+
+
+#: Every tenth budget from a tight block to a roomy one (the delta review's
+#: sweep: 32 of 155 English and 28 of 244 Arabic budgets failed with the
+#: frame counted at its largest).
+_SWEEP = range(800, 4001, 10)
+_UNFIT_MARK = {"summary": "Week of May 1, 2023", "conversation": "e_long"}
+
+
+def _left_out_yet_different(language: str, unfit: str) -> list[int]:
+    """The budgets at which the unfit line is not shown, yet the block is not
+    the block without it."""
+    bad = []
+    for budget in _SWEEP:
+        with_one, without = _with_and_without(language, budget, unfit)
+        if _UNFIT_MARK[unfit] not in with_one and with_one != without:
+            bad.append(budget)
+    return bad
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
@@ -360,19 +384,34 @@ def test_a_summary_that_cannot_fit_takes_no_room_from_the_excerpts(language):
     now the block without it, in English and Arabic."""
     with_one, without = _with_and_without(language, _TIGHT)
     assert "Week of May 1, 2023" not in with_one
-    assert _history_lines(with_one) == _history_lines(without)
+    assert with_one == without
     lead = len(_history_lines(with_one)[0].split(" [", 1)[0])
     assert lead > limits.RECALL_LEAD_LEAST + 50, lead
 
 
+@pytest.mark.parametrize("unfit", ["summary", "conversation"])
 @pytest.mark.parametrize("language", ["en", "ar"])
-@pytest.mark.parametrize("budget", [1000, 1150, 1300, 1600, 2400, 4000])
-def test_whenever_the_summary_is_left_out_the_block_is_the_block_without_it(language, budget):
-    """The class: at any budget, a block whose summary is not shown holds the
-    same lines as the same recall with no summary."""
-    with_one, without = _with_and_without(language, budget)
-    if "Week of May 1, 2023" not in with_one:
-        assert _history_lines(with_one) == _history_lines(without), budget
+def test_whenever_a_line_is_left_out_the_block_is_the_block_without_it(language, unfit):
+    """The class, at every tenth budget from 800 to 4,000: a block that
+    leaves out a line no step can fit, a summary or a later conversation, is
+    the same recall's block without that line, header and footer included."""
+    shown = sum(_UNFIT_MARK[unfit] not in _with_and_without(language, b, unfit)[0] for b in _SWEEP[::40])
+    assert shown, "the sweep never leaves the line out"
+    assert _left_out_yet_different(language, unfit) == []
+
+
+def test_control_the_frame_counted_at_its_largest_fails_the_sweep(monkeypatch):
+    """The negative control: room by rank with the frame counted at its
+    largest, the header and footer of a summary not shown included (0c1789cd5),
+    leaves out the summary yet differs from the block without it."""
+    real = recall_module._room_by_rank
+
+    def frame_counted(result, kept):
+        shown, _exact = real(result, lambda room, exact: kept(room, False))
+        return shown, False
+
+    monkeypatch.setattr(recall_module, "_room_by_rank", frame_counted)
+    assert _left_out_yet_different("en", "summary") or _left_out_yet_different("ar", "summary")
 
 
 def test_a_summary_that_fits_still_takes_its_room():

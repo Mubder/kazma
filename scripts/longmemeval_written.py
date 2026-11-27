@@ -186,7 +186,7 @@ async def sweep(now: float, model: str, sweeps: int = SWEEPS) -> dict[str, Any] 
             else:
                 return f"a {task_type} task's model call failed {TASK_TRIES} times; written again on the next run"
             counts["tasks"] += 1
-    return f"{sweeps} sweeps did not settle its summaries; run again with a larger --sweeps"
+    return f"{sweeps} sweep{'s' if sweeps != 1 else ''} did not settle its summaries; run again with a larger --sweeps"
 
 
 def nightly_merge(db: Path, first: float, now: float) -> dict[str, Any]:
@@ -334,7 +334,8 @@ def compare_blocks(data: Path, facts: Path, folder: Path, ids: list[str]) -> lis
     embedder.vectors.update(pilot.PilotEmbedder(None, data / "cache" / "none.npz", embedder.model,
                                                 facts / "vectors-extra.npz").added)
     rows = []
-    with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder),             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
+    with (mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder),
+          mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0)):
         for qid in ids:
             item = items[qid]
             history, words = bench.history_rows(item), bench.answer_words(item)
@@ -363,6 +364,15 @@ def _fact_lines(block: str) -> list[str]:
             if line.startswith("- ")]
 
 
+def _replies(folder: Path, model: str | None) -> int | None:
+    """The model replies the run holds (one a line), resumed runs included."""
+    path = folder / f"replies-{model}.jsonl"
+    if not model or not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
+
+
 def write_evidence(data: Path, facts: Path, label: str, out: Path, questions: str = "pilot",
                    answers: list[str] | None = None, answers_note: str = "") -> dict[str, Any]:
     """The written run's evidence file (``docs/audits/evidence/memory_ingestion``):
@@ -379,9 +389,11 @@ def write_evidence(data: Path, facts: Path, label: str, out: Path, questions: st
         steps = done["written_with"]
         rows.append({"id": qid, "type": blocks[qid]["type"], "changed": blocks[qid]["changed"],
                      "fact_lines_changed": blocks[qid]["fact_lines_changed"],
-                     "facts_store": {k: held.get(k, 0) for k in ("deep", "no_reply", "deep_failed", "facts", "current",
-                                                                  "dated_events", "refs_added", "refs_lost",
-                                                                  "refs_cross_name")},
+                     # null where the facts run did not count it (the replay
+                     # counts cross-name matches since the step 5 review's L1)
+                     "facts_store": {k: held.get(k) for k in ("deep", "no_reply", "deep_failed", "facts", "current",
+                                                              "dated_events", "refs_added", "refs_lost",
+                                                              "refs_cross_name")},
                      "written_store": {k: done.get(k, 0) for k in ("weekly", "month", "project", "merged")},
                      "sweep": {k: steps["summaries"].get(k, 0) for k in ("weeks", "rollups", "tasks", "weeks_left")},
                      "blocks": {n: blocks[qid][n] for n in ("written", "facts", "episodes")}})
@@ -389,9 +401,12 @@ def write_evidence(data: Path, facts: Path, label: str, out: Path, questions: st
         "what": "The memory plan's W6 step 5: each question's memory as Kazma writes it (written), the facts "
                 "store alone (facts) and the episodes alone (episodes); per question the stores' counts, the "
                 "summaries sweep's, and each block's memories, lines, tokens and whether the answer's words are "
-                "in it. Ids and counts only. Made by scripts/longmemeval_written.py evidence.",
+                "in it. Ids and counts only. Made by scripts/longmemeval_written.py --evidence.",
         "facts": f"facts run {facts.name}", "written": label,
-        "summaries": {"model": usage.get("model"), "calls": (usage.get("this_run") or {}).get("calls")},
+        # every reply the summaries were written from (resumed runs
+        # included), and what they cost, all runs (the delta review's D)
+        "summaries": {"model": usage.get("model"), "calls": _replies(folder, usage.get("model")),
+                      "usd_all_runs": usage.get("usd_all_runs")},
         **({"answers": list(answers), "answers_note": answers_note} if answers else {}),
         "questions": rows,
     }

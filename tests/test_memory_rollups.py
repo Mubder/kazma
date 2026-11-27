@@ -343,3 +343,43 @@ def test_recall_shows_a_roll_up_under_its_own_label(mem, monkeypatch):
         "SELECT id, period_start, period_end, level, title, summary_text FROM memory_summaries WHERE id = 'tr0'"
     ).fetchone()
     assert recall._summary_display(weekly).startswith("Week of ")
+
+
+# ── Old summaries keep their labels and months when the zone differs ─────
+# (the step 5 delta review's B: a week written in the server's local time,
+# read in another operator zone, moved a day and a month)
+
+def _kuwait_week_row() -> dict:
+    """Week 2026-W23 as a Kuwait server wrote it: from Monday 1 June 00:00
+    Kuwait time, which is Sunday 31 May 21:00 UTC."""
+    from zoneinfo import ZoneInfo
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    start = _dt.datetime(2026, 6, 1, tzinfo=kuwait).timestamp()
+    return {"id": "sum_w23", "period_key": "2026-W23", "period_start": start, "period_end": start + 7 * 86400}
+
+
+@pytest.mark.parametrize("zone", ["UTC", "America/New_York", "Asia/Kuwait", "Pacific/Auckland"])
+def test_a_week_written_in_another_zone_keeps_its_label_and_month(monkeypatch, zone):
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import topic_rollups
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    row = _kuwait_week_row()
+    assert topic_rollups.rollup_label("week", row["period_start"], row["period_end"], row["period_key"]) == \
+        "Week of Jun 01, 2026"
+    assert topic_rollups._week_month(row, ZoneInfo(zone))[0] == "2026-06"
+    # without its key, the stretch read at midday is the same week
+    assert topic_rollups.rollup_label("week", row["period_start"], row["period_end"]) == "Week of Jun 01, 2026"
+    month_start = _dt.datetime(2026, 6, 1, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    assert topic_rollups.rollup_label("month", month_start, month_start + 30 * 86400, "2026-06") == "June 2026"
+    assert topic_rollups.rollup_label("month", month_start, month_start + 30 * 86400) == "June 2026"
+
+
+def test_control_the_start_read_as_it_is_moves_the_week_in_utc():
+    """The negative control: the start itself, read in UTC, is 31 May, in
+    May; the reading at its key or at midday is what keeps it."""
+    row = _kuwait_week_row()
+    raw = _dt.datetime.fromtimestamp(row["period_start"], _dt.UTC)
+    assert (raw.month, raw.day) == (5, 31)

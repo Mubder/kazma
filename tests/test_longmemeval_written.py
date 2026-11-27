@@ -329,6 +329,11 @@ def _undone(store: Path, done: Path, how: str) -> None:
             conn.execute("UPDATE memory_summary_periods SET status = 'queued'")
         elif how == "summary_to_rebuild":
             conn.execute("UPDATE memory_summaries SET status = 'rebuild'")
+        elif how == "summaries_gone":
+            # the done file still says no week is left (the delta review's E)
+            conn.execute("DELETE FROM memory_summary_sources")
+            conn.execute("DELETE FROM memory_summaries")
+            conn.execute("DELETE FROM memory_summary_periods")
         elif how == "twin_left":
             row = conn.execute("SELECT * FROM beliefs WHERE predicate = 'attended' AND valid_until IS NULL").fetchone()
             names = [d[0] for d in conn.execute("SELECT * FROM beliefs LIMIT 0").description]
@@ -341,7 +346,8 @@ def _undone(store: Path, done: Path, how: str) -> None:
         conn.close()
 
 
-@pytest.mark.parametrize("how", ["merge_errors", "weeks_left", "week_queued", "summary_to_rebuild", "twin_left"])
+@pytest.mark.parametrize("how", ["merge_errors", "weeks_left", "week_queued", "summary_to_rebuild", "twin_left",
+                                 "summaries_gone"])
 def test_a_store_left_unfinished_refuses_the_run(scripts, made, monkeypatch, how):
     """The step 5 review, M2: the refusal reads the store itself and each
     step's own counts, not only that the done file names the step."""
@@ -460,7 +466,7 @@ def test_sweeps_that_do_not_settle_say_so_apart_from_a_failed_call(scripts, priv
     assert out["unwritten"] == 1 and not (folder / "done" / "written_q.json").exists()
     with mock.patch.object(written, "SWEEPS", 1):
         reason = asyncio.run(_one_question_reason(written, private, facts, folder, cached))
-    assert reason.startswith("1 sweeps did not settle")
+    assert reason.startswith("1 sweep did not settle")
     # Control: enough sweeps write it.
     assert asyncio.run(written._write([_item()], facts, folder, cached, workers=1, sweeps=10))["written"] == 1
 

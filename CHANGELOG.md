@@ -2,11 +2,12 @@
 
 ## Memory: a summary that cannot fit no longer shortens what you see (2026-11-27)
 
-- When Kazma recalls a weekly summary too long for the room left, it no longer
-  shortens the conversations it shows for room the summary then cannot use:
-  they keep their whole excerpt, in English and Arabic.
-- Weekly summaries and monthly roll-ups now follow your own time zone, the
-  one your reminders use, not the server's.
+- When Kazma recalls a weekly summary, or a later conversation, too long for
+  the room left, the conversations it shows no longer give up room for it:
+  they get the widest excerpt that still fits, in English and Arabic.
+- Weekly summaries and monthly roll-ups now read days in your own time zone,
+  the one your reminders use, not the server's. Summaries written before
+  keep their week and month names wherever your zone is.
 - Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:
   facts, weekly summaries and roll-ups, and the nightly merge. On 50
   questions this was within the reader's noise of the facts alone; it found
