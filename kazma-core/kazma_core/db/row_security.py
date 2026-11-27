@@ -536,6 +536,11 @@ class Applied:
     #: What the pass did not do and why, without keeping the lock from
     #: holding (a backfill on a database that is not this install's own).
     notes: list[str] = field(default_factory=list)
+    #: Why no checkpoint row's space was backfilled, when none was (a
+    #: database that is not this install's own). The rules hold without it,
+    #: but armed on it those threads' old state stays the owner's: the script
+    #: says it loudly (step 4 delta review N3).
+    not_backfilled: str = ""
 
     @property
     def complete(self) -> bool:
@@ -817,8 +822,9 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     if not is_kazma_database(url):
-        result.notes.append("checkpoints: not this install's own database, so their spaces are not backfilled "
-                            "from this install's thread records (Spaces on replicas is not covered)")
+        result.not_backfilled = ("checkpoints: not this install's own database, so their spaces are not "
+                                 "backfilled from this install's thread records (Spaces on replicas is not covered)")
+        result.notes.append(result.not_backfilled)
         return
     try:
         homes = threads.thread_spaces()

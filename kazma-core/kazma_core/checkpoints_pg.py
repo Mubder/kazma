@@ -40,16 +40,22 @@ async def _check_kept_cancel(conn: Any) -> None:
     review L1, §69): psycopg_pool 3.3.1 counts ``asyncio.CancelledError``
     among a client's errors, takes another connection and answers as if
     nothing happened, so a turn cancelled at that moment went on. The cancel
-    is asked for again, and lands at the pool's next wait. To be reported
-    upstream (psycopg_pool's ``CLIENT_EXCEPTIONS``)."""
+    the pool is about to swallow is given back -- taken off the task's count
+    and asked for again, with its message -- and lands at the pool's next
+    wait. Never a second one (step 4 delta review N1): ``asyncio.timeout`` and
+    ``wait_for`` take back their own cancel once, and with one more left they
+    let ``CancelledError`` out instead of ``TimeoutError`` (the turn's
+    30-minute window among them). To be reported upstream (psycopg_pool's
+    ``CLIENT_EXCEPTIONS``)."""
     from psycopg_pool import AsyncConnectionPool  # type: ignore
 
     try:
         await AsyncConnectionPool.check_connection(conn)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
         task = asyncio.current_task()
-        if task is not None:
-            task.cancel()
+        if task is not None and task.cancelling():
+            task.uncancel()
+            task.cancel(*exc.args[:1])
         raise
 
 
@@ -106,16 +112,19 @@ def _reported_pool_class() -> type:
         async def _space_half(self) -> Any:
             """The pool that signs in as the space role (the address's own
             options kept, the role last), as large as this one, opened on the
-            loop where the saver runs."""
-            if self.closed:
-                # Closed, it makes no half of its own (step 4 review L3).
-                from psycopg_pool import PoolClosed  # type: ignore
+            loop where the saver runs. Closed, it makes no half of its own
+            (step 4 review L3): asked again under the lock and once the half
+            is open, as a ``close()`` may come between (delta review N2)."""
+            from psycopg_pool import PoolClosed  # type: ignore
 
+            if self.closed:
                 raise PoolClosed("the checkpointer's pool is closed")
             if self._kazma_space_half is None:
                 if self._kazma_space_lock is None:
                     self._kazma_space_lock = asyncio.Lock()
                 async with self._kazma_space_lock:
+                    if self.closed:  # closed while this task waited for the lock
+                        raise PoolClosed("the checkpointer's pool is closed")
                     if self._kazma_space_half is None:
                         from psycopg.rows import dict_row  # type: ignore
 
@@ -135,6 +144,9 @@ def _reported_pool_class() -> type:
                             open=False,
                         )
                         await half.open()
+                        if self.closed:  # closed while the half opened: nothing would close it
+                            await half.close()
+                            raise PoolClosed("the checkpointer's pool is closed")
                         self._kazma_space_half = half
             return self._kazma_space_half
 

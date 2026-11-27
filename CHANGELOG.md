@@ -41,7 +41,12 @@
 - Putting the rules in place also gives the state saved by older versions
   its chat's space, from this install's own records and only on its own
   database; if those records are missing, nothing is changed and the rules
-  are not counted as in place.
+  are not counted as in place. When the database is not this install's own,
+  the rules script now says plainly that no saved state was given its space.
+- Stop now stops a reply that was pressed while Kazma checked its database
+  connection for the chat's saved state (it used to go on), and a reply that
+  reaches its 30-minute limit at that moment still ends as having reached
+  its limit, not as stopped.
 
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 
