@@ -1691,6 +1691,31 @@ Closed 2026-09-22. The stamp is `(mtime_ns, size, blake2b of every byte)`.
 A same-tick same-length rewrite anywhere in the file changes the digest.
 The hash runs in a worker thread so it does not pin the server loop.
 
+## Memory: a correction that also adds (open, 2026-11-27)
+
+**What:** when a reply denies and adds in the same breath, Kazma's memory can
+read it as a plain correction. Told that you met Ali, then "No, not only Ali,
+Omar too" (English), "مو بس علي، عمر بعد" (Gulf) or "ليس علي فقط، بل عمر أيضًا"
+(MSA), it can set Ali aside and keep only Omar. A plain correction ("No,
+Omar", "لا، عمر", "كلا، عمر") is read right, and "Nothing is wrong, I met
+Omar" puts nothing right (`tests/test_memory_w4_left_list.py`).
+
+**Why it is open:** rules that recognise a denial that adds were built and
+reviewed eight times (the memory plan's W6, steps 4 and 4b:
+`docs/plans/MEMORY_TOP_SCORES_PLAN.md`). Each round passed every earlier test
+set and failed a fresh one written by an outside reviewer, in English, Gulf and
+MSA alike; the last read 25 of 265 new sentences worse than today. The rules
+never shipped: the correction readers are the ones that shipped before step 4.
+The owner closed the work on 2026-11-27 as not worth more rounds.
+
+**What you can do:** say the addition as its own sentence ("I met Ali, and Omar
+too"), or put the memory right on the Memory page.
+
+**What would close it:** a reader that understands the whole sentence rather
+than its words (for example the model's own fact pass deciding "correction or
+addition" and asking when it is unsure), measured on fresh English, Gulf and
+MSA sets written by someone other than its builder.
+
 ## Scope
 
 **By design** -- the boundary the rest of this page is written inside.
