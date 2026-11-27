@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## One heading everywhere, and the README says what Kazma does today (2026-11-27)
+
+- **One heading, in English and Arabic**: `docs/brand/heading.json` holds the
+  line Kazma uses on both READMEs, the GitHub About, kazma.ai and social bios
+  (each under 160 characters), its short form and the lede taken from the
+  website. A test checks the READMEs carry it word for word and that it names
+  every chat app the gateway ships.
+- **WhatsApp in the README**: live since 16 Nov, but the README's head, its
+  channel row, its diagram and the package table still listed Telegram,
+  Discord and Slack only. They now name WhatsApp, read from the gateway's
+  own list, so the next chat app cannot ship unnamed. The guide's first
+  paragraph names it too.
+- **What the README was missing**: mail, calendar and reminders (Gmail,
+  Outlook, IMAP, one-click automations), bringing your history from ChatGPT
+  or Claude, weekly summaries, voice notes and buttons in chat apps,
+  installing Kazma as an app on a phone, rewinding or branching a chat, and
+  the 35 providers with the cost of every answer and the cost breaker. Each
+  checked against `docs/FEATURES.md`, in both languages.
+
 ## Two test rules agree on Postgres modules, and the regex sweep reads a bounded pattern by its shape (2026-11-27)
 
 - **The psycopg rule accepts the collected form**: a test module may import

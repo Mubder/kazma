@@ -1,0 +1,19 @@
+{
+  "_about": "The one heading Kazma uses everywhere: both READMEs, the GitHub About, kazma.ai and social bios. Edit it here; tests/test_heading_everywhere.py checks the READMEs' copies, that each heading fits a 160-character bio, and that it names every chat app Kazma ships (kazma_gateway.chat_adapters.CHAT_PLATFORMS).",
+  "en": {
+    "heading": "Open-source, self-hosted AI agent that remembers you and asks before it acts. English and Arabic as equals, on web, WhatsApp, Telegram, Discord and Slack.",
+    "short": "The AI agent that asks before it acts.",
+    "lede": "Research, write and code. Run your mail and calendar, and draft, schedule and post on X. In English, Arabic, or both at once."
+  },
+  "ar": {
+    "heading": "وكيل ذكاء اصطناعي مفتوح المصدر ومستضاف ذاتيًا، يتذكّرك ويستأذنك قبل أن يتصرّف. العربية والإنجليزية على حدٍّ سواء، عبر الويب وواتساب وتيليجرام وديسكورد وسلاك.",
+    "short": "وكيل ذكاء اصطناعي يستأذنك قبل أن يتصرّف.",
+    "lede": "يبحث ويكتب ويبرمج. يدير بريدك وتقويمك، ويكتب منشوراتك على X ويجدولها وينشرها. بالعربية أو الإنجليزية أو بالاثنتين معًا."
+  },
+  "channel_names": {
+    "whatsapp": {"en": "WhatsApp", "ar": "واتساب"},
+    "telegram": {"en": "Telegram", "ar": "تيليجرام"},
+    "discord": {"en": "Discord", "ar": "ديسكورد"},
+    "slack": {"en": "Slack", "ar": "سلاك"}
+  }
+}

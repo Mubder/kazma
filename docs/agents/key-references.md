@@ -3,6 +3,7 @@
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/FEATURES.md` — What Kazma does, a plain list checked against the code (the website's source; re-check a line against the code before changing it)
+- `docs/brand/heading.json` — Kazma's one heading, short form and lede in English and Arabic, for both READMEs, the GitHub About, kazma.ai and social bios. Change it there and in every copy at once; `tests/test_heading_everywhere.py` checks the READMEs carry it verbatim, that it fits a 160-character bio, and that it names every chat app in `CHAT_PLATFORMS` (a new adapter is named in the same change)
 - `docs/docs/ops/website-sync.md` — How kazma.ai is kept in step with this repository: the standing procedure, `docs/website-pages.json` (every doc page's place on the site) and `scripts/website_sync_plan.py` (what the site must add, update, remove, translate)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
 - `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
