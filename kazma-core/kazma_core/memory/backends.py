@@ -708,13 +708,18 @@ class PgvectorBackend:
     def _connect(self) -> Any:
         kazmas = self._kazmas_database
         if kazmas is None:
-            # The one answer (by identity too, S4-01 step 5 review M1), kept
-            # once it is known.
+            # The one answer (S4-01 step 5 review M1), read with this
+            # backend's own timeout and kept only once it cannot change: told
+            # by identity (armed), or Kazma's own by address. Not armed, "not
+            # by address" is asked again, by address alone with no I/O (delta
+            # review N1). None: not told; armed, refused (_armed_door).
+            from kazma_core.db import row_security
             from kazma_core.db.availability import kazma_database
 
-            answer = kazma_database(self._dsn)
-            self._kazmas_database = answer
-            kazmas = answer  # None: not told, asked again; armed, refused (_armed_door)
+            told = row_security.armed()
+            kazmas = kazma_database(self._dsn, timeout=self._timeout)
+            if kazmas is not None and (told or kazmas):
+                self._kazmas_database = kazmas
         from kazma_core.memory.state_backend import _armed_door
 
         held = _armed_door(kazmas)

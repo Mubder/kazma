@@ -61,6 +61,15 @@ MUST_RUN: dict[str, tuple[str, ...]] = {
         "tests/test_memory_pg_primary.py::test_the_benchmark_with_postgres_primary_is_within_the_stated_delta",
         # No pgvector on this server: nothing is created.
         "tests/test_vector_store_probe.py::test_a_real_postgres_is_used_only_if_it_can_hold_vectors",
+        # The armed run checks it is armed: the planted reads of another
+        # space's row and a statement with no space (S4-01 step 5 delta
+        # review N4: without KAZMA_DB_BACKEND=postgres they skipped, and an
+        # armed run that proved nothing about rows went green).
+        "tests/test_pg_armed_is_armed.py::test_the_run_is_armed_exactly_when_it_says_so",
+        "tests/test_pg_armed_is_armed.py::test_a_store_read_of_another_spaces_task",
+        "tests/test_pg_armed_is_armed.py::test_a_raw_select_of_another_spaces_row",
+        "tests/test_pg_armed_is_armed.py::test_a_statement_that_says_no_space",
+        "tests/test_pg_armed_is_armed.py::test_the_tests_own_read_sees_the_row_either_way",
     ),
     "pgvector": (
         "tests/test_memory_benchmark_pg.py::test_the_benchmark_on_pgvector_exact_and_approximate",

@@ -363,13 +363,13 @@ def test_the_mirror_and_pgvector_by_another_name_take_the_shared_door(armed: Any
 
     dsn = os.environ["KAZMA_DATABASE_URL"]
     if told == "by address alone":
-        def by_address(asked: str | None, *, or_its_server: bool = False) -> bool:
+        def by_address(asked: str | None, *, or_its_server: bool = False, **_: Any) -> bool:
             return availability._same_as_kazmas(asked, availability._server_of if or_its_server
                                                 else availability._database_of)
 
         monkeypatch.setattr(availability, "kazma_database", by_address)
     elif told == "not told":
-        monkeypatch.setattr(availability, "server_identity", lambda _dsn: None)
+        monkeypatch.setattr(availability, "server_identity", lambda _dsn, **_: None)
     a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
     mirror = PostgresStateBackend(dsn)
     facts = {space: f"s401-{uuid.uuid4().hex[:12]}" for space in (a, b)}

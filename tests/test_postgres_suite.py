@@ -65,11 +65,17 @@ def test_the_ci_job_runs_the_marked_suite():
 SUITE = "python scripts/postgres_suite.py"
 
 
+#: What the armed run sets apart from the unarmed one: its database and the lock.
+_ARMED_RUN_OWN = ("KAZMA_DATABASE_URL", "KAZMA_TEST_SECOND_LOCK")
+
+
 def armed_run_problems(job: dict) -> list[str]:
     """Why the Postgres job does not also run the suite with Spaces' second
     lock armed (S4-01 step 5 review M2): a second run of the script with
     ``KAZMA_TEST_SECOND_LOCK=armed``, on a database of its own made by an
-    earlier step, run even when the unarmed run failed."""
+    earlier step, run even when the unarmed run failed, in the same
+    environment but for its database and the lock (delta review N4: without
+    KAZMA_DB_BACKEND the self-check skipped and the armed run went green)."""
     steps = job.get("steps") or []
     runs = [s for s in steps if str(s.get("run") or "").strip() == SUITE]
     plain = [s for s in runs if "KAZMA_TEST_SECOND_LOCK" not in (s.get("env") or {})]
@@ -82,6 +88,12 @@ def armed_run_problems(job: dict) -> list[str]:
         url = str(env.get("KAZMA_DATABASE_URL") or "")
         if env.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
             problems.append("the armed run lacks KAZMA_TEST_ALLOW_REAL_DB: conftest pins SQLite")
+        for other in plain:
+            theirs = {k: v for k, v in (other.get("env") or {}).items() if k not in _ARMED_RUN_OWN}
+            mine = {k: v for k, v in env.items() if k not in _ARMED_RUN_OWN}
+            differ = sorted(k for k in set(mine) | set(theirs) if mine.get(k) != theirs.get(k))
+            if differ:
+                problems.append("the armed run's environment differs from the unarmed run's: " + ", ".join(differ))
         if url in {str((p.get("env") or {}).get("KAZMA_DATABASE_URL") or "") for p in plain}:
             problems.append("the armed run reuses the unarmed run's database")
         made = steps[:steps.index(step)]
@@ -119,10 +131,26 @@ def test_control_each_armed_run_rule_finds_what_it_is_for():
     assert armed_run_problems(_changed(armed, env={**armed["env"], "KAZMA_DATABASE_URL": plain_url})) == [
         "the armed run reuses the unarmed run's database", "no earlier step makes the armed run's database"]
     assert armed_run_problems(_changed(armed, env={**armed["env"], "KAZMA_TEST_ALLOW_REAL_DB": "0"})) == [
-        "the armed run lacks KAZMA_TEST_ALLOW_REAL_DB: conftest pins SQLite"]
+        "the armed run lacks KAZMA_TEST_ALLOW_REAL_DB: conftest pins SQLite",
+        "the armed run's environment differs from the unarmed run's: KAZMA_TEST_ALLOW_REAL_DB"]
+    # The delta review's probe (N4): the backend dropped from the armed step only.
+    no_backend = {k: v for k, v in armed["env"].items() if k != "KAZMA_DB_BACKEND"}
+    assert armed_run_problems(_changed(armed, env=no_backend)) == [
+        "the armed run's environment differs from the unarmed run's: KAZMA_DB_BACKEND"]
     without_if = {k: v for k, v in armed.items() if k != "if"}
     assert armed_run_problems({**job, "steps": [without_if if s is armed else s for s in steps]}) == [
         "an unarmed failure skips the armed run"]
+
+
+def test_the_armed_self_check_cannot_skip():
+    """Delta review N4: every test of tests/test_pg_armed_is_armed.py is one
+    the Postgres job exists for, so a skip fails the job (MUST_RUN); the
+    tests are read from the file, so a new one cannot be left out."""
+    source = (REPO / "tests" / "test_pg_armed_is_armed.py").read_text(encoding="utf-8")
+    tests = [n.name for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
+    named = set(_suite().MUST_RUN["postgres"])
+    assert len(tests) >= 5
+    assert [t for t in tests if f"tests/test_pg_armed_is_armed.py::{t}" not in named] == []
 
 
 def test_the_marker_is_registered():

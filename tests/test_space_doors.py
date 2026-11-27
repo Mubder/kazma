@@ -406,10 +406,9 @@ def test_the_memory_mirror_counts_kazmas_own_database_only(monkeypatch: pytest.M
 
     kazmas = "postgresql://kazma@db.example:5432/kazma"
     monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: kazmas)
-    # Another address is told by its server's identity (step 5 review M1): here
-    # another database on Kazma's server.
-    monkeypatch.setattr("kazma_core.db.availability.server_identity",
-                        lambda dsn: ("7712779680233943083", dsn.rsplit("/", 1)[-1]))
+    # Not armed (report mode), another address is told by itself, with no
+    # identity read (step 5 delta review N1): here another database on
+    # Kazma's server.
     backend = PostgresStateBackend(kazmas if same else "postgresql://kazma@db.example:5432/memory")
     monkeypatch.setattr(backend, "_open_connection", lambda: "a connection")
     assert backend._connect() == "a connection"
@@ -424,10 +423,8 @@ def test_pgvector_counts_kazmas_own_database_only(monkeypatch: pytest.MonkeyPatc
 
     kazmas = "postgresql://kazma@db.example:5432/kazma"
     monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: kazmas)
-    # Another address is told by its server's identity (step 5 review M1): here
-    # another server.
-    monkeypatch.setattr("kazma_core.db.availability.server_identity",
-                        lambda dsn: ("2" if "other." in dsn else "1", "kazma"))
+    # Not armed (report mode), another address is told by itself, with no
+    # identity read (step 5 delta review N1): here another server.
     backend = PgvectorBackend(dsn=kazmas if same else "postgresql://kazma@other.example:5432/kazma")
     monkeypatch.setattr(psycopg, "connect", lambda *a, **k: "a connection")
     with install_statements("a ping of the vectors"):
@@ -497,7 +494,7 @@ def test_the_mirror_knows_whose_database_it_is_before_it_says_it_knows(monkeypat
     backend = PostgresStateBackend("postgresql://kazma@db.example:5432/kazma")
     seen: list[object] = []
 
-    def answer(dsn: object, *, or_its_server: bool = False) -> bool:
+    def answer(dsn: object, *, or_its_server: bool = False, **_: object) -> bool:
         seen.append(backend._ours)  # what another thread would read now
         return True
 

@@ -221,12 +221,23 @@ an install with one account behaves as before.
   too (step 5 review M1: they decided by address, so through another name
   for Kazma's database they signed in as the tables' owner, whom row
   security does not hold, and read every space's rows;
-  `tests/test_kazmas_own_database.py` finds any other own-database decision,
-  a planted one as its control). An answer not told (a server's identity
-  could not be read) is never "another database": armed, the mirror and
-  pgvector refuse the address as a space refusal and ask again next time,
-  never reaching it on their own sign-in as the owner; the backfill says it
-  could not tell, at WARNING, with the remedy (run again). It is asked on its own connection, so the
+  `tests/test_kazmas_own_database.py` finds any other own-database decision
+  -- an identity read in SQL, a comparison with Kazma's own address, a parse
+  of it to compare -- each planted as its control, delta review N3). Another
+  address is told by identity only while the lock is armed, and in the
+  operator's `apply` (`by_identity=True`); not armed, by address alone with
+  no I/O, as before (step 5 delta review N1: during an outage every mirror
+  and pgvector connection paid two failed 5 s identity reads first). The
+  read uses the asker's own timeout, and one that fails is not read again
+  for `UNTOLD_FOR_SECONDS` (30 s). Two system identifiers tell; a start time
+  (a login that may not read `pg_control_system()`) tells nothing, nor does
+  a restart between two reads: "not told" (delta review N2). The mirror and
+  pgvector keep an answer only once it cannot change (told armed, or Kazma's
+  own by address). An answer not told is never "another database": armed,
+  the mirror and pgvector refuse the address as a space refusal and ask
+  again later, never reaching it on their own sign-in as the owner; the
+  backfill says it could not tell, at WARNING, with the remedy (run again).
+  It is asked on its own connection, so the
   apply's stays outside a transaction and the schema lock is not held across
   the backfill (step 5 review L1). A physical copy -- a `pg_basebackup`
   clone, a promoted standby -- shares the identifier and the name and counts

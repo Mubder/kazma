@@ -833,7 +833,7 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
     # The one answer (availability.kazma_database: by identity too; S4-01
     # step 5 review M1). Asked on its own connection: the apply's is left as
     # it was, outside a transaction (review L1).
-    ours = kazma_database(url)
+    ours = kazma_database(url, by_identity=True)  # the operator's apply: by any name, armed or not
     if ours is None:
         # Not told: the servers' identities could not be read now. Not read
         # as "another database" -- said as what it is, so a run again is the

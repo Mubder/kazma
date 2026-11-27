@@ -217,18 +217,22 @@ class PostgresStateBackend:
         from kazma_core.db import availability, space_doors
 
         if self._ours is None:
-            # The one answer (``availability.kazma_database``: by identity
-            # too, S4-01 step 5 review M1), kept once it is known.
-            on_its_server = availability.kazma_database(self._dsn, or_its_server=True)
-            database = availability.kazma_database(self._dsn)
-            if on_its_server is None or database is None:
-                # Asked again next time; armed, an untold one is refused (_armed_door).
-                ours, kazmas = bool(on_its_server), database
-            else:
+            # The one answer (``availability.kazma_database``, S4-01 step 5
+            # review M1), read with this backend's own timeout. Kept only once
+            # it cannot change: told by identity (armed), or Kazma's own by
+            # address. Not armed, any other answer is asked again -- by
+            # address alone, no I/O -- so an arming later reads the identity
+            # (delta review N1). Armed, an untold one is refused (_armed_door).
+            from kazma_core.db import row_security
+
+            told = row_security.armed()
+            on_its_server = availability.kazma_database(self._dsn, or_its_server=True, timeout=self._timeout)
+            database = availability.kazma_database(self._dsn, timeout=self._timeout)
+            if on_its_server is not None and database is not None and (told or (on_its_server and database)):
                 # This first: a thread that finds _ours set finds this set too.
                 self._kazmas_database = database
                 self._ours = on_its_server
-                ours, kazmas = on_its_server, database
+            ours, kazmas = bool(on_its_server), database
         else:
             ours, kazmas = self._ours, self._kazmas_database
         held = _armed_door(kazmas)

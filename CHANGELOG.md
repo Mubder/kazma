@@ -7,7 +7,8 @@
   database's name, whatever address reaches it. Once Spaces' second lock is
   switched on (nothing switches it on yet), they reach it through the same
   door as the rest of Kazma, so another address for the same database no
-  longer shows them every space's memory.
+  longer shows them every space's memory. While the lock is off they ask
+  no server, so a database that cannot be reached costs them nothing more.
 - A copy of the database made from its files (a clone, a promoted standby)
   counts as Kazma's own. Spaces on replicas is not covered.
 - Putting the rules in place no longer holds the tables' lock while it gives

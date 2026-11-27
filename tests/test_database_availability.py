@@ -163,7 +163,7 @@ def test_a_cause_cycle_ends():
 @pytest.mark.parametrize("asked", [{}, {"or_its_server": True}], ids=["database", "server"])
 def test_kazma_database_is_matched_by_server(monkeypatch, asked):
     pytest.importorskip("psycopg")
-    monkeypatch.setattr(availability, "server_identity", lambda dsn: None)  # the address alone: nothing read
+    monkeypatch.setattr(availability, "server_identity", lambda dsn, **_: None)  # the address alone: nothing read
     monkeypatch.setattr("kazma_core.db.backend.get_database_url",
                         lambda: "postgresql://kazma:pw@127.0.0.1:5432/kazma")
     is_kazma = functools.partial(availability.is_kazma_database, **asked)
@@ -180,7 +180,7 @@ def test_another_database_of_the_server_is_not_kazmas(monkeypatch):
     Kazma's own. It shares the server's outages (or_its_server, unchanged)
     and none of its tables."""
     pytest.importorskip("psycopg")
-    monkeypatch.setattr(availability, "server_identity", lambda dsn: None)  # the address alone: nothing read
+    monkeypatch.setattr(availability, "server_identity", lambda dsn, **_: None)  # the address alone: nothing read
     monkeypatch.delenv("PGDATABASE", raising=False)
     monkeypatch.setattr("kazma_core.db.backend.get_database_url",
                         lambda: "postgres://kazma:pw@127.0.0.1:5432/kazma")
