@@ -128,9 +128,12 @@ queued by the maintenance sweep with at most two weeks in flight.
   newest stretch, the most turns, the id), the last one saying how many more
   are not shown (the fourth's L1); when that level holds nothing yet the
   other answers ("this month" from the 20th, before its roll-up is
-  written). Arabic "في بداية هذا الشهر" and "أول هذا الشهر" are read as
-  English "at the start of this month" is, their words the time's
-  (`time_words._HISTORY_AR`; a paired test). A roll-up the model skips is retired with its
+  written). One "start of" rule in both languages (`time_words._START_OF_EN`,
+  `_HISTORY_AR`): "at the start" / "في البداية" alone is "at first"; "at the
+  start of" a definite period or a month ("this month", "الشهر", "January",
+  "يناير") reads that period's start; "at the start of" anything else (a
+  story, Ramadan) names no time; "أول أسبوع" is "the first week" (paired
+  tests). A roll-up the model skips is retired with its
   parts and planned again only when they change: a project was left out of
   `_known_projects` and planned under the same id on every other sweep,
   about 48 model calls a day each (O1; gate: the sweep settles after a skip,
@@ -145,9 +148,15 @@ queued by the maintenance sweep with at most two weeks in flight.
   `summary` forget and a `mentions` forget's summaries, journaled by the
   tenants `tenant_view.ledger_reach` names, never by id alone: another
   space naming the owner's id held its month back, the fifth follow-up's N2;
-  a source gate finds a read with no tenant), is not planned again; a new
-  group never takes a tombstone's id, it gets another; each skip is counted
-  (`plan_rollups`' `held_by_forget`) and said once a process.
+  a source gate finds a read with no tenant), is not planned again. A
+  roll-up's forget entry journals its parts (`forget_summary`,
+  `forget_journal.forgotten_rollup_parts`), so after a memory restore that
+  lost its row the project is still known by them (the sixth follow-up's
+  M1: renumbered past its id, the forgotten project was written again). A new
+  group whose id is a project's with known parts gets another id; one whose
+  id is a tombstone with no parts known is held, since it may be that very
+  project. Each skip is counted (`plan_rollups`' `held_by_forget`) and said
+  once a process.
   `forget_summary` journals only once the summary is the caller's: a refused
   forget writes nothing to the ledger. Sharing
   a week is not enough: training that turned into an injury, the training

@@ -59,6 +59,17 @@ def mem(tmp_path, monkeypatch):
     db.close()
 
 
+@pytest.fixture(autouse=True)
+def _said_afresh():
+    """Each test says its held roll-ups afresh (the sixth review's L1:
+    ``_SAID_HELD`` outlived the test that filled it)."""
+    from kazma_core.memory import topic_rollups
+
+    topic_rollups._SAID_HELD.clear()
+    yield
+    topic_rollups._SAID_HELD.clear()
+
+
 #: A month long enough past (its end and the day's grace behind it).
 MONTH_START = _dt.datetime(2026, 6, 1)
 
@@ -1119,7 +1130,8 @@ def _ledger_reads_by_id_alone(source: str, path: str) -> list[str]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call):
             name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-            if name in ("forgotten_summaries", "_ledger_forgotten") and not (node.args or node.keywords):
+            if name in ("forgotten_summaries", "forgotten_rollup_parts", "_ledger_forgotten") and not (
+                    node.args or node.keywords):
                 found.append(f"{path}:{node.lineno} {name}()")
     return found
 
@@ -1205,3 +1217,61 @@ def test_control_ranked_by_id_the_week_shows_its_smallest(monkeypatch):
     monkeypatch.setattr(recall, "_said_rank", lambda by_id, share, span: lambda rid: (-share[rid], rid))
     hits = _said(monkeypatch, _LAST_WEEK[0], _MONDAY_3_AUG, _week_of_eight_topics())
     assert [h.id for h in hits] == ["t_a", "t_b", "t_c", "t_d", "t_e", "t_f"]
+
+
+# ── A forgotten project survives a memory restore (the sixth review's M1) ─
+
+def _forgotten_then_restored(mem) -> str:
+    """A written training project, forgotten, then a memory restore that
+    lost its row and parts: only the ledger knows it."""
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    mem.db.execute("DELETE FROM memory_summary_parts WHERE rollup_id = ?", (rid,))
+    mem.db.execute("DELETE FROM memory_summaries WHERE id = ?", (rid,))
+    mem.db.commit()
+    return rid
+
+
+def test_a_forgotten_project_is_not_written_again_after_a_restore(mem):
+    rid = _forgotten_then_restored(mem)
+    out = _plan(mem)
+    assert out["projects"] == 0 and out["held_by_forget"] >= 1
+    assert _rollups(mem, "project") == [] and rid not in {r["id"] for r in _rollups(mem, "project")}
+
+
+def test_a_forgotten_project_whose_first_week_changed_is_held_by_its_parts(mem):
+    """The journaled parts match the group by the share rule, whatever id
+    the group's first week would give it."""
+    _forgotten_then_restored(mem)
+    _weekly(mem, "tr_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 0
+
+
+def test_control_without_the_ledger_the_restored_project_comes_back(mem, monkeypatch):
+    """The negative control: the restored store alone (no ids, no parts from
+    the ledger) plans the forgotten project again."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _forgotten_then_restored(mem)
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {})
+    monkeypatch.setattr(topic_rollups, "_ledger_forgotten", lambda tenant_id: set())
+    assert _plan(mem)["projects"] == 1
+
+
+@pytest.mark.parametrize("parts_known", [True, False])
+def test_a_group_on_a_forgotten_id_is_renumbered_only_when_its_parts_are_known(mem, monkeypatch, parts_known):
+    """With the tombstone's parts known (another project), the live group
+    gets another id (the fifth review's L-b); unknown, it may be that very
+    project, so it is held (M1)."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    taken = topic_rollups._rollup_id("default", "project", "tr0")
+    forget_journal.append("summary", tenant_id="default", summary_id=taken)
+    if parts_known:
+        monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {taken: {"an-old-week"}})
+    out = _plan(mem)
+    assert out["projects"] == (1 if parts_known else 0)
+    assert taken not in {r["id"] for r in _rollups(mem, "project")}

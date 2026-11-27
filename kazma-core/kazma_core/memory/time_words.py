@@ -131,9 +131,19 @@ _MONTH_EN = re.compile(
     re.IGNORECASE,
 )
 _YEAR_EN = re.compile(r"\b(?:in|during|since)\s+((?:19|20)\d\d)\b", re.IGNORECASE)
+#: Letters ``fold_for_search`` folds away (alef with hamza or madda, taa
+#: marbuta, alef maqsura): a month's name with one is not its folded form.
+_FOLDED_AWAY = frozenset(map(chr, (0x0623, 0x0625, 0x0622, 0x0629, 0x0649)))
 #: What was true before (the history of a fact).
+#: "At the start" alone is "at first"; "at the start of" a period ("this
+#: month", "the week") or a month reads that start, and "at the start of"
+#: anything else (a story, a trip, Ramadan) names no time: one rule with the
+#: Arabic "في البداية" / "في بداية ..." (the sixth follow-up review's L2).
+_START_OF_EN = (rf"(?:at the start|in the beginning)(?! of\b)"
+                rf"|(?:at the start|in the beginning) of(?= (?:this|the|last) (?:month|week|year)\b"
+                rf"| (?:{_MONTH_WORDS})\b)")
 _HISTORY_EN = re.compile(
-    r"\b(?:at first|in the beginning|at the start|originally|original|used to|previously|"
+    rf"\b(?:at first|{_START_OF_EN}|originally|original|used to|previously|"
     r"formerly|former|back then|at the time|before that|my old|the old|first one|earlier)\b",
     re.IGNORECASE,
 )
@@ -158,7 +168,10 @@ _HISTORY_AR = re.compile(
     # الشهر"), never a bare "بداية", "أول هذا الشي" (the fifth review's L-a)
     # or "أول أسبوع" ("the first week": benchmark q1402)
     r"(?:في بدايه|ببدايه|بدايه|في اول|باول|اول)"
-    r"(?= (?:هذا |هذي |هذه )?(?:ال|هال)(?:شهر|اسبوع|سنه|عام)(?:\s|$|[؟?.,،])))(?=\s|$|[؟?.,،])"
+    r"(?= (?:هذا |هذي |هذه )?(?:ال|هال)(?:شهر|اسبوع|سنه|عام)(?:\s|$|[؟?.,،])"
+    # ... or a month's name, as English "at the start of January" is
+    rf"| (?:{'|'.join(k for k in _AR_MONTHS_RAW if not set(k) & _FOLDED_AWAY)})(?:\s|$|[؟?.,،])))"
+    r"(?=\s|$|[؟?.,،])"
 )
 _AR_AGO = re.compile(
     r"(?:^|\s)قبل\s+(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|اسبوع|اسابيع|شهر|شهور|اشهر|"
@@ -230,7 +243,8 @@ def _ar_month_pattern() -> re.Pattern[str]:
     if not _AR_MONTH_CACHE:
         _AR_MONTH_CACHE.update(_ar_months())
     names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
-    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
+    # "بداية يناير" reads January, as "at the start of January" does
+    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر|بدايه)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
                       rf"(?=\s|$|[؟?.,،])")
 
 

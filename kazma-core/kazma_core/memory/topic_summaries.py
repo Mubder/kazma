@@ -1132,8 +1132,14 @@ def forget_summary(
         ).fetchone()
         if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}  # refused: nothing journaled (the fifth review's N2)
-        # Journaled once the summary is the caller's, before it changes.
-        seq = forget_journal.append("summary", tenant_id=caller, summary_id=summary_id) if journal else None
+        # Journaled once the summary is the caller's, before it changes; a
+        # roll-up with its parts, so a restore that loses its row still
+        # knows the project it was (the sixth follow-up review's M1).
+        parts = [str(r[0]) for r in conn.execute(
+            "SELECT part_id FROM memory_summary_parts WHERE rollup_id = ? ORDER BY part_id", (summary_id,))]
+        seq = (forget_journal.append("summary", tenant_id=caller, summary_id=summary_id,
+                                     detail=json.dumps({"parts": parts}) if parts else "")
+               if journal else None)
         if row["status"] == "forgotten":
             forget_journal.mark_applied(conn, seq)
             conn.commit()

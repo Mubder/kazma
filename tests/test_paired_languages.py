@@ -466,6 +466,19 @@ def _reads_a_time(text: str) -> bool:
     return read_time(text, now=datetime(2026, 8, 19, 12, tzinfo=UTC).timestamp(), zone=UTC) is not None
 
 
+def _start_of(text: str) -> tuple[bool, bool, float]:
+    """What ``time_words`` reads of a "start of": any time, whether it is
+    what was true before, and the period's length in days."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.time_words import read_time
+
+    ask = read_time(text, now=datetime(2026, 8, 19, 12, tzinfo=UTC).timestamp(), zone=UTC)
+    if ask is None:
+        return False, False, 0.0
+    return True, bool(ask.history), round((ask.end - ask.start) / 86400, 1) if ask.start is not None else 0.0
+
+
 def _events_lost(lang: int) -> int:
     """Of the openings twinned in ``fixtures/memory_events/openings.json`` and
     the events told after each, how many one language loses."""
@@ -674,6 +687,16 @@ PAIRS: list[Pair] = [
          "What is the start of the story?", "شنو بداية القصة؟", _reads_a_time, False),
     Pair("first_this_thing_is_no_time", (M + "memory/time_words.py",),
          "Where do I live, first this thing?", "وين أسكن، أول هذا الشي؟", _reads_a_time, False),
+    # the sixth follow-up review's L2: one "start of" rule for both languages
+    Pair("the_start_of_a_month_named", (M + "memory/time_words.py",),
+         "What did we talk about at the start of January?", "شنو تكلمنا عنه في بداية يناير؟", _start_of,
+         (True, True, 31.0)),
+    Pair("the_start_of_a_story", (M + "memory/time_words.py",),
+         "What happened at the start of the story?", "شنو صار في بداية القصة؟", _start_of, (False, False, 0.0)),
+    Pair("the_start_of_ramadan", (M + "memory/time_words.py",),
+         "What did I say at the start of Ramadan?", "شنو قلت في بداية رمضان؟", _start_of, (False, False, 0.0)),
+    Pair("at_the_start_alone_is_at_first", (M + "memory/time_words.py",),
+         "Where did I live at the start?", "وين كنت ساكن في البداية؟", _start_of, (True, True, 0.0)),
     Pair("a_weekday_gone_by", (M + "memory/time_words.py",),
          ("I sold it last Friday", "2026-06-05"), ("بعته الجمعة اللي فاتت", "2026-06-05"), _to_come, False),
     Pair("a_correction_denies", (M + "memory/event_text.py",),

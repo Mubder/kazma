@@ -388,10 +388,30 @@ def _ledger_forgotten(tenant_id: str) -> set[str]:
     return forgotten_summaries(tenant_id)
 
 
+def _known_with_the_ledger(conn: sqlite3.Connection, tenant_id: str) -> tuple[
+        dict[str, tuple[str, set[str], bool]], set[str]]:
+    """The known projects and the tombstones, with what the forget ledger
+    holds: an id it holds forgotten is a tombstone whatever its row says,
+    and one whose row is gone (a memory restore) is known by the parts its
+    entry journaled (the sixth follow-up review's M1)."""
+    from kazma_core.memory.forget_journal import forgotten_rollup_parts
+
+    existing = _known_projects(conn, tenant_id)
+    ledger = _ledger_forgotten(tenant_id)
+    for rid, parts in forgotten_rollup_parts(tenant_id).items():
+        if rid not in existing or not existing[rid][1]:
+            existing[rid] = ("forgotten", parts, False)
+    tombstones = {rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger
+    existing = {rid: (("forgotten", *known[1:]) if rid in tombstones else known) for rid, known in existing.items()}
+    return existing, tombstones
+
+
 def _new_project_id(tenant_id: str, parts: list[str], taken: set[str]) -> str:
-    """A new project's id: from its first week, else (that id a tombstone's
-    or another project's) from its first week and a number (the fifth
-    review's L-b: a live group was skipped for good under a forgotten id)."""
+    """A new project's id: from its first week, else (that id a project's
+    whose parts are known, a tombstone's or a live one's) from its first week
+    and a number (the fifth review's L-b: a live group was skipped for good
+    under a forgotten id). The caller holds back a group whose id is a
+    tombstone with no parts known: it may be that very project (M1)."""
     rid = _rollup_id(tenant_id, "project", parts[0])
     n = 1
     while rid in taken:
@@ -451,11 +471,7 @@ def _project_of(existing: dict[str, tuple[str, set[str], bool]], parts: list[str
 
 def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
                    budget: list[int], held_back: list[int]) -> int:
-    existing = _known_projects(conn, tenant_id)
-    ledger = _ledger_forgotten(tenant_id)
-    tombstones = {rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger
-    # One the ledger holds forgotten is a tombstone, whatever its row says.
-    existing = {rid: (("forgotten", *known[1:]) if rid in tombstones else known) for rid, known in existing.items()}
+    existing, tombstones = _known_with_the_ledger(conn, tenant_id)
     planned = 0
     for group in _project_groups(weekly):
         if budget[0] <= 0:
@@ -477,7 +493,13 @@ def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite
                 continue
             rid = match
         else:
-            rid = _new_project_id(tenant_id, parts, tombstones | set(existing))
+            rid = _rollup_id(tenant_id, "project", parts[0])
+            if rid in tombstones and not existing.get(rid, ("", set(), False))[1]:
+                # a tombstone whose parts are unknown: it may be this very
+                # project, so it is held, never renumbered (M1)
+                _held_by_forget(held_back, "project", rid)
+                continue
+            rid = _new_project_id(tenant_id, parts, {r for r, known in existing.items() if known[1]})
         start = min(float(r["period_start"]) for r in group)
         end = max(float(r["period_end"]) for r in group)
         _mark_rebuild(conn, tenant_id=tenant_id, level="project", rollup_id=rid, key=f"project:{rid[4:16]}",
@@ -582,15 +604,12 @@ def _forgotten_now(conn: sqlite3.Connection, level: str, rollup_id: str, tenant_
     """Whether roll-up *rollup_id*, planned before a forget, is now forgotten
     or the same project as one forgotten since (the follow-up's N1: the
     writer had no check of its own)."""
-    ledger = _ledger_forgotten(tenant_id)
-    if rollup_id in ledger:
+    if rollup_id in _ledger_forgotten(tenant_id):
         return True
     if level != "project":
         return False
-    existing = _known_projects(conn, tenant_id)
-    tombstones = ({rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger) - {
-        rollup_id}
-    return _forgotten_project_of(existing, tombstones, parts) is not None
+    existing, tombstones = _known_with_the_ledger(conn, tenant_id)
+    return _forgotten_project_of(existing, tombstones - {rollup_id}, parts) is not None
 
 
 def _retire(conn: sqlite3.Connection, rollup_id: str, tenant_id: str, *, skipped: bool = False) -> None:

@@ -213,6 +213,29 @@ def forgotten_summaries(tenant_id: str) -> set[str]:
     return out
 
 
+def forgotten_rollup_parts(tenant_id: str) -> dict[str, set[str]]:
+    """The parts (weekly summary ids) each forgotten roll-up had when it was
+    forgotten, as its ``summary`` entry holds them, for *tenant_id* by
+    ``tenant_view.ledger_reach``: after a memory restore that lost the
+    roll-up's row, the planner still knows the project it was (the sixth
+    follow-up review's M1)."""
+    from kazma_core.memory.tenant_view import ledger_reach
+
+    reach = set(ledger_reach(tenant_id))
+    out: dict[str, set[str]] = {}
+    for e in _entries(kinds=("summary",)):
+        if e.tenant_id not in reach or not e.summary_id or not e.detail:
+            continue
+        try:
+            parts = json.loads(e.detail).get("parts") or []
+        except (ValueError, TypeError, AttributeError):
+            logger.warning("[forget] a summary entry's parts could not be read (seq %s)", e.seq)
+            continue
+        if parts:
+            out.setdefault(e.summary_id, set()).update(str(p) for p in parts)
+    return out
+
+
 def journaled_seqs() -> list[int]:
     """Every entry's sequence number, read without writing (the restore
     drill: it never writes into the live data directory). Empty when there
