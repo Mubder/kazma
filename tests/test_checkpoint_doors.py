@@ -264,33 +264,99 @@ def test_a_caller_that_names_sqlite_gets_its_file_whatever_the_address(monkeypat
 # ── the step 4 review: the pool's check and a closed pool (L1, L3) ───────
 
 
-@pytest.mark.parametrize("kept", [True, False])
-def test_a_cancel_in_the_pools_check_stays_a_cancel(monkeypatch: pytest.MonkeyPatch, kept: bool) -> None:
-    """L1: psycopg_pool counts a cancel in its check as a bad connection, takes
-    another and returns: a cancelled turn went on."""
-    # CI's light Tests job has no psycopg_pool: skipped there, collected everywhere.
-    AsyncConnectionPool = pytest.importorskip("psycopg_pool").AsyncConnectionPool  # noqa: N806
+def _pool_like(check: Any) -> Any:
+    """psycopg_pool 3.3.1's checkout as far as its check: a client's error --
+    ``CancelledError`` among them -- puts the connection back, waits its
+    backoff and checks another; that second check answers."""
+
+    async def checkout() -> str:
+        for _ in range(2):
+            try:
+                await check(object())
+                return "a connection"
+            except (asyncio.CancelledError, OSError):  # psycopg_pool's CLIENT_EXCEPTIONS
+                await asyncio.sleep(0.01)  # its backoff: the pool's next wait
+        raise AssertionError("no connection was checked")
+
+    return checkout
+
+
+@pytest.fixture()
+def slow_check(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The plain check, its first round trip ten seconds long: a cancel lands
+    inside it. CI's light Tests job has no psycopg_pool: skipped there,
+    collected everywhere."""
+    pool_class = pytest.importorskip("psycopg_pool").AsyncConnectionPool
+    calls: list[Any] = []
+
+    async def _check(conn: Any) -> None:
+        calls.append(conn)
+        if len(calls) == 1:
+            await asyncio.sleep(10)
+
+    monkeypatch.setattr(pool_class, "check_connection", staticmethod(_check))
+    return pool_class
+
+
+def _the_check(pool_class: Any, kept: bool) -> Any:
     from kazma_core import checkpoints_pg
 
-    async def _cancelled(conn: Any) -> None:
-        raise asyncio.CancelledError
+    return checkpoints_pg._check_kept_cancel if kept else pool_class.check_connection
 
-    monkeypatch.setattr(AsyncConnectionPool, "check_connection", staticmethod(_cancelled))
-    check = checkpoints_pg._check_kept_cancel if kept else AsyncConnectionPool.check_connection
 
-    async def _checkout() -> str:
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "the plain check"])
+def test_a_stop_in_the_pools_check_stops_the_turn_by_its_one_cancel(slow_check: Any, kept: bool) -> None:
+    """L1: psycopg_pool counts a cancel in its check as a bad connection, takes
+    another and returns: a turn stopped at that moment went on. Delta review
+    N1: the cancel it swallows is given back, not a second one added -- the
+    task stopped, counted as cancelled once."""
+    check = _the_check(slow_check, kept)
+
+    async def stop() -> tuple[str, int]:
+        task = asyncio.create_task(_pool_like(check)())
+        await asyncio.sleep(0.05)  # inside the check's round trip
+        task.cancel()
         try:
-            await check(object())
-        except asyncio.CancelledError:  # what psycopg_pool does with it
-            pass
-        await asyncio.sleep(0)  # the pool's next wait
-        return "went on"
+            outcome = await task
+        except asyncio.CancelledError:
+            outcome = "stopped"
+        return outcome, task.cancelling()
 
+    outcome, cancelling = asyncio.run(stop())
     if kept:
-        with pytest.raises(asyncio.CancelledError):
-            asyncio.run(_checkout())
+        assert (outcome, cancelling) == ("stopped", 1)
     else:  # the control: the plain check, and the turn goes on
-        assert asyncio.run(_checkout()) == "went on"
+        assert outcome == "a connection"
+
+
+@pytest.mark.parametrize("window", ["asyncio.timeout", "wait_for"])
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "the plain check"])
+def test_a_window_ending_in_the_pools_check_is_a_timeout(slow_check: Any, kept: bool, window: str) -> None:
+    """Delta review N1: a window (``asyncio.timeout``, ``wait_for``; the
+    turn's 30 minutes among them) ending in the check. With a second cancel
+    added, the window took back its own and let ``CancelledError`` out: the
+    turn's limit read as a Stop, with no honest end written."""
+    check = _the_check(slow_check, kept)
+
+    async def run() -> str:
+        if window == "wait_for":
+            return await asyncio.wait_for(_pool_like(check)(), 0.05)
+        async with asyncio.timeout(0.05):
+            return await _pool_like(check)()
+
+    async def inside_a_task() -> tuple[str, int]:
+        task = asyncio.create_task(run())
+        try:
+            outcome = await task
+        except TimeoutError:
+            outcome = "timed out"
+        return outcome, task.cancelling()
+
+    outcome, cancelling = asyncio.run(inside_a_task())
+    if kept:
+        assert (outcome, cancelling) == ("timed out", 0)
+    else:  # the control: the plain check, and the window runs past its end
+        assert outcome == "a connection"
 
 
 def test_a_closed_checkpointer_pool_makes_no_space_half() -> None:
@@ -300,6 +366,27 @@ def test_a_closed_checkpointer_pool_makes_no_space_half() -> None:
 
     pool = checkpoints_pg._reported_pool_class()(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1,
                                                     open=False)
+    with pytest.raises(PoolClosed):
+        asyncio.run(pool._space_half())
+    assert pool._kazma_space_half is None
+
+
+def test_a_pool_closed_while_the_half_waits_for_its_lock_makes_none() -> None:
+    """Delta review N2: open at the first look, closed by the time the lock
+    was had (another task making the half, then ``close()``): a half was made
+    on a closed pool, and nothing ever closed it."""
+    PoolClosed = pytest.importorskip("psycopg_pool").PoolClosed  # noqa: N806 - see the tests above
+    from kazma_core import checkpoints_pg
+
+    class _ClosedMeanwhile(checkpoints_pg._reported_pool_class()):  # type: ignore[misc,valid-type]
+        looks: list[bool]
+
+        @property
+        def closed(self) -> bool:
+            return self.looks.pop(0) if self.looks else True
+
+    pool = _ClosedMeanwhile(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1, open=False)
+    pool.looks = [False, True]
     with pytest.raises(PoolClosed):
         asyncio.run(pool._space_half())
     assert pool._kazma_space_half is None

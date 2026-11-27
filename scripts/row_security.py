@@ -54,16 +54,21 @@ if str(REPO) not in sys.path:
 
 
 def _url(variable: str | None) -> str:
-    """This install's address, or the one in the environment variable named."""
+    """This install's address, or the one in the environment variable named.
+
+    This install's own files are read either way: the backfill trusts its
+    thread records on its own database only (``availability.is_kazma_database``),
+    and with ``--url-from`` naming that very database, unread files made it
+    "another database", backfilled nothing and said so in a note (step 4 delta
+    review N3). The variable is read before them, as the shell holds it."""
     import os
 
-    if variable:
-        return (os.environ.get(variable) or "").strip()
     from kazma_core.db.backend import get_database_url
     from kazma_core.env_files import load_env_files
 
+    named = (os.environ.get(variable) or "").strip() if variable else ""
     load_env_files(include_cwd=False)
-    return get_database_url() or ""
+    return named if variable else (get_database_url() or "")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -166,10 +171,14 @@ def main(argv: list[str] | None = None) -> int:
     for problem in done.unresolved:
         print(f"  [NOT IN PLACE] {problem}")
     for note in done.notes:
-        print(f"  [NOTE] {note}")
+        if note != done.not_backfilled:
+            print(f"  [NOTE] {note}")
     for table in done.left:
         print(f"  [LEFT] {table}: its lock was not had in time; run this again when Kazma is idle")
     print("The rules are in place." if done.complete else "The rules are not all in place.")
+    if done.not_backfilled:
+        print(f"NOT BACKFILLED: {done.not_backfilled}. No checkpoint row was given its thread's space here: "
+              "do not arm on this database before the install it belongs to has run apply on it.")
     return 0 if done.complete else 1
 
 
