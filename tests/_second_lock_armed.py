@@ -34,13 +34,19 @@ def _second_lock_armed() -> Iterator[None]:
         pytest.exit("KAZMA_TEST_SECOND_LOCK=armed needs a throwaway Postgres (KAZMA_DATABASE_URL + "
                     "KAZMA_TEST_ALLOW_REAL_DB=1)", returncode=4)
     from kazma_core.db import row_security
+    from kazma_core.spaces import threads
 
     from tests.test_pg_app_role import _every_store_set_up
 
     _every_store_set_up(url)
+    # The thread record store, as the server's start makes it before the
+    # rules go in place: a missing one keeps apply from being complete
+    # (S4-01 step 4 review M1).
+    threads.ensure_store()
     done = row_security.apply(url, vector_table="")
     if not done.complete:
-        pytest.exit(f"the second lock's rules could not be put in place: {done.refused or done.left}", returncode=4)
+        pytest.exit("the second lock's rules could not be put in place: "
+                    f"{done.refused or done.left or done.unresolved}", returncode=4)
     row_security._arm(True)
     try:
         yield
