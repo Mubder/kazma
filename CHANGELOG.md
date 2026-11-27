@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## A new container engine lets running document jobs finish first (2026-11-27)
+
+- When the container engine changes, the document broker now waits for the
+  jobs it is running to finish (up to 11 minutes, one job's longest run and
+  a minute) before it moves to the new engine; Kazma's log says it waits,
+  and how many jobs were stopped if the wait ran out.
+- On a PC without the Windows docker program's context for Kazma's engine,
+  the broker also moves to Kazma's engine when that engine is set up while
+  Kazma runs.
+- Docker options written together (`-itp 80:80`) no longer keep a folder
+  given to a container from reaching Kazma's engine in the form it reads.
+
 ## Kazma's engine without a Windows docker context: the document broker follows a changed choice (2026-11-27)
 
 - On a PC where the Windows docker program has no context for Kazma's

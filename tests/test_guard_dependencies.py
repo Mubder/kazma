@@ -870,12 +870,20 @@ def test_the_mode_names(value, monkeypatch):
 
 
 def _engine_contexts(monkeypatch) -> list[str]:
-    """The guard's pin, without this machine's docker contexts."""
+    """The guard's pin, without this machine's docker contexts: it sets
+    DOCKER_CONTEXT as docker_cli.apply_engine_choice does (registered with
+    monkeypatch, so it is put back)."""
     pinned: list[str] = []
+    monkeypatch.setenv("DOCKER_CONTEXT", "")
+    monkeypatch.delenv("DOCKER_CONTEXT")
 
     def apply(engine):
         context = {"kazma": "kazma-engine", "desktop": "desktop-linux"}.get(engine)
         pinned.append(context or "")
+        if context:
+            os.environ["DOCKER_CONTEXT"] = context
+        else:
+            os.environ.pop("DOCKER_CONTEXT", None)
         return context
 
     monkeypatch.setattr(guard, "_apply_docker_engine", apply)
@@ -946,18 +954,37 @@ def test_a_task_that_cannot_run_and_the_guard_holds_the_engine_up(monkeypatch, a
     assert h.launches == []
 
 
+def _running_broker(monkeypatch, h) -> list[tuple]:
+    """The guard's real broker, "running" (a stand-in process): the engine
+    pair of each restart its real ``engine_changed`` makes."""
+    broker = h.g.broker
+    restarts: list[tuple] = []
+    broker.proc = SimpleNamespace(poll=lambda: None)
+    broker.docker_engine = guard._broker_engine(os.environ)
+
+    def start():
+        broker.docker_engine = guard._broker_engine(os.environ)
+        restarts.append(broker.docker_engine)
+
+    monkeypatch.setattr(broker, "stop", lambda why: None)
+    monkeypatch.setattr(broker, "_start", start)
+    return restarts
+
+
 def test_a_new_choice_restarts_the_document_broker(monkeypatch):
     _engine_contexts(monkeypatch)
     h = _Harness(monkeypatch, containers=None)
     h.write_record(["kazma-searxng"], engine="desktop")
-    restarted: list[int] = []
-    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(2)
+    restarted = _running_broker(monkeypatch, h)
     h.run(2)
     assert restarted == [], "the first choice the guard reads is no change"
     h.write_record(["kazma-searxng"], engine="kazma")
     h.run(65)
-    assert restarted == [1]
+    assert restarted == [("kazma-engine", None)]
     assert h.deps.context == "kazma-engine"
+    h.run(50 * 60)
+    assert len(restarted) == 1, "an unchanged record restarts nothing (no loop)"
 
 
 def test_a_choice_that_arrives_after_no_choice_restarts_the_broker(monkeypatch):
@@ -968,13 +995,13 @@ def test_a_choice_that_arrives_after_no_choice_restarts_the_broker(monkeypatch):
     _engine_contexts(monkeypatch)
     h = _Harness(monkeypatch, containers=None)
     h.write_record(["kazma-searxng"])
-    restarted: list[int] = []
-    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(2)
+    restarted = _running_broker(monkeypatch, h)
     h.run(130)
     assert h.events().count("deps.engine_choice") == 1, "said once, not at every check"
     h.write_record(["kazma-searxng"], engine="kazma")
     h.run(65)
-    assert restarted == [1]
+    assert restarted == [("kazma-engine", None)]
     assert h.deps.context == "kazma-engine"
 
 

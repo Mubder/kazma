@@ -285,7 +285,7 @@ def test_the_document_broker_uses_the_one_lookup_without_importing_kazma(tmp_pat
     monkeypatch.setenv("KAZMA_DOCKER_BIN", str(cli))
     # In a checkout: Kazma's one route (docker_command), here the CLI named.
     assert worker_broker._find_docker_cli() == worker_broker._ROUTE
-    assert worker_broker._docker_argv(worker_broker._ROUTE, ["ps"]) == [docker_cli.find_docker_cli(), "ps"]
+    assert worker_broker._docker_call(worker_broker._ROUTE, ["ps"]) == ([docker_cli.find_docker_cli(), "ps"], {})
     assert docker_cli.find_docker_cli() == str(cli)
     monkeypatch.setattr(worker_broker, "_DOCKER_MODULE", None)
     alone = tmp_path / "opt" / "kazma-broker" / "worker_broker.py"

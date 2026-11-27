@@ -23,7 +23,6 @@ manage the Windows CLI itself are declared with why.
 from __future__ import annotations
 
 import ast
-import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -369,14 +368,41 @@ def _loads_docker_cli_by_path(text: str) -> bool:
     return "spec_from_file_location" in text and '"docker_cli.py"' in text
 
 
-_ROUTE_ENTRIES = re.compile(r"route_entries\(\)|WSL_ROUTE_ENV|env=cmd\.env")
+#: Functions of a by-path caller that build a docker call and run nothing
+#: with it, each with why.
+_DECIDE_ONLY = {
+    ("scripts/service/kazma_guard.py", "_docker_route_argv"):
+        "returns the argv: Dependencies._run_docker runs it with _docker_route_entries(); "
+        "the tick only asks whether the route is taken",
+    ("kazma-core/kazma_core/documents/worker_broker.py", "_find_docker_cli"):
+        "asks only whether Kazma's route reaches an engine; runs nothing",
+}
+#: What carries the route's entries into a call's environment.
+_CARRIES = {"route_entries", "WSL_ROUTE_ENV", "_docker_route_entries"}
 
 
 def _drops_the_route_env(sources: dict[str, str]) -> list[str]:
-    """Product files that load docker_cli.py by path and run its calls
-    without what the route adds."""
-    return sorted(name for name, text in sources.items()
-                  if _loads_docker_cli_by_path(text) and not _ROUTE_ENTRIES.search(text))
+    """``file::function`` for each function of a file that loads
+    docker_cli.py by path, builds a docker call (``docker_command`` /
+    ``docker_argv``) and carries none of what the route adds: per call, not
+    per file (review delta 3)."""
+    found = []
+    for name, text in sources.items():
+        if not _loads_docker_cli_by_path(text):
+            continue
+        for fn in ast.walk(ast.parse(text)):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or (name, fn.name) in _DECIDE_ONLY:
+                continue
+            own = [n for n in ast.walk(fn) if n is not fn and isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            inner = {id(x) for f in own for x in ast.walk(f)}
+            nodes = [n for n in ast.walk(fn) if id(n) not in inner]
+            builds = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                         and n.func.attr in ("docker_command", "docker_argv") for n in nodes)
+            carries = any((isinstance(n, ast.Attribute) and (n.attr in _CARRIES or n.attr == "env"))
+                          or (isinstance(n, ast.Name) and n.id in _CARRIES) for n in nodes)
+            if builds and not carries:
+                found.append(f"{name}::{fn.name}")
+    return sorted(found)
 
 
 def test_every_by_path_caller_runs_the_route_with_its_entries():
@@ -389,12 +415,23 @@ def test_every_by_path_caller_runs_the_route_with_its_entries():
     assert {"scripts/service/kazma_guard.py", "scripts/prepush.py",
             "kazma-core/kazma_core/documents/worker_broker.py"} <= set(loaders), loaders
     assert _drops_the_route_env(sources) == []
+    for path, function in _DECIDE_ONLY:
+        assert f"def {function}(" in sources[path], f"{path}::{function} is declared but gone"
 
 
 def test_control_a_by_path_caller_that_drops_the_entries_is_found():
-    planted = {"scripts/x.py": 'import importlib.util\nspec = importlib.util.spec_from_file_location('
-                               '"m", root / "docker_cli.py")\nsubprocess.run(m.docker_argv(["ps"]))\n'}
-    assert _drops_the_route_env(planted) == ["scripts/x.py"]
+    """One good call and one dropped call in the same file: the file names
+    WSL_ROUTE_ENV, and the dropped call is still found."""
+    planted = {"scripts/x.py": (
+        "import importlib.util, os, subprocess\n"
+        "spec = importlib.util.spec_from_file_location('m', root / \"docker_cli.py\")\n"
+        "def good():\n"
+        "    cmd = m.docker_command(['ps'])\n"
+        "    subprocess.run(cmd.argv, env={**os.environ, **cmd.route_entries()})\n"
+        "def dropped():\n"
+        "    subprocess.run(m.docker_argv(['ps']))\n"
+        "ROUTE = m.WSL_ROUTE_ENV\n")}
+    assert _drops_the_route_env(planted) == ["scripts/x.py::dropped"]
 
 
 def _by_path_copy(name: str):
@@ -496,12 +533,31 @@ def test_a_programs_own_path_options_are_its_own(kazma_engine):
 
 
 @pytest.mark.parametrize("before", [["-eX=1"], ["--rm", "--use-api-socket"], ["-it"], ["--name=j"],
-                                    ["--some-future-flag"], ["-Z"]])
+                                    ["--some-future-flag"], ["-Z"],
+                                    # Review L-c2: grouped flags ending in a value option.
+                                    ["-itp", "80:80"], ["-ite", "FOO"], ["-dp", "8080:80"]])
 def test_no_option_before_a_mount_stops_its_translation(kazma_engine, before):
     """Review L-c (2026-11-27): an attached short value or an unlisted
-    boolean before -v made L-1's boundary stop at the mount's source."""
+    boolean before -v made L-1's boundary stop at the mount's source; L-c2:
+    so did grouped flags ending in a value option (-itp 80:80)."""
     argv = docker_cli.docker_command(["run", *before, "-v", r"G:\w:/w", "img"]).argv
     assert "/g/w:/w" in argv and r"G:\w:/w" not in argv, argv
+    mount = docker_cli.docker_command(["run", *before, "--mount", r"type=bind,src=G:\w,dst=/w", "img"]).argv
+    assert "type=bind,src=/g/w,dst=/w" in mount, mount
+
+
+@pytest.mark.parametrize("args, start", [
+    # dd51e621d's boundaries for these forms (the reference), kept.
+    (["run", "-itp", "80:80", "-v", "x", "img", "p"], 5),
+    (["run", "-ite", "FOO", "img", "p"], 3),
+    (["run", "-dp", "8080:80", "img"], 3),
+    (["exec", "-itu", "root", "c", "x"], 3),
+    (["exec", "-iuroot", "c", "x"], 2),           # the value attached
+    (["run", "-it", "img", "p"], 2),
+    (["run", "-iZ", "img"], None),                # a character the grammar does not name
+])
+def test_a_short_word_is_read_one_character_at_a_time(args, start):
+    assert docker_cli._program_start(args) == start
 
 
 def test_control_docker_grammar_still_stops_at_the_image(kazma_engine):

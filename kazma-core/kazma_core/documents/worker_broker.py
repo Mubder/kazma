@@ -1171,11 +1171,6 @@ def _docker_call(docker: str, args: list[str]) -> tuple[list[str], dict[str, str
     return [docker, *args], {}
 
 
-def _docker_argv(docker: str, args: list[str]) -> list[str]:
-    """``docker <args>`` (:func:`_docker_call`'s argv)."""
-    return _docker_call(docker, args)[0]
-
-
 def _watch_for_requested_image(broker: _Broker, server: socketserver.BaseServer,
                                outcome: dict[str, int], stop: threading.Event) -> None:
     """While an older image serves, stop (EXIT_NEWER_IMAGE) once the image

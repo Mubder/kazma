@@ -218,6 +218,24 @@ exceptions; a user cannot be asked to turn a protection off.
   `["kazma"] + args` and `cmd /c start "" kazma` (L-d; it reads no `.sh`:
   no launcher is unsigned on Linux). The page says an unsigned installer
   "may not run" with Smart App Control on, until VM test 1 measures it (L-e).
+- **The third delta review (2026-11-27)**: a short word is read as docker's
+  flag parser reads it, one character at a time (`-itp 80:80` is `-i -t -p
+  80:80`; `-eX=1` carries its value; L-c2). `Dependencies.apply_engine` asks
+  `broker.engine_changed()` on every apply after the first, and the broker
+  restarts only when its own pair differs: a change in the export alone
+  (Kazma's distro registered while the guard runs) reaches it (L-f; 50
+  applies of the same record restart nothing). An engine change waits for
+  the broker's running jobs (its `status` `active`), asked again at each
+  apply, at most `BROKER_ENGINE_CHANGE_WAIT_S` (660 s: one job's longest run
+  and a minute), said once (`broker.engine_change_waits`); past it the
+  broker restarts and `broker.engine_changed` says how many jobs it stopped.
+  The route-entries gate reads each function of a by-path caller, not the
+  file, with the functions that only decide declared (`_DECIDE_ONLY`).
+  **The launcher gate is a heuristic**: it reads strings, argv lists and
+  script lines for the shapes it knows (each planted in its controls), and
+  a start written another way (a `Start-Process` with other switches first,
+  `if errorlevel`, a launcher named inside a `powershell -Command` string)
+  is not found; review new ways to start a program against it.
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

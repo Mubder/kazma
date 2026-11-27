@@ -843,16 +843,23 @@ def _program_start(args: Sequence[str]) -> int | None:
                 i += 2
             else:
                 return None
-        elif len(arg) > 2:
-            # Short flags run together (-it) or a short option with its value
-            # attached (-eX=1, -v/x:/y): one word either way.
-            i += 1
-        elif arg in _NO_VALUE_FLAGS:
-            i += 1
-        elif arg in value_options:
-            i += 2
         else:
-            return None
+            # A short word, read as docker's flag parser reads it: one
+            # character at a time (review L-c2, 2026-11-27). A no-value flag
+            # goes on (-it); a value option takes the rest of the word as its
+            # value (-eX=1) or, at the word's end, the next word (-itp 80:80,
+            # -dp 8080:80); a character the grammar does not name translates
+            # the whole call as before.
+            step = None
+            for at, char in enumerate(arg[1:], start=1):
+                flag = f"-{char}"
+                if flag in _NO_VALUE_FLAGS:
+                    continue
+                if flag in value_options:
+                    step = 1 if at < len(arg) - 1 else 2
+                    break
+                return None
+            i += step or 1
     return None
 
 

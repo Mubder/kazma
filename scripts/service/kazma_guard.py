@@ -2507,6 +2507,10 @@ BROKER_PAGE_AFTER = 3
 BROKER_ENGINE_PAGE_AFTER_S = 600.0
 #: A stop asks the broker to end its jobs and remove their containers first.
 BROKER_STOP_GRACE_S = 45.0
+#: How long a new container engine waits for the broker's running jobs (one
+#: job's longest run, the broker's max_timeout_seconds 600, and a minute):
+#: past it the broker is restarted and the jobs left are stopped.
+BROKER_ENGINE_CHANGE_WAIT_S = 660.0
 #: worker_broker.py's exit codes the guard tells apart.
 BROKER_EXIT_NO_IMAGE, BROKER_EXIT_NO_ENGINE, BROKER_EXIT_NEWER_IMAGE = 4, 5, 6
 #: The address it was given cannot be listened on: the guard moves it.
@@ -2785,6 +2789,8 @@ class DocumentBroker:
         self._bad_ports: set[int] = set()
         self._port_moves = 0
         self.token = ""
+        # When an engine change began waiting for running jobs (monotonic).
+        self._engine_wait_since: float | None = None
         self.image_requested = ""
         self.fallback = False
         self.script_sha = ""
@@ -2929,16 +2935,38 @@ class DocumentBroker:
         """The owner chose another container engine: a running broker starts
         its job containers on the old one, so it is started again. Called
         from Dependencies' tick, whose wrapper catches and logs a failure."""
-        if self.proc is not None and self.proc.poll() is None:
-            # The pair, not the context alone: with no Windows docker context
-            # the choice reaches the broker only in the export (review M-a2,
-            # 2026-11-27: a choice that arrived or changed never restarted it).
-            if _broker_engine(os.environ) != getattr(self, "docker_engine", None):
-                self.log("info", "broker.engine_changed",
-                         context=os.environ.get("DOCKER_CONTEXT") or "current",
-                         by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "")
-                self.stop("engine changed")
-                self._start()
+        if self.proc is None or self.proc.poll() is not None:
+            self._engine_wait_since = None
+            return
+        # The pair, not the context alone: with no Windows docker context the
+        # choice reaches the broker only in the export (review M-a2,
+        # 2026-11-27: a choice that arrived or changed never restarted it).
+        if _broker_engine(os.environ) == getattr(self, "docker_engine", None):
+            self._engine_wait_since = None
+            return
+        # Jobs running on the old engine finish first: asked again at each
+        # apply (Dependencies' tick), at most BROKER_ENGINE_CHANGE_WAIT_S
+        # (review delta 3, 2026-11-27). A broker that does not answer is
+        # restarted at once.
+        now = time.monotonic()
+        status = broker_status(self.port, self.token) if self.port and self.token else None
+        active = int(status.get("active") or 0) if isinstance(status, dict) else 0
+        since = self._engine_wait_since
+        if active and (since is None or now - since < BROKER_ENGINE_CHANGE_WAIT_S):
+            if since is None:
+                self._engine_wait_since = now
+                self.log("info", "broker.engine_change_waits", active=active,
+                         wait_s=int(BROKER_ENGINE_CHANGE_WAIT_S),
+                         note="the jobs running finish on the old engine first")
+            return
+        waited = 0 if since is None else int(now - since)
+        self._engine_wait_since = None
+        self.log("info", "broker.engine_changed",
+                 context=os.environ.get("DOCKER_CONTEXT") or "current",
+                 by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "", waited_s=waited,
+                 stopped_jobs=active)
+        self.stop("engine changed")
+        self._start()
 
     def on_pause(self) -> None:
         """Maintenance: nothing of Kazma runs while the guard holds."""
@@ -3695,7 +3723,15 @@ class Dependencies:
                 self.log("warn", "deps.engine_choice_failed", error=str(exc)[:200])
             return
         applied_before = self._engine_said == "applied"
+        broker = getattr(self.guard, "broker", None)
         if applied_before and (engine, context) == (self.engine, self.context):
+            # The choice and its context are the same, but what reaches the
+            # broker may not be (Kazma's engine registered while the guard
+            # runs: only the exported choice changes). The broker compares
+            # its own pair and restarts only when it differs (review L-f,
+            # 2026-11-27).
+            if broker is not None:
+                broker.engine_changed()
             return
         # "No choice" is a choice too: a guard that started before the server
         # wrote its record and then reads "kazma" must restart the broker
@@ -3703,7 +3739,6 @@ class Dependencies:
         changed = applied_before
         self.engine, self.context, self._engine_said = engine, context, "applied"
         self.log("info", "deps.engine_choice", engine=engine, context=context or "current")
-        broker = getattr(self.guard, "broker", None)
         if changed and broker is not None:
             broker.engine_changed()
 
