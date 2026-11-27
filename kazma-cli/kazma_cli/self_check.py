@@ -280,7 +280,8 @@ def _health_from(rows: Sequence[tuple[str, str]]) -> Section:
     No rows means the health check produced nothing: not run, not a pass.
     The doctor's lines stay in the doctor's words.
     """
-    from kazma_cli.doctor import BAD, INFO as DOCTOR_INFO, WARN
+    from kazma_cli.doctor import BAD, WARN
+    from kazma_cli.doctor import INFO as DOCTOR_INFO
     from kazma_cli.doctor import OK as DOCTOR_OK
 
     items: list[Item] = []

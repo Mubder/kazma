@@ -28,7 +28,6 @@ __all__ = [
     "RULES",
     "gaps_path",
     "judge_rules",
-    "open_gap_settings",
 ]
 
 APPLIES = "attention"
@@ -285,7 +284,7 @@ def gaps_path():
     return Path(root) / "docs" / "KNOWN_GAPS.md"
 
 
-def open_gap_settings(text: str) -> set[str]:
+def _open_gap_settings(text: str) -> set[str]:
     """``KAZMA_*`` names in *text* outside a ``~~strike~~``."""
     visible = _STRIKE.sub("", text)
     return set(_KAZMA_SETTING.findall(visible))

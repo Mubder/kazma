@@ -22,7 +22,10 @@ line is a finding when it holds
 A placeholder is never a finding: words such as ``example``, ``your``,
 ``changeme`` or ``demo``, a template (``<token>``, ``${VAR}``, ``{{ x }}``),
 a ``vault://`` pointer, an environment variable's NAME, a dotted settings
-key, or a run of one repeated character.
+key, or a run of one repeated character. A known configuration name whose
+value is a method, not a secret (``password_encryption`` set to
+``scram-sha-256`` or ``md5``), is not a finding either. A password on the
+next line still is.
 """
 
 from __future__ import annotations
@@ -85,6 +88,9 @@ _BARE_ASSIGNMENT = re.compile(
     """
 )
 _PASSWORD_NAME = re.compile(r"(?i)passw(?:or)?d|passwd|pwd")
+#: Postgres names the password method here. The value is the method, not a secret.
+_CONFIG_METHOD_NAMES = frozenset({"password_encryption"})
+_CONFIG_METHOD_VALUES = frozenset({"scram-sha-256", "md5"})
 #: A line holds none of these, lowercased: no credential name can match.
 _NAME_WORDS = ("key", "secret", "token", "pass", "pwd", "credential")
 # A scheme is read at most 32 characters back from its "://": from every letter
@@ -186,10 +192,18 @@ def _line_kind(line: str, lines: list[str], index: int, *, bare_values: bool) ->
     return ""
 
 
+def _is_config_method(name: str, value: str) -> bool:
+    """True when *name* is a known setting and *value* is its method, not a secret."""
+    tail = name.lower().rsplit(".", 1)[-1]
+    return tail in _CONFIG_METHOD_NAMES and value.lower() in _CONFIG_METHOD_VALUES
+
+
 def _assigned_kind(name: str, value: str) -> str:
     """What a value assigned to a credential-named key is, or ''."""
     if "://" in value:
         return ""  # a URL: a credential only with a password (judged above)
+    if _is_config_method(name, value):
+        return ""
     password = bool(_PASSWORD_NAME.search(name))
     if _is_placeholder(value) or _names_something(value) or not _looks_random(value, password=password):
         return ""

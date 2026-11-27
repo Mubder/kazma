@@ -101,7 +101,9 @@ def check_skill(ref: str, *, project_root: Path | None = None) -> dict[str, Any]
                                source=str(skill.location))
     if state == "refused":
         errors.append(reason)
-    warnings = list(skill.warnings) + ([reason] if state == "unsigned" and reason else [])
+    warnings = list(skill.warnings) + (
+        [reason] if state in {"unsigned", "unchecked"} and reason else []
+    )
     return {"name": skill.name, "kind": "agent_skill", "scope": skill.scope,
             "location": str(skill.location.parent), "passed": not errors, "state": state,
             "errors": errors, "warnings": warnings}

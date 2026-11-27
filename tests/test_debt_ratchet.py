@@ -119,7 +119,9 @@ STRUCTURAL_BASELINE = {
     # 516 since 2026-11-23 (the S4-06 rework): sealed_zip.unseal and its
     # refusal went with the move's own whole-file seal.
     # 515 since 2026-11-25: merged with the chat move (S2-12 piece 6), which had it one lower too.
-    "module_local_public_symbols": 513,
+    # 512 since 2026-11-27: self-check's gap-page reader and the hardening
+    # payload are private. detect_install_type gained its caller.
+    "module_local_public_symbols": 512,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

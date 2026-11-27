@@ -171,6 +171,6 @@ def test_the_page_renders_the_badge_only_where_there_is_a_verdict() -> None:
     assert 'title="{{ skill.integrity_reason }}"' not in template
     from kazma_ui.i18n.catalog.common import TRANSLATIONS
 
-    for state in ("verified", "unsigned", "refused"):
+    for state in ("verified", "unsigned", "refused", "unchecked"):
         entry = TRANSLATIONS[f"skills.integrity_{state}"]
         assert entry["en"] and entry["ar"]

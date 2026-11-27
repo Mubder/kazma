@@ -11,6 +11,8 @@ import ast
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -637,7 +639,7 @@ def test_an_ok_backup_says_when_it_was_taken(tmp_path) -> None:
 
 
 def test_the_hardening_payload_says_whether_a_check_ran() -> None:
-    from kazma_ui.settings import security_hardening_payload
+    from kazma_ui.settings import _security_hardening_payload
 
     report = SimpleNamespace(
         total=1, passed=1, failed=0, critical_failures=0, timestamp="t",
@@ -645,13 +647,13 @@ def test_the_hardening_payload_says_whether_a_check_ran() -> None:
             name="deps", passed=True, ran=False, severity="high", message="partial", recommendation="retry",
         )],
     )
-    body = security_hardening_payload(report)
+    body = _security_hardening_payload(report)
     assert body["checks"][0]["ran"] is False
     assert body["checks"][0]["recommendation"] == "retry"
 
 
 def test_every_open_gap_setting_has_a_rule_or_a_reason() -> None:
-    named = gaps.open_gap_settings(GAPS_TEXT)
+    named = gaps._open_gap_settings(GAPS_TEXT)
     ruled = set().union(*(rule.settings for rule in gaps.RULES))
     exempt = set(gaps.EXEMPTIONS)
     assert not (ruled & exempt)
@@ -660,7 +662,7 @@ def test_every_open_gap_setting_has_a_rule_or_a_reason() -> None:
 
 
 def test_negative_control_a_planted_gap_setting_has_no_cover() -> None:
-    named = gaps.open_gap_settings(GAPS_TEXT + "\nKAZMA_PLANTED_GAP\n")
+    named = gaps._open_gap_settings(GAPS_TEXT + "\nKAZMA_PLANTED_GAP\n")
     covered = set().union(*(rule.settings for rule in gaps.RULES)) | set(gaps.EXEMPTIONS)
     assert named - covered == {"KAZMA_PLANTED_GAP"}
 
@@ -752,9 +754,6 @@ def test_negative_control_the_snapshot_sees_a_planted_write(tmp_path) -> None:
 
 
 def _child_collect(env: dict[str, str], cwd: Path) -> str:
-    import subprocess
-    import sys
-
     code = (
         "from kazma_cli.self_check import collect\n"
         "report = collect()\n"
@@ -811,6 +810,58 @@ def test_an_empty_or_mistyped_data_folder_is_not_created(tmp_path) -> None:
     _child_collect(env, tmp_path)
     assert target.read_text(encoding="utf-8") == "mistyped"
     assert _snapshot(tmp_path) == before
+
+
+def _cli_self_check(env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    """The real CLI entry, ``python -m kazma_cli.main self-check``."""
+    return subprocess.run(
+        [sys.executable, "-m", "kazma_cli.main", "self-check"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+
+
+def test_the_cli_entry_creates_nothing_on_an_unreadable_install(tmp_path) -> None:
+    """``load_env_files`` runs before the subcommand. It must not create a home."""
+    project = tmp_path / "project"
+    project.mkdir()
+    env = _isolated_env(tmp_path)
+    cases = ("missing", "empty", "not_a_directory")
+    for kind in cases:
+        data = tmp_path / f"data-{kind}"
+        env["KAZMA_DATA_DIR"] = str(data)
+        if kind == "empty":
+            data.mkdir()
+        elif kind == "not_a_directory":
+            data.write_text("mistyped", encoding="utf-8")
+        before = _snapshot(tmp_path)
+        done = _cli_self_check(env, project)
+        assert done.returncode == 1, (kind, done.stderr[-2000:])
+        assert "Nothing was read and nothing was created." in done.stdout
+        assert _snapshot(tmp_path) == before, kind
+        assert not (tmp_path / "home").exists()
+
+
+def test_negative_control_user_home_outside_self_check_creates_the_folder(tmp_path) -> None:
+    """The same home path is created when the command is not self-check."""
+    project = tmp_path / "project"
+    project.mkdir()
+    env = _isolated_env(tmp_path)
+    done = subprocess.run(
+        [sys.executable, "-c", "from kazma_core.paths import user_home; user_home()"],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert (tmp_path / "home").is_dir()
 
 
 def test_a_seeded_data_folder_is_left_byte_for_byte(tmp_path) -> None:

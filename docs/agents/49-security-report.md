@@ -14,7 +14,10 @@ to.
 - **Each check reads the answer the product uses.** Product files come from
   `project_files.iter_project_files` (§10 E2), with tests, docs and `.env`
   left out. Credentials are judged by `security/secret_scan.find_credentials`,
-  the one detector, which never returns a value. MCP secrets come from
+  the one detector, which never returns a value. A known configuration name
+  whose value is a method, not a secret (`password_encryption` set to
+  `scram-sha-256` or `md5`), is not a finding; a password beside that line
+  still is. MCP secrets come from
   `mcp_servers_store.servers_with_plaintext_secrets`, the list that
   `move_plaintext_secrets` empties. The scope guard is read through
   `mcp.manager.mcp_scope_guard_enabled`. Access and TLS come from

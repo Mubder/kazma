@@ -14,6 +14,7 @@ import base64
 import re
 import secrets
 import string
+from pathlib import Path
 
 import pytest
 from kazma_core.security.secret_scan import find_credentials
@@ -99,6 +100,33 @@ def test_findings_name_the_line_and_never_the_value() -> None:
     findings = find_credentials(text)
     assert [(f.line, f.kind) for f in findings] == [(3, "credential")]
     assert key not in repr(findings)
+
+
+def test_password_encryption_names_a_method_and_a_real_password_is_still_found() -> None:
+    """``password_encryption = 'scram-sha-256'`` is the method, not a password.
+
+    The line is the one in ``postgres_service.py``. A real password on the
+    next lines is still found: the control that the exemption is the method.
+    """
+    source = (
+        Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "postgres_service.py"
+    ).read_text(encoding="utf-8")
+    assert find_credentials(source) == []
+    method = next(
+        line.strip()
+        for line in source.splitlines()
+        if "password_encryption" in line and "scram-sha-256" in line
+    )
+    real = _random(16)
+    text = "\n".join([
+        method,
+        "password_encryption = 'md5'",
+        f"password_encryption = '{real}'",
+        f'DB_PASSWORD = "{real}"',
+    ])
+    findings = find_credentials(text)
+    assert [(f.line, f.kind) for f in findings] == [(3, "password"), (4, "password")]
+    assert real not in repr(findings)
 
 
 def test_the_old_keyword_patterns_flagged_the_stand_ins() -> None:

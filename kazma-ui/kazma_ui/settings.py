@@ -1900,7 +1900,7 @@ class SettingsRouterBuilder:
             root = installed_project_root() or get_project_root()
             with read_only_diagnostic("/api/security/hardening"):
                 report = asyncio.run(SecurityHardeningRunner(root).run_all_checks())
-            return security_hardening_payload(report)
+            return _security_hardening_payload(report)
 
         @router.get("/api/divisions/status")
         def api_division_status() -> dict[str, Any]:
@@ -2260,7 +2260,7 @@ class SettingsRouterBuilder:
         return self.router
 
 
-def security_hardening_payload(report: Any) -> dict[str, Any]:
+def _security_hardening_payload(report: Any) -> dict[str, Any]:
     """The body of ``GET /api/security/hardening``.
 
     ``ran`` is false when a check did not run, or ran only in part. A caller

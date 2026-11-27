@@ -29,8 +29,8 @@ def list_skill_summaries(
 ) -> list[dict[str, Any]]:
     """Return summary dicts for all enabled skills (for UI / tools).
 
-    Each carries ``integrity`` -- verified, unsigned or refused, the answer
-    activation gives -- and ``integrity_reason``.
+    Each carries ``integrity`` -- verified, unsigned, refused or unchecked, the
+    answer activation gives -- and ``integrity_reason``.
     """
     skills = discover_skills(
         project_root=project_root,
