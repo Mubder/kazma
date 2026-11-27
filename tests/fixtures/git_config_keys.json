@@ -1029,6 +1029,9 @@
   "filter.<driver>.process",
   "tar.<format>.command"
  ],
+ "older_spellings": {
+  "sendemail.<identity>.*": "sendemail.<identity>.<config>"
+ },
  "programs": [
   "alias.*",
   "alias.*.command",
@@ -1077,6 +1080,7 @@
   "remote.<name>.uploadpack",
   "remote.<name>.url",
   "remote.<name>.vcs",
+  "sendemail.<identity>.<config>",
   "sendemail.ccCmd",
   "sendemail.headerCmd",
   "sendemail.smtpServer",

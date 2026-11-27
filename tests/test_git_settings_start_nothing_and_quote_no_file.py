@@ -104,18 +104,38 @@ def test_the_data_is_gits_own_list_classified() -> None:
     assert set(classified) <= listed | set(DATA["documented_elsewhere"])
     unclassified = sorted(n for n in listed if _MAY_NAME_ONE.search(n) and n not in classified)
     assert not unclassified, unclassified
+    # An older git's spelling stands only for a name this git lists and the data classifies, so the map can never
+    # hide a setting nobody classified.
+    for older, current in DATA["older_spellings"].items():
+        assert older not in listed and current in listed and current in classified, (older, current)
+
+
+def _as_classified(listed_name: str) -> str:
+    """*listed_name* as the data spells it: an older git's spelling of the same setting
+    (``sendemail.<identity>.*`` before ``sendemail.<identity>.<config>``) becomes the current one."""
+    return DATA["older_spellings"].get(listed_name, listed_name)
 
 
 def test_the_installed_git_lists_no_setting_the_data_leaves_out() -> None:
     """A newer git's new program or file setting fails here until the data
-    classifies it from git's documentation (and the sweep plants it)."""
+    classifies it from git's documentation (and the sweep plants it). An older
+    git may spell a classified setting its own way (Debian's git 2.47 lists
+    ``sendemail.<identity>.*``): that is the same setting, not a new one."""
     listed = subprocess.run([shutil.which("git") or "git", "help", "--config"], capture_output=True,
                             text=True, check=True).stdout.splitlines()
     classified = {name for kind in _KINDS for name in DATA[kind]}
     new = sorted(n.strip() for n in listed
                  if n.strip() and not n.startswith("'") and _MAY_NAME_ONE.search(n.strip())
-                 and n.strip() not in classified)
+                 and _as_classified(n.strip()) not in classified)
     assert not new, f"git {DATA['git']} classified; this git also lists {new}"
+
+
+def test_control_an_unknown_older_spelling_is_still_new() -> None:
+    """The map renames only what it names: an unclassified name an older git
+    might list is still reported, and the identity form's old spelling is not."""
+    classified = {name for kind in _KINDS for name in DATA[kind]}
+    assert _as_classified("sendemail.<identity>.*") in classified
+    assert _as_classified("newtool.<identity>.*") not in classified
 
 
 # ── The planted repository ──────────────────────────────────────────────
@@ -183,6 +203,9 @@ def _names(documented: str) -> list[str]:
         return [f"gpg.{fmt}.program" for fmt in SIGNED]
     if documented == "credential.<url>.*":
         return ["credential.https://example.invalid.helper"]
+    if documented == "sendemail.<identity>.<config>":
+        # An identity's own copy of each sendemail program setting.
+        return [f"sendemail.kz.{key}" for key in ("ccCmd", "toCmd", "headerCmd", "smtpServer")]
     return [re.sub(r"<[^>]+>|\*", "kz", documented)]
 
 
@@ -271,7 +294,7 @@ def _repository(root: Path, tmp: Path) -> Planted:
     return planted
 
 
-def _arm(root: Path, settings: list[tuple[str, str]]) -> None:
+def _configure(root: Path, settings: list[tuple[str, str]]) -> None:
     for name, value in settings:
         _git(root, "config", "--add", name, value)
 
@@ -326,7 +349,7 @@ def test_no_setting_starts_a_program_or_quotes_a_file(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     planted = _repository(ws, tmp_path)
-    _arm(ws, [*_program_settings(planted), *_file_settings(planted, ws), *_signature_settings()])
+    _configure(ws, [*_program_settings(planted), *_file_settings(planted, ws), *_signature_settings()])
     leaks, fired = [], {}
     for command in [*card_less_commands(), *_SIGNED_READS]:
         before = planted.ran()
@@ -638,11 +661,37 @@ def test_control_as_dash_c_a_driver_named_with_equals_runs_in_every_door(
 # ── Every read is bounded, with what git starts ─────────────────────────
 
 
-def _holder() -> list[str]:
-    """A program that starts one more holding the output pipes, then waits."""
-    return [sys.executable, "-c",
-            "import subprocess, sys, time; "
-            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(12)']); time.sleep(12)"]
+def _holder(tmp: Path) -> list[str]:
+    """A program that starts one more holding the output pipes, then waits.
+    The one it starts writes its process id to ``held.pid`` first."""
+    held = tmp / "held.py"
+    held.write_text("import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(12)\n",
+                    encoding="utf-8")
+    holder = tmp / "holder.py"
+    holder.write_text("import subprocess, sys, time\nsubprocess.Popen([sys.executable, *sys.argv[1:]])\n"
+                      "time.sleep(12)\n", encoding="utf-8")
+    return [sys.executable, str(holder), str(held), str(tmp / "held.pid")]
+
+
+def _held_process(tmp: Path, wait_s: float) -> Any:
+    """The program the holder started, while it runs (``None`` once it ended
+    or if it never started within *wait_s*)."""
+    import time
+
+    import psutil
+
+    pid_file = tmp / "held.pid"
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline and not (pid_file.exists() and pid_file.read_text().strip()):
+        time.sleep(0.05)
+    text = pid_file.read_text().strip() if pid_file.exists() else ""
+    if not text:
+        return None
+    try:
+        process = psutil.Process(int(text))
+        return None if process.status() == psutil.STATUS_ZOMBIE else process
+    except psutil.Error:
+        return None
 
 
 def test_a_read_that_never_ends_is_cut_with_what_it_started(tmp_path: Path) -> None:
@@ -653,26 +702,44 @@ def test_a_read_that_never_ends_is_cut_with_what_it_started(tmp_path: Path) -> N
 
     started = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired):
-        run_git(_holder(), cwd=str(tmp_path), env=dict(os.environ), timeout=2)
+        run_git(_holder(tmp_path), cwd=str(tmp_path), env=dict(os.environ), timeout=2)
     assert time.monotonic() - started < 8
+    deadline = time.monotonic() + 5
+    while _held_process(tmp_path, 0) is not None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert _held_process(tmp_path, 0) is None, "the program the read started outlived the read"
 
 
-def test_control_a_bare_timeout_waits_for_what_the_read_started(tmp_path: Path) -> None:
+def test_control_a_bare_timeout_leaves_what_the_read_started(tmp_path: Path) -> None:
+    """Without the bounded runner a timed-out read is not over. On every
+    platform the program it started outlives the timeout; on Windows
+    ``subprocess.run`` also waits for the pipes that program still holds
+    (on POSIX it kills the child and returns, leaving the program running)."""
     import threading
 
     done = threading.Event()
 
     def bare() -> None:
         try:
-            subprocess.run(_holder(), cwd=str(tmp_path), capture_output=True, timeout=2, check=False)
+            subprocess.run(_holder(tmp_path), cwd=str(tmp_path), capture_output=True, timeout=2, check=False)
         except subprocess.TimeoutExpired:
             pass
         done.set()
 
     worker = threading.Thread(target=bare, daemon=True)
     worker.start()
-    assert not done.wait(6), "subprocess.run returned on its timeout: this control proves nothing"
-    done.wait(20)
+    held = _held_process(tmp_path, 10)
+    try:
+        assert held is not None, "the holder never started its program: this control proves nothing"
+        if sys.platform == "win32":
+            assert not done.wait(6), "subprocess.run returned on its timeout: this control proves nothing"
+        else:
+            assert done.wait(10), "subprocess.run on POSIX returns on its timeout"
+        assert held.is_running(), "a bare timeout ended the program the read started: this control proves nothing"
+    finally:
+        if held is not None:
+            held.kill()
+        done.wait(20)
 
 
 def test_every_door_runs_git_through_the_bounded_runner() -> None:
