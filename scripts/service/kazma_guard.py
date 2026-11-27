@@ -95,7 +95,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -2527,6 +2527,17 @@ _BROKER_ENV_KEEP = (
     "LANG", "LC_ALL", "TZ",
 )
 _BROKER_REQUEST_MAGIC = b"KZDB-REQ/1\n"
+#: ``docker_cli.ENGINE_BY_CHOICE_ENV``: the engine choice exported for a
+#: process that never applies it (the broker), when no Windows docker context
+#: carries it.
+_ENGINE_BY_CHOICE_ENV = "KAZMA_DOCKER_ENGINE_BY_CHOICE"
+
+
+def _broker_engine(env: Mapping[str, str]) -> tuple[str | None, str | None]:
+    """What decides the broker's engine: the pinned context and the exported
+    choice. A broker whose pair differs from the guard's is started again
+    (``DocumentBroker.engine_changed``)."""
+    return env.get("DOCKER_CONTEXT") or None, env.get(_ENGINE_BY_CHOICE_ENV) or None
 
 
 def _broker_mode() -> str:
@@ -2919,9 +2930,13 @@ class DocumentBroker:
         its job containers on the old one, so it is started again. Called
         from Dependencies' tick, whose wrapper catches and logs a failure."""
         if self.proc is not None and self.proc.poll() is None:
-            if os.environ.get("DOCKER_CONTEXT") != getattr(self, "docker_context", None):
+            # The pair, not the context alone: with no Windows docker context
+            # the choice reaches the broker only in the export (review M-a2,
+            # 2026-11-27: a choice that arrived or changed never restarted it).
+            if _broker_engine(os.environ) != getattr(self, "docker_engine", None):
                 self.log("info", "broker.engine_changed",
-                         context=os.environ.get("DOCKER_CONTEXT") or "current")
+                         context=os.environ.get("DOCKER_CONTEXT") or "current",
+                         by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "")
                 self.stop("engine changed")
                 self._start()
 
@@ -3081,6 +3096,7 @@ class DocumentBroker:
         # The engine the guard pinned (Dependencies.apply_engine): the broker
         # starts its job containers there.
         self.docker_context = env.get("DOCKER_CONTEXT")
+        self.docker_engine = _broker_engine(env)
         kwargs: dict = {"cwd": str(self.guard.cwd), "env": env, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -3398,12 +3414,16 @@ def _valid_container_name(name: object) -> bool:
             and set(name) <= _CONTAINER_NAME_CHARS)
 
 
-def _run_command(cmd: list[str], timeout: float) -> tuple[int, str, str] | None:
-    """(exit code, stdout, stderr) of *cmd*, or None when it could not run."""
+def _run_command(cmd: list[str], timeout: float,
+                 env_extra: Mapping[str, str] | None = None) -> tuple[int, str, str] | None:
+    """(exit code, stdout, stderr) of *cmd*, or None when it could not run.
+    *env_extra* is added to the guard's environment for this call only (what
+    Kazma's docker route adds, :func:`_docker_route_entries`)."""
+    env = {**os.environ, **env_extra} if env_extra else None
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, creationflags=_NO_WINDOW,
+            timeout=timeout, check=False, creationflags=_NO_WINDOW, env=env,
         )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -3467,6 +3487,17 @@ def _docker_route_argv(args: list[str]) -> list[str] | None:
     except (OSError, ImportError, SyntaxError, AttributeError):
         return None
     return cmd.argv if cmd is not None and cmd.route == "wsl" else None
+
+
+def _docker_route_entries() -> dict[str, str]:
+    """What a call on Kazma's wsl.exe route runs with on top of the guard's
+    environment (``docker_cli.WSL_ROUTE_ENV``: wsl.exe's own messages in
+    UTF-8). The guard's own environment is not changed: the server it starts
+    inherits it (review L-b, 2026-11-27)."""
+    try:
+        return dict(_docker_cli_module().WSL_ROUTE_ENV)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return {}
 
 
 def _refused_docker_clis() -> list[str]:
@@ -3842,16 +3873,19 @@ class Dependencies:
             self._engine_is_down(now)
         self._write()
 
-    def _docker(self, *args: str) -> list[str]:
+    def _run_docker(self, timeout: float, *args: str) -> tuple[int, str, str] | None:
         """``docker <args>``: through wsl.exe for Kazma's own engine (the
-        distro's docker, outside Windows' file check), else the CLI chosen."""
+        distro's docker, outside Windows' file check, with the route's
+        entries), else the CLI chosen."""
         routed = _docker_route_argv(list(args))
-        return routed if routed is not None else [self.cli or "docker", *args]
+        if routed is not None:
+            return _run_command(routed, timeout, env_extra=_docker_route_entries())
+        return _run_command([self.cli or "docker", *args], timeout)
 
     def _engine_answers(self) -> bool | None:
         """True when the engine answers, False when it does not, None when
         the docker CLI itself could not be started."""
-        got = _run_command(self._docker("version", "--format", "{{.Server.Version}}"), 15)
+        got = self._run_docker(15, "version", "--format", "{{.Server.Version}}")
         if got is None:
             return None
         return bool(got[0] == 0 and got[1].strip())
@@ -4084,8 +4118,7 @@ class Dependencies:
 
     def _container_states(self) -> dict[str, str]:
         """{name: status} for the recorded containers Docker knows."""
-        got = _run_command(self._docker("inspect", "--format",
-                                        "{{.Name}}|{{.State.Status}}", *self.containers), 15)
+        got = self._run_docker(15, "inspect", "--format", "{{.Name}}|{{.State.Status}}", *self.containers)
         states: dict[str, str] = {}
         if got is None:
             return states
@@ -4128,7 +4161,7 @@ class Dependencies:
             self._start_container(name, now)
 
     def _start_container(self, name: str, now: float) -> None:
-        got = _run_command(self._docker("start", name), 60)
+        got = self._run_docker(60, "start", name)
         if got is not None and got[0] == 0:
             self.log("warn", "deps.container_started", container=name)
             self._exited_seen.pop(name, None)

@@ -537,7 +537,12 @@ def docker_route(context: str):
             cmd = _docker_cli_module().docker_command(args, context=context)
         except (OSError, ImportError, SyntaxError, AttributeError):
             cmd = None
-        return cmd.argv if cmd is not None else [docker_exe(), "--context", context, *args]
+        if cmd is None:
+            return [docker_exe(), "--context", context, *args]
+        # Every docker call here inherits this process's environment: what
+        # the route adds (WSL_UTF8) goes there (review L-b, 2026-11-27).
+        os.environ.update(cmd.route_entries())
+        return cmd.argv
 
     return argv
 

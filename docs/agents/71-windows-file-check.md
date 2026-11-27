@@ -199,6 +199,25 @@ exceptions; a user cannot be asked to turn a protection off.
   installer answer depends on Smart App Control (L-6); the launcher gate
   finds `args=`, shell strings, `cmd /c`, `.cmd` `call`/`start` and `.ps1`
   blocks (L-8).
+- **The second delta review (2026-11-27)**: the broker is started again when
+  the pair (`DOCKER_CONTEXT`, `KAZMA_DOCKER_ENGINE_BY_CHOICE`) changes, not
+  the context alone: with no Windows context a choice that arrived or
+  changed never reached a running broker (M-a2, `kazma_guard._broker_engine`).
+  `docker_cli._cli_forced` is the one answer to "the Windows docker program
+  is forced" (`KAZMA_DOCKER_ROUTE=cli`, `KAZMA_DOCKER_BIN`, `DOCKER_HOST`):
+  the route, `engine_in_force` and the engine line read it, and the line
+  says the CLI's current context and why (L-a). What the wsl.exe route adds
+  (`WSL_ROUTE_ENV`, `DockerCommand.route_entries()`) reaches every caller
+  that loads `docker_cli.py` by path: the broker's two calls, the guard's
+  routed calls (for that call only: the server inherits the guard's
+  environment), prepush; a gate finds a by-path caller that drops it (L-b).
+  `_program_start` reads docker's own option grammar for run, create and
+  exec; an attached short value is one word, and an option the grammar does
+  not name translates the whole call as before (L-c). The launcher gate
+  also finds `Start-Process [-FilePath]`, `.cmd` `@` and `if exist X`,
+  `["kazma"] + args` and `cmd /c start "" kazma` (L-d; it reads no `.sh`:
+  no launcher is unsigned on Linux). The page says an unsigned installer
+  "may not run" with Smart App Control on, until VM test 1 measures it (L-e).
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

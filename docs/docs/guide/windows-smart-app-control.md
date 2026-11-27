@@ -110,9 +110,10 @@ control):
 
 - **Off, or learning (evaluation)**: choose **More info**, then **Run
   anyway**.
-- **On**: Windows doesn't run an installer that isn't signed, and it offers
-  no way to run one anyway. Keep Smart App Control as it is; the signed
-  installer is on the way.
+- **On**: Windows may not run an installer that isn't signed until it is
+  signed or Windows already knows it, and Smart App Control has no switch
+  for one app. Keep Smart App Control as it is; the signed installer is on
+  the way.
 
 **My company manages the PC with App Control for Business.** Kazma reads it the
 same way and behaves the same way. Your IT team can see each part Kazma uses

@@ -23,8 +23,10 @@ manage the Windows CLI itself are declared with why.
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from kazma_core import docker_cli
@@ -287,6 +289,7 @@ def fresh_process(tmp_path, monkeypatch):
     monkeypatch.setattr(docker_cli, "_choice_applied", False)
     monkeypatch.setattr(docker_cli, "_engine_choice", "")
     monkeypatch.setattr(docker_cli, "_applied", None)
+    monkeypatch.setattr(docker_cli, "_applied_said", "the docker CLI's current context")
     monkeypatch.setattr(docker_cli, "_on_windows", lambda: True)
     monkeypatch.setattr(docker_cli, "_wsl_exe", lambda: WSL)
     monkeypatch.setattr(docker_cli, "wsl_distro_location", lambda name: (Path(r"C:\engine"), "ext4.vhdx"))
@@ -313,6 +316,85 @@ def test_kazmas_engine_needs_no_windows_context(fresh_process):
     cmd = docker_cli.docker_command(["run", "-v", r"G:\w:/w", "alpine"])
     assert cmd.route == "wsl" and docker_cli.engine_in_force() == "kazma"
     assert docker_cli.engine_host_path(r"G:\w", windows=True) == "/g/w"
+
+
+@pytest.mark.parametrize("forced, value", [("KAZMA_DOCKER_ROUTE", "cli"),
+                                           ("KAZMA_DOCKER_BIN", r"C:\tools\docker.exe")])
+def test_a_forced_windows_cli_is_said_and_named_as_what_is_used(fresh_process, caplog, forced, value):
+    """Review L-a (2026-11-27): Kazma's engine chosen, no kazma-engine
+    context, the Windows CLI forced: the line said wsl.exe and
+    engine_in_force said Kazma's while the call took the CLI's current
+    context."""
+    import logging
+
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: False)
+    fresh_process.setenv(forced, value)
+    caplog.set_level(logging.INFO, logger="kazma_core.docker_cli")
+    assert docker_cli.docker_command(["version"]).route == "cli"
+    assert docker_cli.engine_in_force() != "kazma"
+    assert docker_cli.ENGINE_BY_CHOICE_ENV not in docker_cli.os.environ
+    said = " ".join(r.getMessage() for r in caplog.records if "container engine" in r.getMessage())
+    assert "wsl.exe" not in said and "current context" in said and forced in said, said
+
+
+def test_control_without_the_forced_cli_the_wsl_route_and_kazmas_engine(fresh_process, caplog):
+    import logging
+
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: False)
+    caplog.set_level(logging.INFO, logger="kazma_core.docker_cli")
+    assert docker_cli.docker_command(["version"]).route == "wsl"
+    assert docker_cli.engine_in_force() == "kazma"
+    assert any("wsl.exe" in r.getMessage() for r in caplog.records)
+
+
+def test_the_brokers_calls_keep_what_the_route_adds(monkeypatch):
+    """Review L-b (2026-11-27): the broker ran Kazma's route with its own
+    environment and lost WSL_UTF8 (wsl.exe's errors in its log as UTF-16)."""
+    from kazma_core.documents import worker_broker
+
+    monkeypatch.setenv("KAZMA_VAULT_KEY", "not-for-docker")
+    monkeypatch.setattr(worker_broker, "_docker_module", lambda: SimpleNamespace(
+        docker_command=lambda args: docker_cli.DockerCommand(
+            [*PREFIX, *args], {"WSL_UTF8": "1", "KAZMA_VAULT_KEY": "x", "PATH": "p"}, "wsl")))
+    argv, route = worker_broker._docker_call(worker_broker._ROUTE, ["ps"])
+    assert argv == [*PREFIX, "ps"] and route == {"WSL_UTF8": "1"}
+    broker = worker_broker._Broker.__new__(worker_broker._Broker)
+    env = broker._env(route)
+    assert env["WSL_UTF8"] == "1" and "KAZMA_VAULT_KEY" not in env
+    # The control: the CLI route adds nothing.
+    assert docker_cli.DockerCommand(["docker", "ps"], {"WSL_UTF8": "1"}, "cli").route_entries() == {}
+
+
+def _loads_docker_cli_by_path(text: str) -> bool:
+    return "spec_from_file_location" in text and '"docker_cli.py"' in text
+
+
+_ROUTE_ENTRIES = re.compile(r"route_entries\(\)|WSL_ROUTE_ENV|env=cmd\.env")
+
+
+def _drops_the_route_env(sources: dict[str, str]) -> list[str]:
+    """Product files that load docker_cli.py by path and run its calls
+    without what the route adds."""
+    return sorted(name for name, text in sources.items()
+                  if _loads_docker_cli_by_path(text) and not _ROUTE_ENTRIES.search(text))
+
+
+def test_every_by_path_caller_runs_the_route_with_its_entries():
+    files = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard",
+                            "kazma-*/*.py", "kazma-*/**/*.py", "scripts/*.py", "scripts/**/*.py"],
+                           cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
+    sources = {f: (REPO / f).read_text(encoding="utf-8", errors="replace") for f in files
+               if "/tests/" not in f and (REPO / f).is_file()}
+    loaders = [name for name, text in sources.items() if _loads_docker_cli_by_path(text)]
+    assert {"scripts/service/kazma_guard.py", "scripts/prepush.py",
+            "kazma-core/kazma_core/documents/worker_broker.py"} <= set(loaders), loaders
+    assert _drops_the_route_env(sources) == []
+
+
+def test_control_a_by_path_caller_that_drops_the_entries_is_found():
+    planted = {"scripts/x.py": 'import importlib.util\nspec = importlib.util.spec_from_file_location('
+                               '"m", root / "docker_cli.py")\nsubprocess.run(m.docker_argv(["ps"]))\n'}
+    assert _drops_the_route_env(planted) == ["scripts/x.py"]
 
 
 def _by_path_copy(name: str):
@@ -411,6 +493,22 @@ def test_a_programs_own_path_options_are_its_own(kazma_engine):
     # The control: docker's own options before the image are still translated.
     assert docker_cli.docker_command(["create", "--mount", r"type=bind,src=G:\w,dst=/w", "img"]).argv[-2] \
         == "type=bind,src=/g/w,dst=/w"
+
+
+@pytest.mark.parametrize("before", [["-eX=1"], ["--rm", "--use-api-socket"], ["-it"], ["--name=j"],
+                                    ["--some-future-flag"], ["-Z"]])
+def test_no_option_before_a_mount_stops_its_translation(kazma_engine, before):
+    """Review L-c (2026-11-27): an attached short value or an unlisted
+    boolean before -v made L-1's boundary stop at the mount's source."""
+    argv = docker_cli.docker_command(["run", *before, "-v", r"G:\w:/w", "img"]).argv
+    assert "/g/w:/w" in argv and r"G:\w:/w" not in argv, argv
+
+
+def test_control_docker_grammar_still_stops_at_the_image(kazma_engine):
+    argv = docker_cli.docker_command(["run", "-eX=1", "--name", "j", "img", "tool", "-v", r"C:\x"]).argv
+    assert argv[-2:] == ["-v", r"C:\x"], "the program's own -v is the caller's"
+    # An option docker's grammar does not name: the whole call as before.
+    assert docker_cli._program_start(["run", "--some-future-flag", "img"]) is None
 
 
 def test_only_dockers_own_paths_are_translated(kazma_engine):

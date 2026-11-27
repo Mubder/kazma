@@ -302,6 +302,47 @@ def test_changed_code_restarts_the_broker_at_the_next_spawn(monkeypatch, tmp_pat
     assert "broker.code_changed" in h.events()
 
 
+def _engine_env(monkeypatch, *, context: str | None, by_choice: str | None) -> None:
+    for name, value in (("DOCKER_CONTEXT", context), (guard._ENGINE_BY_CHOICE_ENV, by_choice)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize("before, after", [
+    pytest.param(None, "kazma", id="none-to-kazma"),        # a fresh install's first broker
+    pytest.param("kazma", None, id="kazma-to-desktop"),     # no desktop context here: the export is cleared
+    pytest.param("kazma", None, id="kazma-to-none"),
+])
+def test_a_choice_carried_only_by_the_export_restarts_the_broker(monkeypatch, tmp_path, before, after):
+    """Review M-a2 (2026-11-27): with no Windows docker context the choice
+    reaches the broker only in KAZMA_DOCKER_ENGINE_BY_CHOICE; comparing the
+    context alone never restarted it."""
+    _engine_env(monkeypatch, context=None, by_choice=before)
+    h = _Harness(monkeypatch, tmp_path)
+    h.b.before_spawn()
+    h.run_for(3)
+    assert len(h.procs) == 1
+    _engine_env(monkeypatch, context=None, by_choice=after)
+    h.b.engine_changed()
+    assert len(h.procs) == 2, "the broker was not started again on the new engine"
+    assert h.procs[1].kwargs["env"].get(guard._ENGINE_BY_CHOICE_ENV) == after
+    assert "broker.engine_changed" in h.events()
+
+
+def test_control_a_context_carries_the_choice_and_no_change_is_no_restart(monkeypatch, tmp_path):
+    _engine_env(monkeypatch, context=None, by_choice=None)
+    h = _Harness(monkeypatch, tmp_path)
+    h.b.before_spawn()
+    h.run_for(3)
+    _engine_env(monkeypatch, context="kazma-engine", by_choice=None)
+    h.b.engine_changed()
+    assert len(h.procs) == 2  # as before M-a2: the context changed
+    h.b.engine_changed()
+    assert len(h.procs) == 2, "the same engine is no change"
+
+
 def _env_names_read(source: str) -> set[str]:
     """The environment names a module reads: ``os.environ.get(X)``,
     ``os.getenv(X)``, ``os.environ[X]``, X a literal or a module constant."""

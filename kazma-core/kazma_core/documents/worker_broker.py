@@ -358,14 +358,18 @@ class _Broker:
         self._token = settings.token.encode("utf-8")
 
     # ── docker CLI ──────────────────────────────────────────────────────
-    def _env(self) -> dict[str, str]:
+    def _env(self, route: dict[str, str] | None = None) -> dict[str, str]:
+        """The docker CLI's environment: the names it needs, and what Kazma's
+        route adds to a call (``WSL_UTF8`` on the wsl.exe route, review L-b)."""
         upper = {key.upper(): key for key in os.environ}
-        return {upper[name]: os.environ[upper[name]] for name in _ALLOWED_ENV if name in upper}
+        env = {upper[name]: os.environ[upper[name]] for name in _ALLOWED_ENV if name in upper}
+        env.update(route or {})
+        return env
 
     def _docker(self, *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
         """Run the docker CLI; a slow engine is a failed call, never an exception."""
 
-        argv = _docker_argv(self.settings.docker, list(args))
+        argv, route = _docker_call(self.settings.docker, list(args))
         try:
             return subprocess.run(  # nosec B603 - fixed argv, docker CLI from operator config, no shell
                 argv,
@@ -374,7 +378,7 @@ class _Broker:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
-                env=self._env(),
+                env=self._env(route),
                 check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
@@ -531,14 +535,15 @@ class _Broker:
         if self.image_id is None:
             raise RuntimeError("worker image is not resolved")
         timeout = min(float(timeout_seconds), float(self.limits.max_timeout_seconds))
-        argv = _docker_argv(self.settings.docker, list(_container_argv(self.settings, self.image_id, run_id, worker)))
+        argv, route = _docker_call(self.settings.docker,
+                                   list(_container_argv(self.settings, self.image_id, run_id, worker)))
         started = time.monotonic()
         process = subprocess.Popen(  # nosec B603 - fixed policy argv, no shell
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=self._env(),
+            env=self._env(route),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         name = container_name(self.settings.name, run_id)
@@ -1153,16 +1158,22 @@ def _find_docker_cli() -> str | None:
     return named if named and Path(named).is_file() else None
 
 
-def _docker_argv(docker: str, args: list[str]) -> list[str]:
-    """``docker <args>``: by Kazma's route for :data:`_ROUTE`, else by the
-    CLI named."""
+def _docker_call(docker: str, args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """``docker <args>`` and what its route adds to the environment: by
+    Kazma's route for :data:`_ROUTE` (``DockerCommand.route_entries``, review
+    L-b), else by the CLI named with nothing added."""
     if docker == _ROUTE:
         module = _docker_module()
-        argv = module.docker_argv(args) if module is not None else None
-        if argv is not None:
-            return argv
-        return ["docker", *args]
-    return [docker, *args]
+        cmd = module.docker_command(args) if module is not None else None
+        if cmd is not None:
+            return cmd.argv, cmd.route_entries()
+        return ["docker", *args], {}
+    return [docker, *args], {}
+
+
+def _docker_argv(docker: str, args: list[str]) -> list[str]:
+    """``docker <args>`` (:func:`_docker_call`'s argv)."""
+    return _docker_call(docker, args)[0]
 
 
 def _watch_for_requested_image(broker: _Broker, server: socketserver.BaseServer,

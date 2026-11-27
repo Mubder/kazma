@@ -511,7 +511,9 @@ def _names_a_launcher(words: list[str | None], bare: set[str]) -> bool:
     if first in bare:
         return True
     if first in {s.removesuffix(".exe") for s in _SHELLS}:
-        rest = [w for w in words[1:] if w is not None and not w.startswith(("/", "-"))]
+        # Past the shell's switches, `start`, `call` and start's empty title.
+        rest = [w for w in words[1:] if w is not None and w.strip("'\" ")
+                and not w.startswith(("/", "-")) and w.lower() not in ("start", "call")]
         return bool(rest) and rest[0].split()[0].strip("'\"").lower().removesuffix(".exe") in bare
     return False
 
@@ -529,6 +531,8 @@ def _bare_launcher(node: ast.AST, bare: set[str]) -> bool:
     if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")) not in _STARTS:
         return False
     first = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "args"), None)
+    while isinstance(first, ast.BinOp):  # ["kazma"] + args: the list's head
+        first = first.left
     if first is None:
         return False
     if isinstance(first, (ast.List, ast.Tuple)):
@@ -543,9 +547,11 @@ def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
     a program runs, an argv that starts with a launcher's bare name, or a
     script line that is not a comment and runs one."""
     bare = {exe.removesuffix(".exe") for exe in names}
-    # At a line's start, after `&`, `call`, `start ""`, or inside a block or
-    # after a separator (`{ kazma serve }`, `x; kazma`): never inside quotes.
-    runs = re.compile(r"""(?:^|[{;|(])\s*(?:&\s*)?(?:(?:call|start)\s+(?:""\s+)?)?['"]?(?:"""
+    # At a line's start, after `&`, `@`, `call`, `start ""`, `if [not] exist
+    # X`, `Start-Process [-FilePath]`, or inside a block or after a separator
+    # (`{ kazma serve }`, `x; kazma`): never inside quotes (review L-d).
+    runs = re.compile(r"""(?:^|[{;|(])\s*(?:[&@]\s*)?(?:(?i:if)\s+(?:(?i:not)\s+)?(?i:exist)\s+\S+\s+)?"""
+                      r"""(?:(?:(?:call|start)\s+(?:""\s+)?)|(?i:start-process)\s+(?:-(?i:filepath)\s+)?)?['"]?(?:"""
                       + "|".join(sorted(map(re.escape, bare), key=len, reverse=True))
                       + r""")(?:\.exe)?['"]?(?:\s|$|})""")
     hits = []
@@ -609,6 +615,24 @@ def test_control_every_way_to_start_a_launcher_is_found():
                      "scripts/v.ps1:1", "scripts/v.ps1:2"], found
 
 
+def test_control_the_windows_forms_the_second_review_planted_are_found():
+    """Review L-d (2026-11-27): six more Windows ways to start a launcher.
+    (`exec kazma` and `nohup kazma-web &` in a .sh are Linux's: no launcher
+    is unsigned there, and the gate does not read .sh files.)"""
+    names = _launcher_names()
+    planted = {
+        "scripts/w2.ps1": "Start-Process kazma -ArgumentList serve\nStart-Process -FilePath \"kazma-web\"\n"
+                          "Write-Host 'Start-Process kazma serve'\n",
+        "scripts/w2.cmd": "@kazma serve\nif exist .venv kazma serve\nif not exist x echo kazma serve\n",
+        "kazma-cli/kazma_cli/w2.py": ("import subprocess\nsubprocess.run(['kazma'] + args)\n"
+                                      "subprocess.run(['cmd', '/c', 'start', '', 'kazma'])\n"
+                                      "subprocess.run(['cmd', '/c', 'start', '', 'notepad'])\n"),
+    }
+    found = _launcher_uses(planted, names)
+    assert found == ["kazma-cli/kazma_cli/w2.py:2", "kazma-cli/kazma_cli/w2.py:3",
+                     "scripts/w2.cmd:1", "scripts/w2.cmd:2", "scripts/w2.ps1:1", "scripts/w2.ps1:2"], found
+
+
 def test_control_a_launcher_started_by_its_bare_name_is_found():
     # Review L10 (2026-11-26): Windows runs kazma.exe for "kazma" too.
     names = _launcher_names()
@@ -642,7 +666,7 @@ def test_a_refused_engine_cli_is_no_wait_when_the_engine_is_reached_through_wsl(
     state = windows_trust._docker_cli()
     assert state.status == windows_trust.NOT_NEEDED
     report = _report(state)
-    assert windows_trust.report_at_boot is not None and not report.waiting()
+    assert not report.waiting(), "no feature waits: no windows.feature_waits alert"
     (status, english), = [line for line in windows_trust.lines(report) if line[0] != "state"]
     (_, arabic), = [line for line in windows_trust.lines(report, "ar") if line[0] != "state"]
     assert english.endswith("Everything works.") and "wsl.exe" in english

@@ -347,7 +347,10 @@ MOUNT_BUILDERS = {("kazma-core/kazma_core/tools/code_exec.py", "_workspace_mount
                   ("kazma-core/kazma_core/docker_cli.py", "_cross"),
                   # Builds no mount either: names docker's own path options
                   # (-v/--volume/--mount ...) whose values _cross translates.
-                  ("kazma-core/kazma_core/docker_cli.py", "_cross_args")}
+                  ("kazma-core/kazma_core/docker_cli.py", "_cross_args"),
+                  # Builds no mount: reads docker's option grammar (which
+                  # options take a value) to find where a program begins.
+                  ("kazma-core/kazma_core/docker_cli.py", "_program_start")}
 _MOUNT_MARKERS = ("type=bind", "--volume")
 
 

@@ -1088,10 +1088,12 @@ def test_kazmas_engine_through_wsl_needs_no_windows_cli(monkeypatch):
     h.write_record(["kazma-searxng"], engine="kazma")
     fake = h.docker
     seen: list[list[str]] = []
+    extras: list[dict | None] = []
 
-    def run(cmd, timeout):
+    def run(cmd, timeout, env_extra=None):
         cmd = [str(c) for c in cmd]
         seen.append(cmd)
+        extras.append(env_extra)
         if cmd[:7] == _WSL_PREFIX:
             return fake(["docker-in-distro", *cmd[7:]], timeout)
         return fake(cmd, timeout)
@@ -1102,6 +1104,25 @@ def test_kazmas_engine_through_wsl_needs_no_windows_cli(monkeypatch):
     h.run(30)
     assert h.deps.state == "ok"
     assert seen and all(c[:7] == _WSL_PREFIX for c in seen)
+    # Each routed call runs with what the route adds (review L-b): wsl.exe's
+    # own messages in UTF-8.
+    assert extras and all(extra == {"WSL_UTF8": "1"} for extra in extras), extras
+
+
+def test_control_the_windows_cli_runs_with_nothing_added(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    extras: list[dict | None] = []
+    fake = h.docker
+
+    def run(cmd, timeout, env_extra=None):
+        extras.append(env_extra)
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    h.run(30)
+    assert extras and all(extra is None for extra in extras)
 
 
 def test_a_wsl_call_that_times_out_is_never_read_as_a_refused_cli(monkeypatch):
@@ -1115,7 +1136,7 @@ def test_a_wsl_call_that_times_out_is_never_read_as_a_refused_cli(monkeypatch):
     h.deps.cli = "docker-fake"
     fake = h.docker
 
-    def run(cmd, timeout):
+    def run(cmd, timeout, env_extra=None):
         cmd = [str(c) for c in cmd]
         if cmd[:7] == _WSL_PREFIX:
             fake.calls.append(cmd)

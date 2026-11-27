@@ -570,14 +570,31 @@ def _choice_in_force() -> str:
     return normalize_engine(os.environ.get(ENGINE_BY_CHOICE_ENV))
 
 
+def _cli_forced() -> str | None:
+    """Why every docker call takes the Windows docker program whatever the
+    engine (``KAZMA_DOCKER_ROUTE=cli``, an explicit ``KAZMA_DOCKER_BIN``, the
+    operator's ``DOCKER_HOST``), or None when the wsl.exe route may be taken.
+    The one answer :func:`docker_command`, :func:`_kazma_by_choice` (and so
+    :func:`engine_in_force`) and the engine line read (review L-a,
+    2026-11-27)."""
+    if (os.environ.get(ROUTE_ENV) or "").strip().lower() == "cli":
+        return f"{ROUTE_ENV}=cli"
+    if (os.environ.get(_ENV) or "").strip():
+        return _ENV
+    if os.environ.get("DOCKER_HOST"):
+        return "DOCKER_HOST"
+    return None
+
+
 def _kazma_by_choice() -> bool:
     """Kazma's own engine is the stored choice and its distro is registered,
     with no engine of the operator's own in the way: it is reached through
     wsl.exe whether or not the Windows CLI's ``kazma-engine`` context exists
     (only the Windows docker.exe creates that, and Windows may refuse it:
     review M4, 2026-11-26). A process that has not applied the choice takes
-    its parent's (:data:`ENGINE_BY_CHOICE_ENV`, review M-a)."""
-    if _choice_in_force() != "kazma" or not _on_windows() or os.environ.get("DOCKER_HOST"):
+    its parent's (:data:`ENGINE_BY_CHOICE_ENV`, review M-a). Never while the
+    Windows docker program is forced (:func:`_cli_forced`)."""
+    if _choice_in_force() != "kazma" or not _on_windows() or _cli_forced() is not None:
         return False
     pinned = (os.environ.get("DOCKER_CONTEXT") or "").strip()
     if pinned and pinned != KAZMA_CONTEXT:
@@ -587,8 +604,9 @@ def _kazma_by_choice() -> bool:
 
 #: The DOCKER_CONTEXT this module set; one the operator set is never changed.
 _applied: str | None = None
-#: Whether the last applied choice is Kazma's engine reached through wsl.exe.
-_applied_by_wsl = False
+#: What the engine line last said (said again only when it changes; the
+#: CLI's own context, the start, is not said).
+_applied_said = "the docker CLI's current context"
 _apply_lock = threading.Lock()
 #: Whether this process has applied the stored choice (see find_docker_cli).
 _choice_applied = False
@@ -599,7 +617,7 @@ def apply_engine_choice(engine: object) -> str | None:
     docker call it starts (children inherit it, the document broker's
     included). Returns the context in force (None: the CLI's current one).
     The operator's own ``DOCKER_CONTEXT`` or ``DOCKER_HOST`` is left alone."""
-    global _applied, _applied_by_wsl, _choice_applied, _engine_choice
+    global _applied, _applied_said, _choice_applied, _engine_choice
     with _apply_lock:
         _choice_applied = True
         _engine_choice = normalize_engine(engine)
@@ -617,14 +635,19 @@ def apply_engine_choice(engine: object) -> str | None:
             os.environ[ENGINE_BY_CHOICE_ENV] = "kazma"
         else:
             os.environ.pop(ENGINE_BY_CHOICE_ENV, None)
-        if (wanted, by_wsl) != (_applied, _applied_by_wsl):
-            logger.info("[docker] Kazma's container engine: %s",
-                        "Kazma's own, through Microsoft's wsl.exe (no Windows docker context needed)"
-                        if by_wsl else
-                        {KAZMA_CONTEXT: "Kazma's own (the kazma-engine context)",
-                         DESKTOP_CONTEXT: "Docker Desktop"}.get(wanted or "",
-                                                                "the docker CLI's current context"))
-        _applied, _applied_by_wsl = wanted, by_wsl
+        forced = _cli_forced() if _engine_choice == "kazma" and wanted is None else None
+        if by_wsl:
+            said = "Kazma's own, through Microsoft's wsl.exe (no Windows docker context needed)"
+        elif forced:
+            said = (f"the docker CLI's current context: Kazma's own engine is chosen, but {forced} "
+                    "sends every docker call to the Windows docker program, which has no "
+                    f"{KAZMA_CONTEXT} context here")
+        else:
+            said = {KAZMA_CONTEXT: "Kazma's own (the kazma-engine context)",
+                    DESKTOP_CONTEXT: "Docker Desktop"}.get(wanted or "", "the docker CLI's current context")
+        if said != _applied_said:
+            logger.info("[docker] Kazma's container engine: %s", said)
+        _applied, _applied_said = wanted, said
         return wanted
 
 
@@ -765,18 +788,41 @@ def _cross(arg: str, before: str | None) -> str | None:
     return arg
 
 
-#: Options of ``docker run``/``create``/``exec`` that take no value. Any other
-#: option is read as taking one: a wrong guess then keeps translating (the
-#: older behaviour), never stops before a mount that needs it.
-_NO_VALUE_FLAGS = frozenset({"--rm", "-i", "-t", "-d", "--interactive", "--tty", "--detach", "--init",
-                             "--privileged", "--read-only", "-P", "--publish-all", "--no-healthcheck",
-                             "--oom-kill-disable", "-q", "--quiet", "--disable-content-trust", "--sig-proxy"})
+#: docker's own grammar for ``run``, ``create`` and ``exec`` (the Docker CLI
+#: reference, docker 29): the options that take no value ...
+_NO_VALUE_FLAGS = frozenset({
+    "-d", "-i", "-t", "-P", "-q", "--detach", "--interactive", "--tty", "--init", "--privileged",
+    "--read-only", "--rm", "--publish-all", "--no-healthcheck", "--oom-kill-disable", "--quiet",
+    "--disable-content-trust", "--sig-proxy", "--use-api-socket", "--help",
+})
 
 
 def _program_start(args: Sequence[str]) -> int | None:
     """Where the container program's own arguments begin in a ``run``,
     ``create`` or ``exec`` call: at the image or the container, past
-    docker's options. None for any other call."""
+    docker's options. None for any other call, and for an option docker's
+    grammar above does not name: the whole call is then translated as
+    before, so a guess never stops before a mount (review L-c,
+    2026-11-27)."""
+    # ... and those that take one (``--name x``; ``--name=x`` is one word).
+    value_options = frozenset({
+        "-a", "-c", "-e", "-h", "-l", "-m", "-p", "-u", "-v", "-w",
+        "--add-host", "--annotation", "--attach", "--blkio-weight", "--blkio-weight-device", "--cap-add",
+        "--cap-drop", "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-count", "--cpu-percent",
+        "--cpu-period", "--cpu-quota", "--cpu-rt-period", "--cpu-rt-runtime", "--cpu-shares", "--cpus",
+        "--cpuset-cpus", "--cpuset-mems", "--detach-keys", "--device", "--device-cgroup-rule",
+        "--device-read-bps", "--device-read-iops", "--device-write-bps", "--device-write-iops", "--dns",
+        "--dns-option", "--dns-search", "--domainname", "--entrypoint", "--env", "--env-file", "--expose",
+        "--gpus", "--group-add", "--health-cmd", "--health-interval", "--health-retries",
+        "--health-start-interval", "--health-start-period", "--health-timeout", "--hostname", "--io-maxbandwidth",
+        "--io-maxiops", "--ip", "--ip6", "--ipc", "--isolation", "--kernel-memory", "--label", "--label-file",
+        "--link", "--link-local-ip", "--log-driver", "--log-opt", "--mac-address", "--memory",
+        "--memory-reservation", "--memory-swap", "--memory-swappiness", "--mount", "--name", "--network",
+        "--network-alias", "--oom-score-adj", "--pid", "--pids-limit", "--platform", "--publish", "--pull",
+        "--restart", "--runtime", "--security-opt", "--shm-size", "--stop-signal", "--stop-timeout",
+        "--storage-opt", "--sysctl", "--tmpfs", "--ulimit", "--user", "--userns", "--uts", "--volume",
+        "--volume-driver", "--volumes-from", "--workdir",
+    })
     i = 0
     if args[:1] == ["container"]:
         i = 1
@@ -789,12 +835,24 @@ def _program_start(args: Sequence[str]) -> int | None:
             return i + 1
         if not arg.startswith("-"):
             return i
-        flags = arg[1:] if not arg.startswith("--") else ""
-        if (arg in _NO_VALUE_FLAGS or (arg.startswith("--") and "=" in arg)
-                or (len(flags) > 1 and all(f"-{c}" in _NO_VALUE_FLAGS for c in flags))):
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if "=" in arg or arg in _NO_VALUE_FLAGS:
+                i += 1
+            elif name in value_options:
+                i += 2
+            else:
+                return None
+        elif len(arg) > 2:
+            # Short flags run together (-it) or a short option with its value
+            # attached (-eX=1, -v/x:/y): one word either way.
             i += 1
-        else:
+        elif arg in _NO_VALUE_FLAGS:
+            i += 1
+        elif arg in value_options:
             i += 2
+        else:
+            return None
     return None
 
 
@@ -898,6 +956,21 @@ class DockerCommand:
     env: dict[str, str] | None
     route: str
 
+    def route_entries(self) -> dict[str, str]:
+        """What the route itself adds to the environment (``WSL_UTF8``, and
+        ``WSLENV`` for a variable taken by name): for a caller that runs the
+        call with an environment of its own (the guard, the broker, prepush,
+        a tool's secret-free one). Empty on the CLI route (review L-b,
+        2026-11-27)."""
+        if self.route != "wsl" or not self.env:
+            return {}
+        return {key: self.env[key] for key in (*WSL_ROUTE_ENV, "WSLENV") if key in self.env}
+
+
+#: What every call on the wsl.exe route runs with: wsl.exe's own messages in
+#: UTF-8, not UTF-16 (a NUL after every character in a log; review L2).
+WSL_ROUTE_ENV = {"WSL_UTF8": "1"}
+
 
 def docker_command(args: Sequence[str], *, env: Mapping[str, str] | None = None,
                    context: str | None = None) -> DockerCommand | None:
@@ -918,8 +991,7 @@ def docker_command(args: Sequence[str], *, env: Mapping[str, str] | None = None,
     mode = (os.environ.get(ROUTE_ENV) or "auto").strip().lower()
     engine_context = context or _context_in_force()
     kazmas = engine_context == KAZMA_CONTEXT or (context is None and _kazma_by_choice())
-    if (_on_windows() and mode != "cli" and not os.environ.get("DOCKER_HOST")
-            and not (os.environ.get(_ENV) or "").strip()
+    if (_on_windows() and _cli_forced() is None
             # An explicit other engine (Docker Desktop's context) is never
             # sent to Kazma's distro, whatever KAZMA_DOCKER_ROUTE says (L5).
             and (kazmas or (mode == "wsl" and context in (None, KAZMA_CONTEXT)))):
@@ -930,7 +1002,7 @@ def docker_command(args: Sequence[str], *, env: Mapping[str, str] | None = None,
                 argv = [wsl, *_WSL_ARGS, *crossed]
                 run_env = carry_env(argv, env)
                 run_env = dict(run_env if run_env is not None else os.environ)
-                run_env["WSL_UTF8"] = "1"  # wsl.exe's own messages in UTF-8, not UTF-16 (L2)
+                run_env.update(WSL_ROUTE_ENV)  # wsl.exe's own messages in UTF-8, not UTF-16 (L2)
                 return DockerCommand(argv, run_env, "wsl")
     cli = find_docker_cli()
     if not cli:

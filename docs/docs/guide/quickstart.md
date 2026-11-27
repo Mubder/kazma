@@ -41,8 +41,8 @@ page), **Update Kazma**, **Finish or repair Kazma setup** and the
 documentation. **Settings → Apps** uninstalls it with `kazma uninstall`, which
 keeps your data (`kazma-data`, `.env`). Windows shows a SmartScreen notice for
 installers that aren't signed yet, and signed releases are on the way: choose
-**More info**, then **Run anyway**. With Smart App Control on, Windows offers no
-such choice until the installer is signed ([Kazma and Windows Smart App Control](windows-smart-app-control.md)). Updating
+**More info**, then **Run anyway**. With Smart App Control on, Windows may not
+run it until it is signed ([Kazma and Windows Smart App Control](windows-smart-app-control.md)). Updating
 is `kazma update`, from the next release's signed source archive
 ([Kazma Update](../ops/kazma-update.md#release-install)).
 

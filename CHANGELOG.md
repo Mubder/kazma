@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Kazma's engine without a Windows docker context: the document broker follows a changed choice (2026-11-27)
+
+- On a PC where the Windows docker program has no context for Kazma's
+  engine, the document broker now starts again when the engine choice
+  arrives or changes, so document jobs run on the engine you chose.
+- With `KAZMA_DOCKER_ROUTE=cli` or `KAZMA_DOCKER_BIN` set, Kazma's log and
+  its status name the Windows docker program it really uses, and why.
+- The document broker, the guard and the pre-push check keep wsl.exe's
+  messages readable (UTF-8) when they reach Kazma's engine through it.
+- The Smart App Control page says an installer that isn't signed may not
+  run while Smart App Control is on, as it is not measured yet.
+
 ## Windows setup asks before it installs Python, and takes the newest (2026-11-27)
 
 - A new Windows install takes the newest python.org Python on the PC: 3.14,
