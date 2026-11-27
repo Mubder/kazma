@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
+
+- **A Word file's font table is read in linear time**: the pattern that takes
+  out a font's old embeds read to the end of the text from every
+  `<w:embed…` when no `>` followed, so a crafted file's time grew with the
+  square of its size. It now stops at the next tag, and removes exactly what
+  it did from well-formed XML.
+- **Postgres test modules count the same everywhere**: Spaces' Postgres test
+  modules skipped themselves whole where psycopg is missing, so CI's light job
+  counted 86 fewer tests than README said. They are now collected
+  everywhere and skipped by a mark, and a gate keeps new ones that way.
+- **The regex sweep's verdicts no longer depend on the machine**: the secret
+  scanner's pattern is linear (every repeat bounded) but heavy, and its
+  inputs ran out the sweep's clock on CI's slower runners; it is declared
+  with the measurement. A planted slow pattern that runs out the clock now
+  counts as caught.
+
 ## Spaces: a chat's saved state is marked with its own space (2026-11-26)
 
 - Once the second lock's rules are in place (nothing puts them in place

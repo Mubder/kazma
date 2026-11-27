@@ -108,3 +108,43 @@ def test_a_failed_embed_leaves_the_file_whole(tmp_path, monkeypatch):
     import docx as python_docx
 
     assert ARABIC in "\n".join(p.text for p in python_docx.Document(str(docx)).paragraphs)
+
+
+# ── the embed-strip pattern reads each "<w:embed" once (the regex sweep, 2026-11-27) ──
+
+_OLD_EMBED = re.compile(r"<w:embed(Regular|Bold|Italic|BoldItalic)\b[^>]*/>")
+
+
+def _embed_pattern() -> re.Pattern[str]:
+    from kazma_core.documents.engines import docx_fonts
+
+    source = Path(docx_fonts.__file__).read_text(encoding="utf-8")
+    found = re.search(r're\.sub\(r"(<w:embed\(Regular[^"]+)"', source)
+    assert found, "the embed-strip pattern moved"
+    return re.compile(found.group(1))
+
+
+def test_the_embed_strip_removes_what_it_did_on_well_formed_xml():
+    import random
+
+    new = _embed_pattern()
+    tags = ['<w:embedRegular r:id="rId1" w:fontKey="{AB-12}"/>', '<w:embedBold r:id="rId2"/>',
+            '<w:embedItalic w:subsetted="1" r:id="rId3"/>', '<w:embedBoldItalic r:id="rId4"/>',
+            '<w:charset w:val="00"/>', '<w:family w:val="swiss"/>', '<w:altName w:val="x"/>', "text&lt;x&gt;"]
+    rng = random.Random(20261127)
+    for _ in range(20_000):
+        xml = "".join(rng.choice(tags) for _ in range(rng.randint(0, 10)))
+        assert new.sub("", xml) == _OLD_EMBED.sub("", xml), xml
+
+
+def test_the_embed_strip_grows_with_its_input_and_the_old_one_did_not():
+    from tests._growth import grows_faster_than_linear
+
+    def make(n: int) -> str:
+        return "<w:embedRegular" * n + "a.a"
+
+    # Large enough that the linear pattern takes milliseconds: a few microseconds
+    # read as growth on a busy runner (see the regex tests' linear floor).
+    new = _embed_pattern()
+    assert not grows_faster_than_linear(lambda s: new.sub("", s), make, 40_000)
+    assert grows_faster_than_linear(lambda s: _OLD_EMBED.sub("", s), make, 3000), "control: the old pattern"

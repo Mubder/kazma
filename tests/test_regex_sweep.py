@@ -94,6 +94,11 @@ class Literal:
 #: Kazma's own, bounded, or read in a worker or child process with a deadline).
 #: A pattern on outside text that is not contained is fixed, never declared.
 DECLARED: dict[tuple[str, str], str] = {
+    ('kazma-core/kazma_core/security/secret_scan.py',
+     '(?ix)\n    (?P<name>[a-z0-9_.-]{0,40}?\n        (?:api[_.-]?key|apikey|secret|token|passw(?:or)?d|passwd|pwd\n          |private[_.-]?key|access[_.-]?key|auth[_.-]?key|credentials?)\n        [a-z0-9_.-]{0,40})\n    ["\']?\\s*(?::=|=>|:|=)\\s*\n    [rbuf]{0,2}(?P<q>["\'])(?P<value>[^"\'\\s]{8,512})(?P=q)\n    '):
+        "Linear: every repeat is bounded ({0,40}, {0,2}, {8,512}), so the work per position is "
+        "bounded; measured: four times the input took 3.7 times as long (2026-11-27). Its constant "
+        "is large, so on a slow CI runner the sweep's own clock ran out before its inputs did.",
     ('kazma-cli/kazma_cli/setup.py',
      '^[\\s▀-▟\\-\\\\|/.]*(\\d+(\\.\\d+)?\\s*[KMGT]?i?B\\s*/\\s*\\d+(\\.\\d+)?\\s*[KMGT]?i?B|\\d{1,3}(\\.\\d+)?\\s*%)?[\\s▀-▟]*$'):
         "A line of an installer's own progress output (winget, uv) on this machine.",
@@ -647,11 +652,12 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
         encoding="utf-8",
     )
     literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path)
-    flagged = {literals[i].pattern for i in slow}
+    # A planted pattern whose inputs ran out the sweep's clock is caught too: on a
+    # slow CI runner "HEADED" came back as "did not finish", not as grown (2026-11-27).
+    flagged = {literals[i].pattern for i in slow} | {literals[i].pattern for i in hung}
     assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x",
                        r"^\W*(?:no|nope)[,.-]\W*(?P<v>[^.,\n]{1,60}?)\W*$",
-                       r"^\W*(?:no|nope),\W*+(?:يا [^\W\d_]+\W+)?(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow)
-    assert not hung
+                       r"^\W*(?:no|nope),\W*+(?:يا [^\W\d_]+\W+)?(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow, hung)
     assert len(_report(literals, slow, hung)) == 6
 
 
