@@ -35,6 +35,8 @@ import pytest
 SPACES = ("default", "s0a0a0a0a0a0a", "s0b0b0b0b0b0b")
 #: A time in a row or a message, and a measured duration: never the same twice.
 _TIME = re.compile(r"\d{4}-\d\d-\d\dT[\d:.+]+|\d{9,}(?:\.\d+)?|\d+\.\d+s|0x[0-9a-f]+")
+#: This process's own patches: it ends when its one job does.
+_PATCH = pytest.MonkeyPatch()
 _SECONDS = re.compile(r'(\\"seconds\\": )[\d.]+')
 
 
@@ -61,7 +63,7 @@ def seed(dsn: str, data: str) -> None:
 
     from tests.test_pg_app_role import _every_store_set_up
 
-    scope._enforced = True
+    _PATCH.setattr(scope, "_enforced", True)
     _every_store_set_up(dsn)
     threads.ensure_store()
     for space in SPACES[1:]:
@@ -124,19 +126,19 @@ def seed(dsn: str, data: str) -> None:
 
         saver = await open_postgres_checkpointer(dsn, max_size=2)
         real_ns = time.time_ns
-        time.time_ns = lambda: real_ns() - 60 * 86400 * 10**9  # their ids say sixty days ago
         try:
-            graph = StateGraph(State)
-            graph.add_node("step", lambda s: {"n": s["n"] + 1})
-            graph.add_edge(START, "step")
-            graph.add_edge("step", END)
-            compiled = graph.compile(checkpointer=saver)
-            for space in SPACES:
-                with bind_scope(space, OWNER_ACCOUNT_ID):
-                    for _ in range(6):
-                        await compiled.ainvoke({"n": 0}, {"configurable": {"thread_id": f"th-{space[-4:]}-0"}})
+            with pytest.MonkeyPatch.context() as clock:
+                clock.setattr(time, "time_ns", lambda: real_ns() - 60 * 86400 * 10**9)  # their ids say sixty days ago
+                graph = StateGraph(State)
+                graph.add_node("step", lambda s: {"n": s["n"] + 1})
+                graph.add_edge(START, "step")
+                graph.add_edge("step", END)
+                compiled = graph.compile(checkpointer=saver)
+                for space in SPACES:
+                    with bind_scope(space, OWNER_ACCOUNT_ID):
+                        for _ in range(6):
+                            await compiled.ainvoke({"n": 0}, {"configurable": {"thread_id": f"th-{space[-4:]}-0"}})
         finally:
-            time.time_ns = real_ns
             await close_postgres_checkpointer(saver)
 
     _run(checkpoints())
@@ -154,7 +156,7 @@ def sweep(dsn: str, data: str, how: str, out: str) -> None:
     from kazma_core.memory import worker_bootstrap as wb
     from kazma_core.spaces import scope
 
-    scope._enforced = True
+    _PATCH.setattr(scope, "_enforced", True)
     if how in ("armed", "blinded"):
         done = row_security.apply(dsn, tables=list(row_security.rules("")), vector_table="")
         assert done.complete, (done.refused, done.left, done.unresolved)
@@ -162,9 +164,9 @@ def sweep(dsn: str, data: str, how: str, out: str) -> None:
     if how == "blinded":  # the control: the swarm task retention with no install declaration
         from kazma_core.swarm.task_store import TaskStore
 
-        TaskStore.prune_tasks = TaskStore.prune_tasks.__wrapped__
+        _PATCH.setattr(TaskStore, "prune_tasks", TaskStore.prune_tasks.__wrapped__)
     # The mirror is this copy's own database.
-    state_backend._cfg = lambda: {"state": {"provider": "postgres", "url": dsn, "role": "mirror"}}
+    _PATCH.setattr(state_backend, "_cfg", lambda: {"state": {"provider": "postgres", "url": dsn, "role": "mirror"}})
     seen: list[list[str]] = []
 
     class _Warnings(logging.Handler):
