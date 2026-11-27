@@ -186,6 +186,13 @@ def _entries(*, kinds: tuple[str, ...] = KINDS, since: float = 0.0) -> list[Entr
                   str(r[7]), str(r[8]), str(r[9] or "")) for r in rows]
 
 
+def forgotten_summaries(tenant_id: str) -> set[str]:
+    """The summaries (weekly or roll-up) forgotten in *tenant_id*, by id, as
+    the ledger holds them: a planner asks it before writing one again, so a
+    restored database that has lost the tombstone does not bring it back."""
+    return {e.summary_id for e in _entries(kinds=("summary",)) if e.tenant_id == tenant_id and e.summary_id}
+
+
 def journaled_seqs() -> list[int]:
     """Every entry's sequence number, read without writing (the restore
     drill: it never writes into the live data directory). Empty when there

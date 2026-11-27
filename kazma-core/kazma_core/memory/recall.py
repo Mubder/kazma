@@ -3626,19 +3626,36 @@ def _months_said_in(
     if not asks_what_was_said(query, ask.words):
         return []
     whole = max(float(ask.end) - float(ask.start), 1.0)
+    def shares(kind: str) -> dict[str, float]:
+        return {rid: (min(stretch[1], float(ask.end)) - max(stretch[0], float(ask.start))) / whole
+                for rid, stretch in span.items() if level.get(rid) == kind and _overlaps(stretch, ask)}
+
+    # A long period by its months, a short one by its weeks; when that
+    # level holds nothing yet, the other ("this month" on the 21st: its
+    # month is not written until it ends; a quiet week: its month).
     by = "month" if whole >= _SAID_BY_MONTHS_S else "week"
-    share = {
-        rid: (min(stretch[1], float(ask.end)) - max(stretch[0], float(ask.start))) / whole
-        for rid, stretch in span.items()
-        if level.get(rid) == by and _overlaps(stretch, ask)
-    }
+    share = shares(by)
+    if not share:
+        by = "week" if by == "month" else "month"
+        share = shares(by)
     if not share:
         return []
     trace = _EVIDENCE_TRACE.get()
     if trace is not None:
         trace.append({"kind": "summary", "cut": 0.0, "evidence": dict(share)})
     by_id = {str(row["id"]): row for row in rows}
-    ordered = sorted(share, key=lambda rid: (-share[rid], span[rid][0]))
+    ordered = sorted(share, key=lambda rid: (-share[rid], span[rid][0], rid))
+    # A week's topics are all shown, up to the listing's limit and as short
+    # as a listing's (the follow-up's M3: two of four, by row order).
+    limit = _LIST_SUMMARY_LIMIT if by == "week" else _SUMMARY_LIMIT
+    shown = ordered[:limit]
+
+    def display(rid: str) -> str:
+        text = _summary_display(by_id[rid])
+        if len(shown) > _SUMMARY_LIMIT and len(text) > _LIST_SUMMARY_SHOW_CHARS:
+            return text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
+        return text
+
     return [
         RecallHit(
             id=rid,
@@ -3651,10 +3668,10 @@ def _months_said_in(
                 "strength": "strong",
                 "at": span[rid][1],
                 "level": by,
-                "display": _summary_display(by_id[rid]),
+                "display": display(rid),
             },
         )
-        for rid in ordered[:_SUMMARY_LIMIT]
+        for rid in shown
     ]
 
 

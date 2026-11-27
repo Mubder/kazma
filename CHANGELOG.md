@@ -11,7 +11,9 @@
   the one your reminders use, not the server's. Summaries written before
   keep their week and month names wherever your zone is, and "What did we
   talk about in June?" is answered by June's summary alone; "What did we
-  talk about last week?" by that week's, not the whole month's.
+  talk about last week?" by every topic of that week, not the whole month's.
+- A topic you told Kazma to forget is never summarised across weeks again,
+  however the database orders its rows.
 - A topic Kazma decides not to summarise across weeks is no longer offered
   to the model again on every sweep (about 48 model calls a day for each).
 - Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:

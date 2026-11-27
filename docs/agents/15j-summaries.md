@@ -122,11 +122,24 @@ queued by the maintenance sweep with at most two weeks in flight.
   moved it a day: the follow-up review's L2). A said period shorter than
   `_SAID_BY_MONTHS_S` (20 days: "What did we talk about last week?", "شنو
   تكلمنا عنه الأسبوع الماضي؟") is answered by its weekly summaries by share,
-  not its whole month (O2). A roll-up the model skips is retired with its
+  not its whole month (O2), every topic of the week up to the listing's
+  limit, shortened as a listing is (the third follow-up review's M3: two of
+  four, by row order); when that level holds nothing yet the other answers
+  ("this month" from the 20th, before its roll-up is written). A roll-up the model skips is retired with its
   parts and planned again only when they change: a project was left out of
   `_known_projects` and planned under the same id on every other sweep,
   about 48 model calls a day each (O1; gate: the sweep settles after a skip,
-  a new part asks again, and the old lookup as control never settles).
+  a new part asks again, and the old lookup as control never settles). Only
+  a skip settles: `_retire(skipped=True)` marks it, and a roll-up retired for
+  too few live parts (a week written again after a version bump) is planned
+  again when they are live, month or project (M2). Which project a group
+  continues is never row order (`_project_of`: active, then waiting, then
+  retired; then the most weeks shared; then the id), and a group that shares
+  a week with a forgotten project, in the store or the forget ledger
+  (`forget_journal.forgotten_summaries`), is never written again (M1: after
+  ANALYZE a retired project came first and took a forgotten one's weeks;
+  gate: both row orders, with and without ANALYZE, the first-match lookup as
+  control).
   Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
   from it: through a turn and through a weekly summary; a roll-up that names
   no source, and a store without the re-read, as controls),
