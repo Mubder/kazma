@@ -863,8 +863,10 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
         out.append("the nightly merge failed")
     if int(summaries.get("weeks_left") or 0):
         out.append("a week left unsummarised")
-    if steps.get("at") and weeks_due(store, parse_date(str(steps["at"]))):
-        out.append("a week the store holds unsummarised at the question's time")
+    if not steps.get("at"):
+        # without it, the store's weeks cannot be read at the question's time
+        # (the step 5 final review's L3)
+        out.append("the question's time is not recorded")
     conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
     try:
         def one(sql: str) -> int:
@@ -877,6 +879,12 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
             out.append("a week still queued")
         if one("SELECT COUNT(*) FROM memory_summaries WHERE status = 'rebuild'"):
             out.append("a summary still to be written again")
+        # A week marked done with summaries the store no longer holds (the
+        # final review's L3: deleting only the summaries kept the markers).
+        if one("SELECT COUNT(*) FROM memory_summary_periods p WHERE p.status = 'done' AND p.summaries > 0 "
+               "AND NOT EXISTS (SELECT 1 FROM memory_summaries s WHERE s.tenant_id = p.tenant_id "
+               "AND s.period_key = p.period_key AND s.level = 'week' AND s.status = 'active')"):
+            out.append("a week marked done whose summaries are gone")
         # One fact twice: the same words on the same day (an event on two
         # days is two, ``fact_days.event_day``, and the merge keeps both).
         if one("SELECT COUNT(*) FROM (SELECT 1 FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
@@ -886,7 +894,45 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
             out.append("a twin fact left current")
     finally:
         conn.close()
+    if not out and weeks_due(store, parse_date(str(steps["at"]))):
+        out.append("a week the store holds unsummarised at the question's time")
+    if not out and any(rollups_due(store, parse_date(str(steps["at"]))).values()):
+        # a month or project roll-up the product's sweep would plan (a
+        # deleted one; the step 5 follow-up review's L-c)
+        out.append("a roll-up the store lacks at the question's time")
     return out
+
+
+def rollups_due(store: Path, now: float) -> dict[str, int]:
+    """The month and project roll-ups the product's sweep would plan on
+    *store* at *now*: ``topic_rollups.plan_rollups`` on a throwaway copy
+    (it writes and commits), in UTC, with the weekly summaries' own vector
+    model as the embedder's."""
+    from unittest import mock
+
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+    from kazma_core.memory import topic_rollups
+
+    with tempfile.TemporaryDirectory(prefix="kazma-rollups-due-") as folder:
+        copy = Path(folder) / "store.db"
+        snapshot_copy(store, copy, read_only=True)
+        conn = sqlite3.connect(str(copy))
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                found = conn.execute(
+                    "SELECT embedding_model_version, COUNT(*) n FROM memory_summaries WHERE level = 'week' "
+                    "AND status = 'active' AND embedding IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 1").fetchone()
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc):
+                    return {}
+                raise
+            model = str(found[0] or "") if found else ""
+            with (mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC),
+                  mock.patch("kazma_core.memory.embedder.get_embedding_model_name", lambda: model)):
+                return topic_rollups.plan_rollups(conn, now=now)
+        finally:
+            conn.close()
 
 
 def weeks_due(store: Path, now: float) -> list[Any]:
@@ -902,8 +948,13 @@ def weeks_due(store: Path, now: float) -> list[Any]:
     try:
         with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
             return topic_summaries._due_periods(conn, now, topic_summaries._config()["min_turns"])
-    except sqlite3.OperationalError:
-        return []  # a store with no episodes table holds no week
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return []  # a store with no episodes table holds no week
+        if "readonly" in str(exc):
+            # the sweep would mark a queued week failed: a week not done
+            return ["a queued week past its tries"]
+        raise
     finally:
         conn.close()
 

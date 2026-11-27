@@ -414,6 +414,32 @@ def test_control_the_frame_counted_at_its_largest_fails_the_sweep(monkeypatch):
     assert _left_out_yet_different("en", "summary") or _left_out_yet_different("ar", "summary")
 
 
+def test_control_the_narrowest_step_fails_the_conversation_sweep(monkeypatch):
+    """The conversation half's negative control (the final review's L2): room
+    by rank as it was before M1 (2179116ec): the first step that keeps every
+    line, else the narrowest, the frame counted at its largest. It gives the
+    other conversations less room for a last conversation that cannot fit."""
+    real = recall_module._room_by_rank
+    every = (10**6,) * 3
+
+    def before_m1(result, kept):
+        calls = []
+
+        def all_or_nothing(room, _exact):
+            calls.append(room)
+            counts, all_fit = kept(room, False)
+            # the target is every line; a step reaches it only if all fit
+            if len(calls) == 2 or all_fit:
+                return every, all_fit
+            return counts, all_fit
+
+        shown, _exact = real(result, all_or_nothing)
+        return shown, False
+
+    monkeypatch.setattr(recall_module, "_room_by_rank", before_m1)
+    assert _left_out_yet_different("en", "conversation") or _left_out_yet_different("ar", "conversation")
+
+
 def test_a_summary_that_fits_still_takes_its_room():
     """The control: a short summary that fits at a narrower step is shown,
     and the excerpts give way for it, as before."""
