@@ -39,8 +39,8 @@ stdio:
 {
   "mcpServers": {
     "kazma": {
-      "command": "kazma",
-      "args": ["mcp"]
+      "command": "C:\\kazma\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kazma_cli", "mcp"]
     }
   }
 }
@@ -186,8 +186,8 @@ about than 155 tools:
 {
   "mcpServers": {
     "kazma": {
-      "command": "kazma",
-      "args": ["mcp"],
+      "command": "C:\\kazma\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kazma_cli", "mcp"],
       "env": { "KAZMA_MCP_TOOLS": "file_read,file_write,shell_exec,web_search" }
     }
   }

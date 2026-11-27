@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from kazma_core.spaces import scope
 from kazma_ui import auth, space_binding
 
+from tests._as_request import own
 from tests._chat_space_cases import _boundary
 from tests._no_models import keep_models_out
 from tests._space_matrix import Matrix, case
@@ -102,7 +103,7 @@ class World:
                                    "asker": self.account_of(who)},
                          completed_at="2026-11-18T08:00:00+00:00")
         task.result = TaskResult(task_id=task.id, status="success", aggregated_output=f"report {mark}")
-        assert self.engine._task_store.persist_task(task), task.id
+        assert own(self.engine._task_store).persist_task(task), task.id
         return Planted(id=task.id, mark=mark)
 
     def tasks(self, word: str) -> tuple[Planted, Planted]:
@@ -110,7 +111,7 @@ class World:
         return self.task("a", marks.a), self.task("b", marks.b)
 
     def held_task(self, planted: Planted) -> dict[str, Any]:
-        row = self.engine._task_store.get_task(planted.id)
+        row = own(self.engine._task_store).get_task(planted.id)
         return {} if row is None else {"status": str(row.status), "meta": dict(row.metadata or {})}
 
     def tool(self, who: str, name: str, **kwargs: Any) -> str:

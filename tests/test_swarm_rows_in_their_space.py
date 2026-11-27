@@ -29,6 +29,7 @@ from kazma_core.swarm.engine import STORE_UNAVAILABLE, SwarmEngine
 from kazma_core.swarm.task import TaskResult
 from kazma_core.swarm.task_store import TaskStore
 
+from tests._as_request import not_armed, own
 from tests._no_models import keep_models_out
 from tests._space_door import Calls, watched
 
@@ -62,7 +63,7 @@ def store(tmp_path: Any) -> Any:
     made.mine = []
     yield made
     for task_id in made.mine:
-        made.delete_task(task_id)
+        own(made).delete_task(task_id)
     made.close()
 
 
@@ -95,7 +96,7 @@ def _said(calls: Calls, *names: str) -> set[str]:
 def _stale(store: Any, space: str) -> SwarmTask:
     task = _task(store, space, timeout=1)
     task.started_at = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
-    assert store.persist_task(task)
+    assert own(store).persist_task(task)
     return task
 
 
@@ -111,7 +112,7 @@ def _reaped(store: Any, space: str, bound: Any) -> Calls:
 
     with watched(*_WRITES) as calls:
         asyncio.run(run())
-    assert store.get_task(task.id).status == TaskStatus.TIMEOUT
+    assert own(store).get_task(task.id).status == TaskStatus.TIMEOUT
     return calls
 
 
@@ -143,8 +144,8 @@ def test_an_auto_reject_armed_at_a_start_is_its_own_spaces(store: Any, a: str) -
     task = _task(store, a, TaskStatus.PAUSED, type=TaskType.PIPELINE, metadata={
         "hitl_checkpoint": {"step": 1, "worker": "w", "output_preview": "draft"}, "checkpoint_timeout": 0.05})
     task.result = TaskResult(task_id=task.id, status="paused")
-    assert store.persist_task(task)
-    store.get_paused_tasks = lambda: [store.get_task(task.id)]  # this test's, in a shared table
+    assert own(store).persist_task(task)
+    store.get_paused_tasks = lambda: [own(store).get_task(task.id)]  # this test's, in a shared table
     engine = _engine(store)
     engine.restore_paused_tasks()
 
@@ -153,7 +154,7 @@ def test_an_auto_reject_armed_at_a_start_is_its_own_spaces(store: Any, a: str) -
         for _ in range(100):
             await asyncio.sleep(0.05)
             await engine._flush_writes(task.id)
-            if store.get_task(task.id).status == TaskStatus.FAILED:
+            if own(store).get_task(task.id).status == TaskStatus.FAILED:
                 return
         raise AssertionError("never rejected")
 
@@ -168,12 +169,12 @@ def test_a_late_outcome_kept_as_evidence_is_its_own_spaces(store: Any, a: str, b
     task = _stale(store, a)
     task.status = TaskStatus.COMPLETED
     task.result = TaskResult(task_id=task.id, status="completed")
-    assert store.persist_task(task)
+    assert own(store).persist_task(task)
     task.status = TaskStatus.FAILED  # the transition table refuses it
     with watched(*_WRITES) as calls, bind_scope(b, "omar"):
         engine._persist(task, "failed", "late")
     assert _said(calls, "persist_task", "record_orphan", "get_task") == {a}
-    assert store.get_task(task.id).metadata["orphan_results"]
+    assert own(store).get_task(task.id).metadata["orphan_results"]
 
 
 @pytest.mark.usefixtures("enforced")
@@ -211,11 +212,11 @@ def test_the_start_holds_interrupted_rows_once_enforced(store: Any, a: str, b: s
     """Its list was refused (no space bound): the start held nothing."""
     tasks = [_task(store, space, TaskStatus.PENDING, metadata={"recovery_count": 1}) for space in (a, b)]
     for task in tasks:
-        assert store.persist_task(task)
+        assert own(store).persist_task(task)
     with watched((TaskStore, "list_tasks"), (TaskStore, "persist_task")) as calls:
         _engine(store).redispatch_recovered_tasks(max_tasks=100)
     for task in tasks:
-        assert store.get_task(task.id).status == TaskStatus.FAILED, "held, with its outcome unknown"
+        assert own(store).get_task(task.id).status == TaskStatus.FAILED, "held, with its outcome unknown"
     assert calls.of("list_tasks") == ["<install>"]
     ids = {t.id: t.metadata["tenant_id"] for t in tasks}
     assert {c.args[1].id: c.space for c in calls if c.name == "persist_task" and c.args[1].id in ids} == ids
@@ -223,10 +224,10 @@ def test_the_start_holds_interrupted_rows_once_enforced(store: Any, a: str, b: s
 
 def test_off_the_start_holds_them_as_before(store: Any, a: str) -> None:
     task = _task(store, a, TaskStatus.PENDING, metadata={"recovery_count": 1})
-    assert store.persist_task(task)
+    assert own(store).persist_task(task)
     with watched((TaskStore, "list_tasks")) as calls:
         _engine(store).redispatch_recovered_tasks(max_tasks=100)
-    assert store.get_task(task.id).status == TaskStatus.FAILED
+    assert own(store).get_task(task.id).status == TaskStatus.FAILED
     assert [c.kwargs.get("metadata_filter") for c in calls] == [None] and calls.scopes("list_tasks") == [None]
 
 
@@ -245,7 +246,7 @@ def _before_and_after(store: Any, b: str) -> tuple[str, dict[str, SwarmTask]]:
     made = {name: _task(store, space, TaskStatus.COMPLETED, metadata={"kind": kind})
             for name, space in (("none", None), ("empty", ""), ("owner", "default"), ("b", b))}
     for task in made.values():
-        assert store.persist_task(task)
+        assert own(store).persist_task(task)
     return kind, made
 
 
@@ -264,7 +265,8 @@ def test_the_owners_list_has_the_tasks_of_before_spaces(store: Any, b: str) -> N
         _listed(store, kind)
 
 
-def test_off_the_list_is_every_tasks_as_before(store: Any, b: str) -> None:
+def test_off_the_list_is_every_tasks_as_before(store: Any, b: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    not_armed(monkeypatch)  # Spaces off: the unbound list of every task, as before
     kind, made = _before_and_after(store, b)
     assert _listed(store, kind) == {t.id for t in made.values()}
     assert _listed(store, kind, tenant_id=b) == {made["b"].id}, "a filter asked for is kept"
@@ -277,7 +279,8 @@ def test_every_spaces_list_is_every_spaces_whatever_the_old_switch_says(
     monkeypatch.setattr(scope, "_enforced", on)
     monkeypatch.setenv("KAZMA_TENANT_FILTER", switch)
     kind, made = _before_and_after(store, b)
-    assert _listed(store, kind, tenant_id="*") == {t.id for t in made.values()}
+    # "*" is every space's list: the install's own, as its callers (a start's recovery) say.
+    assert _listed(own(store), kind, tenant_id="*") == {t.id for t in made.values()}
 
 
 # ── a task of before Spaces is the owner's, to the end (M1) ──────────────
@@ -290,7 +293,7 @@ def _paused_before_spaces(store: Any, engine: SwarmEngine, tenant: str | None) -
     task = _task(store, tenant, TaskStatus.PAUSED, type=TaskType.PIPELINE, metadata=metadata)
     task.workers = ["w", "second"]
     task.result = TaskResult(task_id=task.id, status="paused")
-    assert store.persist_task(task)
+    assert own(store).persist_task(task)
     engine.add_worker(WorkerConfig(name="second", type="in_process"))
     ran: list[Any] = []
 
@@ -299,7 +302,7 @@ def _paused_before_spaces(store: Any, engine: SwarmEngine, tenant: str | None) -
         return {"worker": "second", "task_id": "", "status": "success", "output": "ok", "error": None}
 
     engine.get_worker("second").dispatch = work
-    store.get_paused_tasks = lambda: [store.get_task(task.id)]
+    store.get_paused_tasks = lambda: [own(store).get_task(task.id)]
     engine.restore_paused_tasks()
     return task, ran
 
@@ -324,7 +327,7 @@ def test_the_owner_approves_a_pipeline_paused_before_spaces(store: Any, tenant: 
 
     async def run() -> Any:
         with bind_scope("default", "owner"):
-            assert await asyncio.to_thread(task_answered_by_caller, store.get_task(task.id))
+            assert await asyncio.to_thread(task_answered_by_caller, own(store).get_task(task.id))
             result = await engine.approve_checkpoint(task.id)
         await engine._flush_writes(task.id)
         return result
@@ -332,7 +335,7 @@ def test_the_owner_approves_a_pipeline_paused_before_spaces(store: Any, tenant: 
     result = asyncio.run(run())
     assert result is not None and result.status != "failed", result
     assert ran == [Scope("default", "owner")], "the rest of it ran, in the owner's space"
-    stored = store.get_task(task.id)
+    stored = own(store).get_task(task.id)
     assert stored.status == TaskStatus.COMPLETED and stored.metadata["tenant_id"] == "default"
 
 
@@ -355,7 +358,7 @@ def test_the_owner_cancels_and_rejects_tasks_of_before_spaces(store: Any, monkey
         await engine._flush_writes(task.id)
 
     asyncio.run(run())
-    assert store.get_task(task.id).status == TaskStatus.FAILED and ran == []
+    assert own(store).get_task(task.id).status == TaskStatus.FAILED and ran == []
 
 
 @pytest.mark.usefixtures("enforced")
@@ -442,13 +445,14 @@ def test_new_work_of_no_space_is_refused_never_the_owners(store: Any, monkeypatc
     result, ran, (engine, task) = _dispatched(store, monkeypatch, tenant)
     assert (result.metadata["code"], result.metadata["retryable"]) == (SPACE_REFUSED, False)
     assert ran == [] and engine.list_active_tasks() == [], "its slot is free"
-    assert store.get_task(task.id) is None, "nothing is recorded as anyone's"
+    assert own(store).get_task(task.id) is None, "nothing is recorded as anyone's"
 
 
 def test_off_work_of_no_tenant_runs_as_before(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    not_armed(monkeypatch)  # Spaces off: work dispatched with nothing bound runs as before
     result, ran, (_engine_, task) = _dispatched(store, monkeypatch, None)
     assert result.status == "success" and ran == [None]
-    assert store.get_task(task.id).metadata["tenant_id"] == "default"
+    assert own(store).get_task(task.id).metadata["tenant_id"] == "default"
 
 
 @pytest.mark.usefixtures("enforced")
@@ -525,9 +529,9 @@ def test_another_spaces_tasks_do_not_push_out_a_spaces_own(store: Any, a: str, b
 
     mine = _task(store, b, TaskStatus.PENDING)
     mine.created_at = "2020-01-01T00:00:00+00:00"
-    assert store.persist_task(mine)
+    assert own(store).persist_task(mine)
     for _ in range(45):
-        assert store.persist_task(_task(store, a, TaskStatus.PENDING))
+        assert own(store).persist_task(_task(store, a, TaskStatus.PENDING))
     with watched((TaskStore, "list_tasks")) as calls, bind_scope(b, "omar"):
         assert [t.id for t in _SwarmAdapter._stored(store, 0.0)] == [mine.id]
     assert {c.space for c in calls} == {b}, "a list inside a space stays that space's (H6)"
@@ -540,7 +544,7 @@ def test_off_the_runs_list_is_as_before(store: Any, a: str) -> None:
     from kazma_core.runs.adapters.swarm import _SwarmAdapter
 
     task = _task(store, a, TaskStatus.PENDING)
-    assert store.persist_task(task)
+    assert own(store).persist_task(task)
     with watched((TaskStore, "list_tasks")) as calls:
         assert task.id in {t.id for t in _SwarmAdapter._stored(store, 0.0)}
     assert {c.scope for c in calls} == {None} and {c.kwargs["metadata_filter"] for c in calls} == {None}
@@ -571,6 +575,7 @@ def test_a_refused_task_is_said_to_be_refused(store: Any, a: str, monkeypatch: p
 
 
 def test_off_every_unrecorded_task_is_said_as_before(store: Any, a: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    not_armed(monkeypatch)  # Spaces off: an error reads as before (step 3 review M3)
     result = _refused_admission(store, a, monkeypatch, NoSpaceBound("no space is bound"))
     assert (result.metadata["code"], result.metadata["retryable"]) == (STORE_UNAVAILABLE, True)
 
@@ -621,6 +626,8 @@ def test_a_refused_table_is_raised(monkeypatch: pytest.MonkeyPatch, tmp_path: An
 def test_every_other_failure_warns_as_before(monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
                                              caplog: pytest.LogCaptureFixture, on: bool) -> None:
     monkeypatch.setattr(scope, "_enforced", on)
+    if not on:
+        not_armed(monkeypatch)  # Spaces off: an error reads as before (step 3 review M3)
     caplog.set_level("WARNING", logger="kazma_core.swarm.task_store")
     _made_on_postgres(monkeypatch, tmp_path, ConnectionError("away") if on else NoSpaceBound("refused"))
     assert "Postgres schema update failed" in caplog.text

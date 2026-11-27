@@ -34,6 +34,7 @@ from fastapi.testclient import TestClient
 from kazma_core.spaces import scope
 from kazma_ui import auth, space_binding
 
+from tests._as_request import own
 from tests._no_models import keep_models_out
 from tests._space_matrix import Matrix, case
 
@@ -125,7 +126,7 @@ class World:
             metadata={"tenant_id": space or self.space_of(who), "asker": self.account_of(who)},
             completed_at=datetime.now(UTC).isoformat() if status in ("completed", "failed") else None,
         )
-        assert self.store.persist_task(task), task.id
+        assert own(self.store).persist_task(task), task.id
         if status in ("paused", "running"):
             # Held in flight and in the history, as a restored pause is.
             self.engine._active_tasks[task.id] = task
@@ -151,7 +152,7 @@ class World:
 
     def held(self, task: Task) -> dict[str, Any]:
         """A task as the store holds it, whoever asks ({} when gone)."""
-        row = self.store.get_task(task.id)
+        row = own(self.store).get_task(task.id)
         return {} if row is None else {"status": str(row.status), "prompt": row.prompt,
                                        "space": (row.metadata or {}).get("tenant_id")}
 
@@ -381,7 +382,7 @@ def swarm_dispatch(w: World) -> None:
 
 def _stored_with(w: World, mark: str) -> list[Any]:
     """Every stored task whose prompt holds *mark*, of any space."""
-    return [t for t in w.store.list_tasks(page=1, page_size=100, metadata_filter={"tenant_id": "*"})
+    return [t for t in own(w.store).list_tasks(page=1, page_size=100, metadata_filter={"tenant_id": "*"})
             if mark in t.prompt]
 
 

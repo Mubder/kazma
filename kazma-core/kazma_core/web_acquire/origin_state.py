@@ -6,12 +6,10 @@ import hashlib
 import json
 import logging
 import math
-import os
 import threading
 import uuid
 
-import psutil
-
+from kazma_core import process_start
 from kazma_core.web_acquire.crawl_jobs import _alive
 from kazma_core.web_acquire.durable_state import Unchanged, checked_clock, mutate
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
@@ -27,17 +25,12 @@ logger = logging.getLogger(__name__)
 #: until a restart.
 _HELD: set[str] = set()
 _HELD_LOCK = threading.Lock()
-_OWN: list | None = None
 
 
 def _own_identity() -> list:
-    """This process as a lease records it: [pid, process start time]."""
-    global _OWN
-    pid = os.getpid()
-    own = _OWN
-    if own is None or own[0] != pid:
-        own = _OWN = [pid, psutil.Process(pid).create_time()]
-    return list(own)
+    """This process as a lease records it: [pid, start(, stamp)]
+    (``process_start``)."""
+    return process_start.own_identity()
 
 
 def _holds(token) -> bool:
@@ -47,10 +40,7 @@ def _holds(token) -> bool:
 
 def _left_behind(identity, token) -> bool:
     """A lease this process recorded and no longer holds."""
-    if not isinstance(identity, list) or len(identity) != 2:
-        return False
-    own = _own_identity()
-    return identity[0] == own[0] and identity[1] == own[1] and not _holds(token)
+    return process_start.identity_is_this_process(identity) and not _holds(token)
 
 
 def _key(origin):

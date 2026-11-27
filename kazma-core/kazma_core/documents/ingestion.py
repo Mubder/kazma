@@ -220,6 +220,12 @@ class DocumentIngestionService:
             )
         else:
             jobs_meta = self.repository
+        # The SQLite stores this service opened beside a Postgres one (the
+        # metadata store the resolver did not take, the job queue's
+        # fallback) are its to close too: close() left their connections
+        # open (S4-01 step 5, the space matrix on Postgres).
+        self._opened_beside = [store for store in (None if repository is not None else sqlite_meta, jobs_meta)
+                               if store is not None and store is not self.repository]
         sqlite_jobs = jobs or DocumentJobRepository(
             jobs_meta,
             retry_base_seconds=float(initial.worker_retry_base_seconds),
@@ -634,11 +640,13 @@ class DocumentIngestionService:
             logger.info("[documents.ingestion] worker pool stopped")
 
     def close(self) -> None:
-        """Close the shared repository connection."""
-        try:
-            self.repository.close()
-        except Exception:  # pragma: no cover - defensive
-            logger.debug("[documents.ingestion] repository close failed", exc_info=True)
+        """Close the shared repository connection, and the SQLite stores this
+        service opened beside a Postgres one."""
+        for store in (self.repository, *getattr(self, "_opened_beside", ())):
+            try:
+                store.close()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("[documents.ingestion] repository close failed", exc_info=True)
 
     def _intake_owner_is_live(self, job: DocumentJobRecord) -> bool:
         """True when the process that published *job* may still be advancing it.

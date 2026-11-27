@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -37,8 +38,18 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tests import _tt_graph as tt
+from tests._as_request import as_owner
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_chat() -> Iterator[None]:
+    """Each test is the owner's chat: its turns run, and the replay page's
+    requests are made, in the owner's space, as the chat page binds them
+    (S4-01 step 5)."""
+    with as_owner():
+        yield
 
 
 def _params():

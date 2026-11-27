@@ -1,5 +1,72 @@
 # CHANGELOG
 
+## A process's start is told by what no clock step moves (2026-11-27)
+
+- **The failure**: prepush's Linux part failed once on
+  `test_a_second_crawl_of_a_library_is_its_own_code`: the Knowledge ingest
+  answered 200 instead of `library_busy`, and the running crawl's finish was
+  refused ("Crawl ownership ended"). The ingest had read the crawl's own
+  owner, this same process, as gone and taken the crawl over.
+- **The cause**: on Linux psutil's `create_time()` is the start's ticks since
+  boot plus `/proc/stat`'s boot time, read again on every call, and the boot
+  time moves whenever the wall clock is stepped. On Docker Desktop's WSL2 VM
+  (`hv_utils.timesync_implicit=Y`) it moved a whole second about every 30 s
+  while the PC was loaded (3.7 s in 90 s, measured; 11 s in about 130 s
+  under a second prepush), and one process's own start went from
+  `...883.48` to `...884.48` between two readings. The crawl journal
+  compared a recorded start with a fresh reading exactly. Waiting for the
+  boot time to step between the crawl's start and the ingest reproduced the
+  failure on that kernel every time, with no mocks.
+- **The class**: six owner records compared starts that way. The origin
+  table dropped this process's own live leases, research sessions of this
+  process read as interrupted, a research storage reservation as not live,
+  a live document intake owner as dead, and a migration working folder in
+  use as free to sweep. All now go through `kazma_core.process_start`, and
+  each record carries a stamp beside its start time:
+  - **Linux**: the boot id and the start's ticks after boot
+    (`/proc/<pid>/stat` field 22). Neither moves with the clock, so any
+    process of the host is matched exactly, and a container's pid 1 after a
+    restart or a process of an earlier boot is told apart.
+  - **macOS and the BSDs**: an id made once per process. psutil moves the
+    start with the boot time there too and offers no reading that stays
+    put, so another process is matched by a start read when the record is
+    written, within 10 s; further off settles nothing. A document intake's
+    owner is the exception: it is the process's fence token, fixed for its
+    life, so its start is the one read once, and a start further off than
+    10 s reads as "unknown" and the intake's lease decides, never as dead.
+    "Self" is asked by the stamp first.
+  - **Windows**: unchanged. The kernel keeps the creation time; starts are
+    matched within 2 ms (the 3-decimal text some records keep).
+  - **Records from before the stamps**: matched by their start, within
+    2 ms for this process's own pid and 10 s for another process.
+- **The guard's orphan check**: on Linux it read the start the same way and
+  allowed 2 s, so a server recorded minutes before a drifting clock moved
+  read as "pid reused" and was not reaped. The guard (standard library only)
+  now records the same stamp (`child_stamp`, the broker's `stamp`) and the
+  pid it is of (`child_stamp_pid`, `stamp_pid`), and compares the stamp
+  first when it is the recorded pid's. A guard from before the stamps
+  leaves the earlier child's stamp in the state (a rollback, then a roll
+  forward); bound to its pid, that stamp no longer calls the new child a
+  reused pid.
+- **The pid-only checks**: a research session's cancel now asks the helper
+  whether its owner is this process, and a resumed session reads its owner
+  in the thread that claims it, not on the event loop. A legacy crawl row's
+  pid check stays: its claim already settles it. The guard's liveness
+  fallback by pid stays: it only reads state files from guards older than
+  the heartbeat.
+- **The certification sampler** counts a worker by psutil's own identity.
+- **Gate**: `tests/test_process_start.py` runs every site with the clock
+  stepped. Each site failed on the old code, and the old crawl journal is
+  run as a control, as is the guard before the stamp was bound to its pid.
+  The gate enumerates the product source: no module but the helper calls
+  `create_time()` or `boot_time()`, asks `as_dict` or `process_iter` for
+  `create_time` (or a process's `as_dict()` for everything), reads
+  `info['create_time']` or `info.get('create_time')`, reads `btime`, builds
+  `/proc/<pid>/stat` (a string, `Path` or `os.path.join`), reads a `/proc`
+  directory's time, or asks `ps` for a start column. The guard is allowed
+  its own `/proc` reads only in its two start functions, held to the
+  helper's stamp. Each shape has a planted control.
+
 ## The security policy, rewritten in English and Arabic (2026-11-27)
 
 - **One policy, in both languages**: `SECURITY.md` is rewritten in eleven
@@ -73,6 +140,22 @@
   4.1-4.4 times per four times the input here; a busy CI runner read 8.9
   and named it. Its time at each size is still read.
 
+## Memory: a summary that cannot fit no longer shortens what you see (2026-11-27)
+
+- When Kazma recalls a weekly summary, or a later conversation, too long for
+  the room left, the conversations it shows no longer give up room for it:
+  they get the widest excerpt that still fits, in English and Arabic. When
+  room is short, that can show one more conversation in place of the short
+  summaries after it.
+- Weekly summaries and monthly roll-ups now read days in your own time zone,
+  the one your reminders use, not the server's. Summaries written before
+  keep their week and month names wherever your zone is, and "What did we
+  talk about in June?" is answered by June's summary alone.
+- Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:
+  facts, weekly summaries and roll-ups, and the nightly merge. On 50
+  questions this was within the reader's noise of the facts alone; it found
+  the summary fault above.
+
 ## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
 
 - **A Word file's font table is read in linear time**: the pattern that takes
@@ -92,12 +175,165 @@
 
 ## Spaces: a chat's saved state is marked with its own space (2026-11-26)
 
-- With Spaces on, each chat's saved state in Postgres is now marked with the
-  space the chat belongs to, whoever is asking, so the database's own lock
-  will show a space only its own chats' state once it is switched on.
-  Nothing switches the lock on yet, and with Spaces off nothing changes.
-- Putting the lock's rules in place also gives the state saved by older
-  versions its chat's space.
+- Once the second lock's rules are in place (nothing puts them in place
+  yet), each chat's saved state in Postgres is marked with the space the
+  chat belongs to, with Spaces on, whoever is asking, so the database's own
+  lock will show a space only its own chats' state when it is switched on.
+  With Spaces off nothing changes.
+- Putting the rules in place also gives the state saved by older versions
+  its chat's space, from this install's own records and only on its own
+  database; if those records are missing, nothing is changed and the rules
+  are not counted as in place. Its own database is known by the server it
+  is on, whatever name reaches it. When the database is not this install's
+  own, the rules script says plainly that no saved state was given its space,
+  names what to do, and does not report success.
+- Stop now stops a reply that was pressed while Kazma checked its database
+  connection for the chat's saved state (it used to go on), and a reply that
+  reaches its 30-minute limit at that moment still ends as having reached
+  its limit, not as stopped.
+
+## Kazma's engine reads every way of writing a folder given to a container (2026-11-27)
+
+- A folder given to a container inside a group of docker options
+  (`-itv G:\w:/w`, `-vG:\w:/w`, `-v=G:\w:/w`) now reaches Kazma's engine in
+  the form it reads, as `-v G:\w:/w` already did.
+- While a new container engine waits for running document jobs, a broker
+  that misses one status answer no longer ends the wait early; Kazma's log
+  says the number of jobs stopped is unknown when the broker did not answer,
+  and says so when a wait ends with nothing to restart.
+
+## A new container engine lets running document jobs finish first (2026-11-27)
+
+- When the container engine changes, the document broker now waits for the
+  jobs it is running to finish (up to 11 minutes, one job's longest run and
+  a minute) before it moves to the new engine; Kazma's log says it waits,
+  and how many jobs were stopped if the wait ran out.
+- On a PC without the Windows docker program's context for Kazma's engine,
+  the broker also moves to Kazma's engine when that engine is set up while
+  Kazma runs.
+- Docker options written together (`-itp 80:80`) no longer keep a folder
+  given to a container from reaching Kazma's engine in the form it reads.
+
+## Kazma's engine without a Windows docker context: the document broker follows a changed choice (2026-11-27)
+
+- On a PC where the Windows docker program has no context for Kazma's
+  engine, the document broker now starts again when the engine choice
+  arrives or changes, so document jobs run on the engine you chose.
+- With `KAZMA_DOCKER_ROUTE=cli` or `KAZMA_DOCKER_BIN` set, Kazma's log and
+  its status name the Windows docker program it really uses, and why.
+- The document broker, the guard and the pre-push check keep wsl.exe's
+  messages readable (UTF-8) when they reach Kazma's engine through it.
+- The Smart App Control page says an installer that isn't signed may not
+  run while Smart App Control is on, as it is not measured yet.
+
+## Windows setup asks before it installs Python, and takes the newest (2026-11-27)
+
+- A new Windows install takes the newest python.org Python on the PC: 3.14,
+  then 3.13. 3.12 and 3.11 are used only when nothing newer is there, as
+  python.org no longer ships patched Windows builds of them.
+- When there is none, setup installs Python 3.14.10 from python.org with
+  winget only with your yes: `-Yes` installs it, a terminal asks once, and
+  without either nothing is installed and setup says so. A failed install
+  says winget's exit code and its last line. Looking for a Python never
+  installs one.
+- Kazma's document jobs reach Kazma's own engine through `wsl.exe` on a PC
+  without the Windows docker program's context, as Kazma itself does.
+  `kazma doctor` says the Windows docker tool is not needed there, without
+  starting it.
+- The installer question in the Smart App Control page now depends on
+  whether Smart App Control is on (English and Arabic).
+
+## Windows' file check: the review's fixes (2026-11-26)
+
+- Backups of a Postgres that runs in a container on Kazma's engine work on
+  the route through `wsl.exe` again: the dump reached a closed port and the
+  restore check called a good backup corrupt.
+- The route to Kazma's engine is chosen from the engine you picked, even in
+  a program's first docker call and on a PC where Windows' file check refuses
+  the Windows docker tool; `kazma doctor` then says the tool is not needed
+  instead of naming a feature that waits.
+- A deploy that waits because Windows checked a file the new version needs
+  is kept and reported, never undone.
+- A code run that runs out of time stops its container too. A reload's
+  failure detail never shows a password or a token. The company-IT section
+  suggests publisher rules only.
+
+## Every Windows file Kazma runs, and its route without Kazma's certificate (2026-11-26)
+
+- A new Windows install runs on python.org's Python, which the Python
+  Software Foundation signs (3.12 first, installed for you when none is
+  there); the Python builds uv downloads are not signed. An existing install
+  keeps its Python.
+- The installer's SmartScreen notice is said as it is: Windows shows it for
+  installers that aren't signed yet, and signed releases are on the way.
+- `docs/plans/WINDOWS_TRUST_INVENTORY.md` lists every Windows-native file
+  Kazma runs or loads, its signature, and how it keeps working with Smart App
+  Control on; what is left needs Kazma's own certificate, four tools still
+  need a route, and three script rows need the VM test.
+
+## Kazma reaches its own container engine without a Windows docker program (2026-11-26)
+
+- Every docker call Kazma makes to its own engine now runs the engine's own
+  Docker inside WSL through Microsoft's `wsl.exe`, so Kazma needs no Windows
+  `docker.exe` for it and Windows' file check has nothing to refuse there.
+  Docker Desktop keeps its own signed tool. It is as fast or faster: a
+  container command 281 -> 152 ms, a container start 699 -> 425 ms, 50 MB out
+  of a container 551 -> 316 ms (measured on the owner's PC).
+- Paths are given as the engine reads them, a value a container takes from
+  the environment never goes on a command line, and the reboot drill checks
+  this route with nobody signed in. `KAZMA_DOCKER_ROUTE=cli` keeps the old way.
+
+## Windows' file check: the outside audit's findings (2026-11-26)
+
+- A docker program Windows does not allow is never taken for a Docker engine
+  that is down: the guard uses the next program Windows allows, or waits and
+  says once which feature waits; it no longer restarts Kazma's engine for it.
+  A program that started is checked again after 15 minutes, so a policy that
+  arrives while Kazma runs is noticed.
+- `KAZMA_DOCKER_BIN` naming a program Windows refused is said as that, not as
+  a missing file. The PostgreSQL Kazma's setup installed is looked for first
+  wherever it lives, and a `libpq.dll` on PATH that Windows refuses is passed
+  over.
+- One list of Windows' refusal codes, read everywhere, including by the
+  pre-push check, which now finds docker the way Kazma does.
+- Kazma's setup hints and the MCP and ACP client configs run Kazma with
+  Python (`python -m kazma_cli`), never its unsigned launchers.
+- The Smart App Control page has a section for company IT (App Control for
+  Business) and says what Windows checked on a real PC.
+
+## Kazma works with Windows' file check (Smart App Control) (2026-11-26)
+
+- **An update never replaces a working Kazma with one that cannot start**:
+  before the guard stops the running server for a reload, it checks in a
+  separate process that the new code can load what it needs on this PC
+  (the database client library, the app, the docker command-line tool).
+  When it cannot, the running server stays, the update waits, and the owner
+  gets one calm message saying so; `kazma_guard.py --reload` answers 4.
+  On 26 November a reload left Kazma read-only for thirty minutes this way.
+  The running guard takes this on the next restart of the KazmaAgent task.
+- **Kazma says what Windows checked, calmly**: `kazma doctor` has a
+  "Windows' file check" section (whether Smart App Control checks files, and
+  each of Kazma's native parts: allowed, replaced by its signed alternative,
+  or the feature that waits); `kazma setup system` and `kazma setup install`
+  add a note when there is something to say; the security report shows it as
+  information, never a finding. The two fallbacks (PostgreSQL's signed client
+  library, Docker Desktop's signed CLI) now say so at INFO. One alert,
+  "Kazma could not keep a feature working on this PC", only when a feature
+  has no signed alternative, naming it. Nothing Kazma says asks anyone to
+  change Windows' protection, in English or Arabic (a test reads every
+  phrase).
+- **Signed parts first while Smart App Control checks files**: Kazma then
+  uses PostgreSQL's signed client library and Docker Desktop's signed CLI
+  from the start, and never tries the unsigned copies (psycopg's bundled
+  library, the engine's own CLI). With it off, nothing changes.
+- **Fewer unsigned files in Express**: the test suite part installs pytest
+  and its plugins (the `test` extra), not the developer tools (`dev`: mypy,
+  locust, pre-commit), which nothing in a running Kazma or its tests uses.
+  Measured on Windows: 699 unsigned native files in an Express install's
+  packages before, 359 after.
+- **New page**: [Kazma and Windows Smart App Control](docs/docs/guide/windows-smart-app-control.md),
+  with its Arabic text, and the plan: signed releases, then a release bundle
+  where every file Kazma ships is signed.
 
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 
@@ -156,13 +392,17 @@
   its MCP server and the terminal app's preview now refuse Kazma's stores
   and secret files wherever they are. An alert reported this earlier (#53)
   and was dismissed; the owner reopens it.
-- **The IDE's read-only git reads the repository's versions only**: no
-  `--no-index`, `git diff` only in a repository, and none of Kazma's own
-  files as an operand. Git with no approval (the IDE's, `/ide git`, the
-  agent's `git_diff`) shows a file's contents only in a work tree git
-  itself accepts and a repository that holds none of Kazma's files; the
-  answer says why in English or Arabic. A network path given to git is
-  refused before anything touches it.
+- **Git with no approval runs a list of known read forms; anything else
+  asks**: the IDE's git (the page, `/ide git`, the terminal app) and the
+  agent's git read tools run with no card only status, the branch and tag
+  lists, names and ids, `stash list`, log, and diff, show and blame in the
+  forms the list names. A diff, show or patch log runs only on commits of
+  the repository's own history, in a work tree git accepts; the sections
+  under Kazma's own paths are left out, with a line saying how many, in
+  English or Arabic.
+  Every other command, option or operand goes to the approval card with
+  the exact command shown. A word naming one of Kazma's files is refused,
+  and a network path given to git is refused before anything touches it.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

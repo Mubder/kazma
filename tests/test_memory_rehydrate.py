@@ -28,6 +28,7 @@ from kazma_core.memory.dual_write import _episode_id
 from kazma_core.memory.rehydrate import erased_counts
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
+from tests._as_request import in_space, tests_own
 from tests._no_models import finish_turn_memory, keep_models_out
 
 
@@ -101,8 +102,9 @@ def _chat(mem, session_id, messages, *, thread_id="", tenant="default"):
 
     store = SessionManager(db_path=str(mem.dir / "chat_sessions.db"))
     try:
-        store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
-                              messages=list(messages)))
+        with in_space(tenant):  # the chat page's save, in its chat's space
+            store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
+                                  messages=list(messages)))
     finally:
         store.close()
 
@@ -198,7 +200,9 @@ def test_a_turn_is_restored_from_the_chat_store(mem):
     eid = _turn(mem.db, session, 3, question, answer)
     _erase(mem.db, eid)
 
-    rehydrate._rehydrate_erased(mem.db)
+    # Through the door its pass declares (run_rehydrate_pass): every space's chats.
+    with tests_own("memory recovery reads every space's chats and checkpoints for erased turns"):
+        rehydrate._rehydrate_erased(mem.db)
     row = _row(mem.db, eid)
     assert (row["user_text"], row["assistant_text"]) == (question.strip(), answer.strip())
     assert _meta(row)["rehydrated"] | {"at": 0} == {

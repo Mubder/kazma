@@ -51,7 +51,8 @@ def _status_text(*, engine_up: bool | None, broker: str, context: str = "kazma-e
 
 
 def _reading(up: float, *, engine_up=True, broker="running", sandbox: str | None = "ok",
-             sandbox_engine="kazma", searxng=200, signed_in=False) -> dict[str, Any]:
+             sandbox_engine="kazma", searxng=200, signed_in=False,
+             route: str | None = "wsl 0 29.10.0") -> dict[str, Any]:
     checks: dict[str, Any] = {"llm_provider": {"status": "degraded", "needs_setup": "provider"}}
     if sandbox is not None:
         checks["code_execution"] = (
@@ -63,6 +64,7 @@ def _reading(up: float, *, engine_up=True, broker="running", sandbox: str | None
         "ready": {"http": 503, "body": {"status": "not_ready", "checks": checks}},
         "status": _status_text(engine_up=engine_up, broker=broker),
         "searxng": {"url": "http://127.0.0.1:8888", "http": searxng},
+        "route": route,
     }
 
 
@@ -92,6 +94,9 @@ def test_each_part_is_read_up_when_it_is():
     ({"sandbox_engine": "desktop"}, "code_sandbox"),
     ({"searxng": None}, "private_search"),
     ({"searxng": 502}, "private_search"),
+    ({"route": "cli 0 29.10.0"}, "docker_route"),  # Kazma's engine through a Windows docker.exe
+    ({"route": "wsl 1 Cannot connect"}, "docker_route"),
+    ({"route": None}, "docker_route"),
 ])
 def test_each_part_is_read_down_when_it_is(change, part):
     parts = drill.part_readings(_reading(60.0, **change), "kazma")

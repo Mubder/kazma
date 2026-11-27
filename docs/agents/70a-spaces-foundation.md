@@ -188,8 +188,9 @@ an install with one account behaves as before.
   swarm, chats and the mirror armed and enforced, seeded as requests bind:
   each space reads its own; not armed as the control).
   `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
-  (`tests/_second_lock_armed.py`); a test there that reaches the database
-  with nothing bound fails, and binding every test is step 5's.
+  (`tests/_second_lock_armed.py`: the rules put back and the lock armed
+  again at each module, with no backfill); a test there that reaches the
+  database with nothing bound fails.
 - **The checkpointer's door** (S4-01 step 4, `checkpoints_pg.py`,
   `db/row_security.py`, the gateway's `stores/checkpoint.py`; nothing arms
   it). The checkpointer's pool asks `row_security.checkpoint_door()` at each
@@ -207,15 +208,76 @@ an install with one account behaves as before.
   call that names no thread); its listing takes each step in the door and
   hands the row on outside it (M5: a door held across a `yield` stays in the
   consumer). `aprune` keeping the latest is refused in a space's checkout
-  (L1). `apply` ends with the backfill (design 7.3, at every pass): every
-  checkpoint row gets its thread's space from `thread_scopes.db`, NULL for
-  the owner's, a wrong stamp back; a record store that cannot be read keeps
-  `apply` from being complete. Gates: `tests/test_pg_checkpoint_spaces.py`
-  (real Postgres, the saver called directly: wire, stamp, a space's own
-  threads, refused, backfill, prune; each with its control) and
+  (L1). A whole `apply` ends with the backfill (design 7.3, at every whole
+  pass, not at each checkpointer open): every checkpoint row gets its
+  thread's space from `thread_scopes.db`, NULL for the owner's, a wrong
+  stamp back -- set-based, the records loaded once into a temporary table,
+  two statements per table under the schema lock with a statement timeout
+  (step 4 review L6). It trusts this install's records only on this
+  install's own database -- its own address, or any other way to the same
+  server and database, told by the server's system identifier and the
+  database's name (`row_security._this_installs_own`); the script reads this
+  install's files even with `--url-from`. Elsewhere `Applied.not_backfilled`,
+  and the script exits 1 with one message naming the remedy: Spaces on
+  replicas is not covered (review M2, delta review N3, second delta review
+  L2) -- reads them read-only,
+  and a missing record store, an empty one while rows carry a space, or one
+  that cannot be read keeps `apply` from being complete, changing nothing
+  (M1: a missing store used to be made empty and read as "no threads").
+  The checkpointer's space checkout does not mark `holding(space)` as the
+  shared pool's does: a context variable held across LangGraph's yields
+  would leak into the consumer (M5), so step 3's nested refusals do not
+  cover it (L2). Its pools' connection check gives back the cancel
+  psycopg_pool swallows (`checkpoints_pg._check_kept_cancel`: 3.3.1 counts
+  `CancelledError` among a client's errors and goes on; the check takes the
+  cancel off the task's count and asks for it again, so it lands at the
+  pool's next wait and a timeout or `wait_for` ending there is still a
+  `TimeoutError` -- never a second cancel, delta review N1; for upstream,
+  L1); a closed or closing pool makes no space half: `close()` says it is
+  closing before it awaits the old half, as `closed` turns True only after,
+  and the half asks again under its lock (L3, delta review N2, second delta
+  review L1). Gates:
+  `tests/test_pg_checkpoint_spaces.py` (real Postgres, the saver called
+  directly: wire, stamp, a space's own threads, refused, backfill, the
+  backfill's trust, prune; each with its control) and
   `tests/test_checkpoint_doors.py` (the door's answers, the manager, M5 and
-  its control, the H4 gate). A moved thread's checkpoints are restamped by
-  the next backfill; at the move itself is step 5's.
+  its control, the H4 gate over `exec_` and the sync senders, a Stop and
+  a window ending in the check, a half asked for of a pool closed, closing,
+  or closed while it waited for the lock). No flow moves a thread between spaces: the chat
+  move forks, its copy written under the target's scope.
+- **Every Postgres suite armed** (S4-01 step 5; nothing arms the product).
+  The chat move runs armed end to end on Postgres (no restamp: thread
+  records never change, and the move forks under the target's scope), and
+  the faults hold armed: a space role lost while running (refused and said
+  as the space half's, never an outage), `/health/ready` and `/health/deep`,
+  the audit prune (`tests/test_pg_second_lock_faults.py`). The whole
+  Postgres suite runs armed as well as not. Each test binds what the
+  request or turn it stands for would (`tests/_as_request.py`: `as_owner`,
+  the tenant middleware's answer with Spaces off; `in_space`; the real
+  tenant middleware in front of a test's own app); a store test's own seeds
+  and checks are the install's (`tests_own`, `own(store)`); a private part
+  of a declared pass, called directly, takes that pass's door; a thread a
+  test starts says its own. A test that pins how an install reads with the
+  lock not armed says so (`not_armed`): Spaces off as before, step 1's
+  report mode, the first lock's controls, a database of a test's own that
+  never had the rules, the mirror's own connections, and a restore of the
+  shared tables while running, which takes the space role's rights until a
+  whole `apply` (step 6's to handle). The armed run found one fault, fixed
+  with its class: a closed shared pool made a space half at its next space
+  checkout and wrote through it (`PostgresPool._space_half` raises
+  `PoolClosed`, as the checkpointer's does; a gate reads every
+  `_space_half`, `tests/test_checkpoint_doors.py`), and a catalog read lost
+  a column through a store's dict-row cursor (`row_security._rows` refuses a
+  short row; a gate: each query names its columns once). The proof that
+  nothing is blinded: the space matrix runs on Postgres armed (every route
+  and tool in its own space; a Documents case speaks of the documents it
+  seeded, the shared tables holding the cases before), and every
+  maintenance sweep does the same armed as not
+  (`tests/test_pg_sweeps_armed.py`: one database seeded in three spaces,
+  copied, each copy's sweeps in a process of their own as the cadence runs
+  them; the same outcomes, warnings and rows, while the sweeps changed rows
+  of every space; the control, a sweep with its install declaration taken
+  away, is seen).
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

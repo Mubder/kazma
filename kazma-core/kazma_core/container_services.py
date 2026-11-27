@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import secrets as _secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -129,14 +130,28 @@ def ensure_secret(env_path: Path, name: str, placeholders: tuple[str, ...] = ())
     return True
 
 
-def compose_up_argv(svc: ContainerService, docker: str, root: Path, env_path: Path) -> tuple[str, ...]:
+#: How a docker call is made: a docker CLI's path (the old form, kept for
+#: callers and tests that name one), or ``docker_cli.docker_argv`` (the one
+#: route: Kazma's engine through wsl.exe, else the Windows CLI).
+Docker = str | Callable[[list[str]], list[str] | None]
+
+
+def docker_call(docker: Docker, args: list[str]) -> list[str]:
+    """The argv of ``docker <args>`` by *docker*."""
+    if callable(docker):
+        argv = docker(list(args))
+        return argv if argv is not None else ["docker", *args]
+    return [docker, *args]
+
+
+def compose_up_argv(svc: ContainerService, docker: Docker, root: Path, env_path: Path) -> tuple[str, ...]:
     """``docker compose ... up -d <service>`` for *svc*, reading *env_path*."""
-    argv = [docker, "compose", "-f", str(Path(root) / svc.compose_file), "--env-file", str(env_path)]
+    argv = ["compose", "-f", str(Path(root) / svc.compose_file), "--env-file", str(env_path)]
     if svc.project:
         argv += ["-p", svc.project]
     if svc.profile:
         argv += ["--profile", svc.profile]
-    return (*argv, "up", "-d", svc.service)
+    return tuple(docker_call(docker, [*argv, "up", "-d", svc.service]))
 
 
 # ── keeping a set-up service on its pinned image ──────────────────────────
@@ -168,10 +183,17 @@ def _made_from(config_files: str | None, svc: ContainerService, root: Path) -> b
     share it, and one install's update would have recreated the other's
     container. Compose records the files it used, comma-separated."""
     want = (Path(root) / svc.compose_file).resolve()
+    # Compose run through wsl.exe (Kazma's engine, docker_cli.docker_command)
+    # records the file as the engine's distro reads it (/g/...).
+    from kazma_core.docker_cli import distro_path
+
+    in_distro = distro_path(str(want)) if os.name == "nt" else None
     for name in str(config_files or "").split(","):
         name = name.strip()
         if not name:
             continue
+        if in_distro and name == in_distro:
+            return True
         try:
             if Path(name).resolve() == want:
                 return True
@@ -208,7 +230,7 @@ class ImageState:
     image_id: str = ""
 
 
-def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) -> ImageState:
+def _image_state(svc: ContainerService, root: Path, docker: Docker, *, run=None) -> ImageState:
     """Whether *svc*'s container runs the image its compose file pins.
 
     ``absent``: no container of that name (the part is not set up here).
@@ -224,7 +246,7 @@ def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) ->
     if not pinned:
         return ImageState(svc, "unknown")
     try:
-        found = run([docker, "inspect", svc.container], capture_output=True, text=True, timeout=60,
+        found = run(docker_call(docker, ["inspect", svc.container]), capture_output=True, text=True, timeout=60,
                     stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return ImageState(svc, "unknown", pinned=pinned)
@@ -248,7 +270,7 @@ def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) ->
                       volumes=volumes, image_id=str(row.get("Image") or ""))
 
 
-def _remove_replaced_image(state: ImageState, docker: str, *, run) -> str:
+def _remove_replaced_image(state: ImageState, docker: Docker, *, run) -> str:
     """Remove the image *state*'s container ran before compose recreated it;
     "" when it is gone (or there was none), else docker's reason for keeping
     it. Never forced: an image another container still uses, or that another
@@ -259,14 +281,14 @@ def _remove_replaced_image(state: ImageState, docker: str, *, run) -> str:
     if not state.image_id:
         return ""
     try:
-        now = run([docker, "inspect", "--format", "{{.Image}}", state.svc.container], capture_output=True,
+        now = run(docker_call(docker, ["inspect", "--format", "{{.Image}}", state.svc.container]), capture_output=True,
                   text=True, timeout=60, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return ""
     if now.returncode != 0 or (now.stdout or "").strip() == state.image_id:
         return ""
     try:
-        done = run([docker, "image", "rm", state.image_id], capture_output=True, text=True, timeout=120,
+        done = run(docker_call(docker, ["image", "rm", state.image_id]), capture_output=True, text=True, timeout=120,
                    stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as exc:
         return str(exc)[:200]
@@ -276,7 +298,7 @@ def _remove_replaced_image(state: ImageState, docker: str, *, run) -> str:
     return (text.splitlines() or ["refused"])[-1][:200]
 
 
-def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list[tuple[ImageState, str]]:
+def refresh_images(root: Path, env_path: Path, docker: Docker, *, run=None) -> list[tuple[ImageState, str]]:
     """Put every set-up service on its pinned image; one outcome per service.
 
     Outcomes: ``current``, ``absent``, ``not_ours``, ``unknown``, ``updated``,

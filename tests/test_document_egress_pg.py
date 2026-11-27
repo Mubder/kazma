@@ -22,7 +22,9 @@ import pytest
 from kazma_core.config_store import get_config_store
 from kazma_core.documents import extract_salvage as salvage
 from kazma_core.documents.config import DocumentConfig
+from kazma_core.spaces.row_work import work_of
 
+from tests._as_request import in_space, own
 from tests.test_extract_salvage import _ir
 
 pytestmark = pytest.mark.postgres
@@ -65,14 +67,22 @@ def _service(root):
 
 
 def _job(svc, tenant, actor):
-    result = svc.ingest_stream(io.BytesIO(b"a private document " + uuid.uuid4().hex.encode()),
-                               filename="note.txt", tenant_id=tenant, actor_id=actor,
-                               workspace_id=tenant + "-workspace")
-    return svc.jobs.get(tenant_id=tenant, job_id=result.job_id)
+    with in_space(tenant, actor):  # the upload request, in the actor's space
+        result = svc.ingest_stream(io.BytesIO(b"a private document " + uuid.uuid4().hex.encode()),
+                                   filename="note.txt", tenant_id=tenant, actor_id=actor,
+                                   workspace_id=tenant + "-workspace")
+    return own(svc.jobs).get(tenant_id=tenant, job_id=result.job_id)
+
+
+def _stage(svc, job, **kwargs):
+    """The parse stage, as the worker runs it: in the job's own space (each
+    thread says it: a thread of its own starts with nothing said)."""
+    with work_of(job.tenant_id, job.actor_id):
+        return svc._parse_to_manifest(job, **kwargs)
 
 
 def _egress_events(svc, tenant):
-    return [e for e in svc.audit.list_events(tenant_id=tenant)["events"] if e["event_type"] == "egress"]
+    return [e for e in own(svc.audit).list_events(tenant_id=tenant)["events"] if e["event_type"] == "egress"]
 
 
 def test_concurrent_services_keep_each_jobs_identity_on_postgres(pg_backend, tmp_path, monkeypatch):
@@ -91,7 +101,7 @@ def test_concurrent_services_keep_each_jobs_identity_on_postgres(pg_backend, tmp
     monkeypatch.setattr(second, "_parse_to_manifest_impl", parse)
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(svc._parse_to_manifest, job, force_ocr=False)
+            futures = [pool.submit(_stage, svc, job, force_ocr=False)
                        for svc, job in ((first, a), (second, b))]
             for future in futures:
                 future.result(timeout=30)
@@ -137,7 +147,7 @@ def test_an_unavailable_postgres_audit_refuses_the_upload(pg_backend, tmp_path, 
 
     monkeypatch.setattr(svc, "_parse_to_manifest_impl", parse)
     try:
-        svc._parse_to_manifest(job, force_ocr=False)
+        _stage(svc, job, force_ocr=False)
         assert not uploaded
     finally:
         get_config_store().set("documents.security.remote_parse", False, category="documents")
@@ -168,7 +178,7 @@ def test_live_revocation_through_the_settings_store_stops_the_next_upload(pg_bac
 
     monkeypatch.setattr(svc, "_parse_to_manifest_impl", parse)
     try:
-        svc._parse_to_manifest(job, force_ocr=False)
+        _stage(svc, job, force_ocr=False)
         assert uploaded == ["llama"]
         phases = sorted(e["action"] for e in _egress_events(svc, job.tenant_id))
         assert phases == ["remote_parse_attempt", "remote_parse_failure"]
@@ -185,20 +195,22 @@ def test_a_reused_version_keeps_each_new_jobs_actor_on_postgres(pg_backend, tmp_
     tenant = f"pg-v-{uuid.uuid4().hex[:8]}"
     body = b"a private document " + uuid.uuid4().hex.encode()
     try:
-        first = svc.ingest_stream(io.BytesIO(body), filename="note.txt", tenant_id=tenant,
-                                  actor_id="alice", workspace_id="alice-workspace")
-        first_job = svc.jobs.get(tenant_id=tenant, job_id=first.job_id)
-        svc.repository.grant_access(tenant_id=tenant, document_id=first_job.document_id,
-                                    actor_id="alice", principal_id="bob", permission="write")
-        second = svc.ingest_stream(io.BytesIO(body), filename="note.txt", tenant_id=tenant,
-                                   actor_id="bob", workspace_id="bob-workspace",
-                                   document_id=first_job.document_id, force_ocr=True,
-                                   idempotency_key="bob-request")
-        job = svc.jobs.get(tenant_id=tenant, job_id=second.job_id)
+        with in_space(tenant, "alice"):  # alice's upload and her share
+            first = svc.ingest_stream(io.BytesIO(body), filename="note.txt", tenant_id=tenant,
+                                      actor_id="alice", workspace_id="alice-workspace")
+            first_job = svc.jobs.get(tenant_id=tenant, job_id=first.job_id)
+            svc.repository.grant_access(tenant_id=tenant, document_id=first_job.document_id,
+                                        actor_id="alice", principal_id="bob", permission="write")
+        with in_space(tenant, "bob"):  # bob's upload of a new version
+            second = svc.ingest_stream(io.BytesIO(body), filename="note.txt", tenant_id=tenant,
+                                       actor_id="bob", workspace_id="bob-workspace",
+                                       document_id=first_job.document_id, force_ocr=True,
+                                       idempotency_key="bob-request")
+        job = own(svc.jobs).get(tenant_id=tenant, job_id=second.job_id)
         assert job.version_id == first_job.version_id and job.actor_id == "bob"
         monkeypatch.setattr(svc, "_parse_to_manifest_impl", lambda *a, **k:
                             salvage._record_egress("mock-no-upload", tmp_path, 18))
-        svc._parse_to_manifest(job, force_ocr=True)
+        _stage(svc, job, force_ocr=True)
         events = _egress_events(svc, tenant)
         assert len(events) == 1
         assert events[0]["actor_id"] == "bob" and events[0]["job_id"] == str(job.id)

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import sys
 import json
 import os
 from pathlib import Path
@@ -165,6 +166,7 @@ def test_the_guards_copy_never_reads_settings(contexts, monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "kazma_guard_docker_cli_probe", ROOT / "kazma-core" / "kazma_core" / "docker_cli.py")
     copy = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = copy  # @dataclass (DockerCommand) needs it, as the guard's loader does
     spec.loader.exec_module(copy)
     copy.find_docker_cli()
     assert called == []

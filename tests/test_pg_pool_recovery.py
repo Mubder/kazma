@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._as_request import tests_own
+
 REPO = Path(__file__).resolve().parents[1]
 _PRODUCT = ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",
             "kazma-cli/kazma_cli", "kazma-skills/kazma_skills", "kazma-tui/kazma_tui")
@@ -119,10 +121,11 @@ def test_a_connection_the_server_closed_is_replaced_at_checkout():
     dsn = _dsn()
     pool = PostgresPool(dsn, min_size=1, max_size=1)
     try:
-        first = pool.execute_one("SELECT pg_backend_pid() AS pid")["pid"]
-        _terminate(dsn, first)
-        # The one pooled connection is dead; the caller still gets an answer.
-        second = pool.execute_one("SELECT pg_backend_pid() AS pid")["pid"]
+        with tests_own():
+            first = pool.execute_one("SELECT pg_backend_pid() AS pid")["pid"]
+            _terminate(dsn, first)
+            # The one pooled connection is dead; the caller still gets an answer.
+            second = pool.execute_one("SELECT pg_backend_pid() AS pid")["pid"]
         assert second != first
     finally:
         pool.close()
@@ -217,7 +220,8 @@ def test_the_checkpointers_pool_replaces_a_closed_connection():
         import selectors
 
         factory = lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())  # noqa: E731
-    with asyncio.Runner(loop_factory=factory) as runner:
+    # The test's own statements, said before the runner copies the context.
+    with tests_own(), asyncio.Runner(loop_factory=factory) as runner:
         runner.run(scenario())
 
 

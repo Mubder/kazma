@@ -1154,7 +1154,13 @@ class ConfigStore(_ChangeNotices):
 
     def __init__(self, db_path: str | None = None, yaml_path: str | None = None) -> None:
         self._db_path = Path(db_path or _DEFAULT_DB)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        from kazma_core.diagnostic_scope import self_check_reading
+
+        # kazma self-check must not create settings.db or its folder. A later
+        # read opens the file immutable when it is already there.
+        self._read_only_open = self_check_reading()
+        if not self._read_only_open:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._yaml_path = Path(yaml_path or "kazma.yaml")
         self._conn: sqlite3.Connection | None = None
         # REENTRANT, and it has to be. `atomic_update` holds this lock across
@@ -1345,6 +1351,18 @@ class ConfigStore(_ChangeNotices):
                 raise
             return
         with self._lock:
+            if self._read_only_open:
+                # immutable=1 does not create the file, a journal, or -wal/-shm.
+                # mode=ro on a WAL database still creates those sidecars.
+                if not self._db_path.is_file():
+                    raise FileNotFoundError(self._db_path.name)
+                self._conn = sqlite3.connect(
+                    self._db_path.resolve().as_uri() + "?immutable=1",
+                    uri=True,
+                    check_same_thread=False,
+                )
+                self._conn.row_factory = sqlite3.Row
+                return
             self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
@@ -1387,17 +1405,11 @@ class ConfigStore(_ChangeNotices):
         One line at boot, best-effort, never fatal.
         """
         try:
-            raw = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
-            if not raw:
+            from kazma_core.paths import data_dir_is_relocated
+
+            if not data_dir_is_relocated():
                 return
-            from pathlib import Path as _Path
-
-            from kazma_core.paths import get_project_root
-
-            relocated = _Path(raw).expanduser().resolve()
-            default = (get_project_root() / "kazma-data").resolve()
-            if relocated == default:
-                return  # pointed at its own dir; nothing surprising
+            relocated = Path((os.environ.get("KAZMA_DATA_DIR") or "").strip()).expanduser().resolve()
             logger.warning(
                 "[ConfigStore] KAZMA_DATA_DIR relocates files to %s, but "
                 "settings come from POSTGRES, which is SHARED with every other "

@@ -17,6 +17,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
 
+from tests._as_request import as_owner
+
 pytestmark = pytest.mark.postgres
 
 
@@ -80,5 +82,6 @@ def test_restored_approval_keeps_root_and_has_one_effect(tmp_path):
     factory = None
     if sys.platform == "win32":
         factory = lambda: asyncio.SelectorEventLoop()  # noqa: E731
-    with asyncio.Runner(loop_factory=factory) as runner:
+    # The owner's chat turns, bound before the runner copies the context.
+    with as_owner(), asyncio.Runner(loop_factory=factory) as runner:
         runner.run(scenario())

@@ -16,7 +16,22 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   packages, and eleven scripts plus the guard's pager lost the vault key and
   the DSN). Untrusted XML: `kazma_core.security.safe_xml`. Child rlimits:
   `kazma_core.security.rlimits` (no `preexec_fn`). UI writes:
-  `window.kazmaSave` (never discard an awaited `fetch`).
+  `window.kazmaSave` (never discard an awaited `fetch`). A process's start
+  (the pid-reuse guard of every owner record: crawls, research sessions and
+  storage, origin leases, document intakes, migration folders):
+  `kazma_core.process_start`. A record carries a stamp beside its start
+  time: on Linux the boot id and the start's ticks after boot, matched
+  exactly for any process; on macOS and the BSDs an id of this process,
+  with another process's start matched within 10 s and further off
+  settling nothing (`start_verdict` says None: a document intake, whose
+  owner is a fixed fence token, then lets its lease decide); on Windows
+  none, the kernel-kept start matched within 2 ms. On Linux psutil's `create_time()`
+  adds the boot time, read again on every call, and it steps with the wall
+  clock: on Docker Desktop's WSL2 VM a whole second about every 30 s under
+  load, and the Knowledge ingest took a live crawl over (prepush,
+  2026-11-27). No other module reads a start, the boot time or
+  `/proc/<pid>/stat`; the guard keeps its own copy of the Linux stamp for
+  its orphan check, held to the helper's (`tests/test_process_start.py`).
 - **Every thread-taking route declares its rule** in
   `tests/test_thread_route_policy.py` (owner / admin / admin+owner / session).
 - **Closures scheduled from a loop bind the loop's names** as defaults or

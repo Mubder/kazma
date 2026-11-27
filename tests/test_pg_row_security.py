@@ -762,6 +762,28 @@ def test_the_proof_says_what_stopped_it(rs: Any, db: dict[str, Any]) -> None:
         _sql(app, "ALTER FUNCTION public.kazma_space_id_away() RENAME TO kazma_space_id")
 
 
+# ── a store's cursor (S4-01 step 5) ─────────────────────────────────────
+
+
+def test_a_tables_policy_reads_whole_through_a_dict_row_cursor(rs: Any, db: dict[str, str]) -> None:
+    """``apply_made_tables`` reads with the store's own cursor, whose rows are
+    dicts: the two ``pg_get_expr`` columns of ``_policies`` came back as one,
+    and a table that already held its policy raised IndexError (found by the
+    armed suite, a store made in a schema of its own)."""
+    dict_row = psycopg.rows.dict_row  # the module's guarded import: no bare one in a test
+
+    table = "kazma_chat_sessions"
+    with psycopg.connect(db["app"], autocommit=True) as conn:
+        plain = rs._policies(conn.cursor(), table)
+        assert plain and len(plain[0]) == 6
+        assert rs._policies(conn.cursor(row_factory=dict_row), table) == plain
+        with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+            assert rs._apply_table(cur, table, rs.RULES[table]) == [], "in place: nothing to change"
+        # The control: a read that names two columns alike is refused, never read short.
+        with pytest.raises(ValueError, match="two columns alike"):
+            rs._rows(conn.cursor(row_factory=dict_row), "SELECT 1 AS a, 2 AS a")
+
+
 # ── the way out (last: it drops the role) ───────────────────────────────
 
 
@@ -769,6 +791,11 @@ def test_zz_the_remove_file_takes_the_lock_out(rs: Any, db: dict[str, str]) -> N
     with psycopg.connect(db["base"], autocommit=True) as admin:
         for other in db["extra"]:  # the role's rights in other databases go with them
             admin.execute(f'DROP DATABASE IF EXISTS "{other}" WITH (FORCE)')
+        # An armed run keeps the rules, and the role's rights, in the shared
+        # test database too (tests/_second_lock_armed.py): they go first, and
+        # its next module puts them back.
+        if admin.execute("SELECT 1 FROM pg_roles WHERE rolname = 'kazma_space'").fetchone():
+            admin.execute("DROP OWNED BY kazma_space")
     db["extra"].clear()
     _seed(db)
     with psycopg.connect(db["su"], autocommit=True) as conn:

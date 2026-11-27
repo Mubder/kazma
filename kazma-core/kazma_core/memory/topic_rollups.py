@@ -49,6 +49,7 @@ import datetime as _dt
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -108,26 +109,106 @@ Reply with JSON only: {{"title": "...", "summary": "...", "skip": false}}
 # ── Periods ──────────────────────────────────────────────────────────────
 
 
-def _month_of(ts: float) -> tuple[str, float, float]:
-    """The calendar month holding *ts* in the install's local time: its key
-    (``"2026-10"``) and its start and end as epoch seconds."""
-    day = _dt.datetime.fromtimestamp(float(ts)).date()
-    start = _dt.datetime(day.year, day.month, 1)
-    end = _dt.datetime(day.year + (day.month == 12), day.month % 12 + 1, 1)
+#: A stretch's start or end is read at midday: a summary written before its
+#: days were read in the operator's zone starts at the server's midnight,
+#: and no two zones less than 12 hours apart put midday on another day (the
+#: step 5 delta review's B).
+_MIDDAY_S = 12 * 3600
+_WEEK_KEY = re.compile(r"(\d{4})-W(\d{2})")
+_MONTH_KEY = re.compile(r"(\d{4})-(\d{2})")
+
+
+def _week_monday(key: str) -> _dt.date | None:
+    """The Monday of an ISO week key ("2026-W23"), with no zone; None when
+    *key* is not one."""
+    found = _WEEK_KEY.fullmatch(str(key or ""))
+    try:
+        return _dt.date.fromisocalendar(int(found[1]), int(found[2]), 1) if found else None
+    except ValueError:
+        return None
+
+
+def _month_first(key: str) -> _dt.date | None:
+    """The first of a month key ("2026-06"); None when *key* is not one."""
+    found = _MONTH_KEY.fullmatch(str(key or ""))
+    try:
+        return _dt.date(int(found[1]), int(found[2]), 1) if found else None
+    except ValueError:
+        return None
+
+
+def _month_bounds(day: _dt.date, zone: Any) -> tuple[str, float, float]:
+    start = _dt.datetime(day.year, day.month, 1, tzinfo=zone)
+    end = _dt.datetime(day.year + (day.month == 12), day.month % 12 + 1, 1, tzinfo=zone)
     return f"{day.year}-{day.month:02d}", start.timestamp(), end.timestamp()
 
 
-def rollup_label(level: str, period_start: float, period_end: float) -> str:
-    """How recall and the page name a summary's stretch of time, in English
-    (recall's block is Kazma's own text): "Week of Oct 06, 2026",
-    "October 2026", "Project, Sep 2026 to Nov 2026"."""
-    start = _dt.datetime.fromtimestamp(float(period_start or 0))
+def _month_of(ts: float, zone: Any = None) -> tuple[str, float, float]:
+    """The calendar month holding *ts* in the operator's zone
+    (``topic_summaries.memory_zone``): its key (``"2026-10"``) and its start
+    and end as epoch seconds."""
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone() if zone is None else zone
+    return _month_bounds(_dt.datetime.fromtimestamp(float(ts), zone).date(), zone)
+
+
+def _week_month(row: Any, zone: Any) -> tuple[str, float, float]:
+    """The month a weekly summary belongs to: its Monday's, from its key (no
+    zone; a week written in the server's local time keeps its month), else
+    its start read at midday."""
+    monday = _week_monday(row["period_key"])
+    if monday is not None:
+        return _month_bounds(monday, zone)
+    return _month_of(float(row["period_start"]) + _MIDDAY_S, zone)
+
+
+def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any) -> tuple[float, float]:
+    """A summary's stretch of time in *zone*, as epoch seconds: a week from
+    its key's Monday to the next, a month from its key's first to the next,
+    with no zone in the key; else its stored stretch read at midday, from its
+    first day's midnight to the midnight after its last. Recall compares it
+    with the question's period (the step 5 follow-up review's L-a: a stretch
+    a server wrote in its own local time, compared as stored, put a June
+    question's neighbouring month in its answer)."""
+    def midnight(day: _dt.date) -> float:
+        return _dt.datetime(day.year, day.month, day.day, tzinfo=zone).timestamp()
+
+    monday = _week_monday(period_key) if level == "week" else None
+    if monday is not None:
+        return midnight(monday), midnight(monday + _dt.timedelta(days=7))
+    first = _month_first(period_key) if level == "month" else None
+    if first is not None:
+        _key, start, end = _month_bounds(first, zone)
+        return start, end
+    begun = float(period_start or 0)
+    return (midnight(_dt.datetime.fromtimestamp(begun + _MIDDAY_S, zone).date()),
+            midnight(_dt.datetime.fromtimestamp(max(float(period_end or 0) - _MIDDAY_S, begun + _MIDDAY_S),
+                                                zone).date() + _dt.timedelta(days=1)))
+
+
+def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "") -> str:
+    """How recall's block and the roll-up prompts name a summary's stretch of
+    time, in English (Kazma's own text): "Week of Oct 06, 2026",
+    "October 2026", "Project, Sep 2026 to Nov 2026". A week and a month are
+    named from *period_key* when it is one ("2026-W41", "2026-10"), with no
+    zone; otherwise from the stretch read at midday in the operator's zone.
+    The Memory page names them itself, in the browser (``memory_console.js``),
+    from ``period_start``: not this."""
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone()
+    start = float(period_start or 0)
+
+    def day(ts: float) -> _dt.date:
+        return _dt.datetime.fromtimestamp(ts, zone).date()
+
     if level == "month":
-        return start.strftime("%B %Y")
+        return (_month_first(period_key) or day(start + _MIDDAY_S)).strftime("%B %Y")
     if level == "project":
-        last = _dt.datetime.fromtimestamp(max(float(period_end or 0) - 1, float(period_start or 0)))
-        return f"Project, {start.strftime('%b %Y')} to {last.strftime('%b %Y')}"
-    return f"Week of {start.strftime('%b %d, %Y')}"
+        first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
+        return f"Project, {first.strftime('%b %Y')} to {last.strftime('%b %Y')}"
+    return f"Week of {(_week_monday(period_key) or day(start + _MIDDAY_S)).strftime('%b %d, %Y')}"
 
 
 def _rollup_id(tenant_id: str, level: str, key: str) -> str:
@@ -183,23 +264,27 @@ def _mark_rebuild(conn: sqlite3.Connection, *, tenant_id: str, level: str, rollu
     _set_parts(conn, rollup_id, parts)
 
 
-def _month_settled(conn: sqlite3.Connection, tenant_id: str, start: float, end: float) -> bool:
-    """No week of the month is still queued, and no weekly summary of it waits
-    to be written again."""
-    queued = conn.execute(
-        "SELECT 1 FROM memory_summary_periods WHERE tenant_id = ? AND status = 'queued' "
-        "AND period_start >= ? AND period_start < ? LIMIT 1", (tenant_id, start, end)).fetchone()
-    waiting = conn.execute(
-        "SELECT 1 FROM memory_summaries WHERE tenant_id = ? AND level = 'week' AND status = 'rebuild' "
-        "AND period_start >= ? AND period_start < ? LIMIT 1", (tenant_id, start, end)).fetchone()
-    return queued is None and waiting is None
+def _month_settled(conn: sqlite3.Connection, tenant_id: str, key: str, zone: Any) -> bool:
+    """No week of month *key* is still queued, and no weekly summary of it
+    waits to be written again: a week is the month's by its key's Monday
+    (:func:`_week_month`), never by its start read in another zone (the step
+    5 final review's M: a Kuwait-written week of 1 June fell in May)."""
+    waiting = [*conn.execute(
+        "SELECT period_key, period_start FROM memory_summary_periods WHERE tenant_id = ? AND status = 'queued'",
+        (tenant_id,)), *conn.execute(
+        "SELECT period_key, period_start FROM memory_summaries WHERE tenant_id = ? AND level = 'week' "
+        "AND status = 'rebuild'", (tenant_id,))]
+    return not any(_week_month(row, zone)[0] == key for row in waiting)
 
 
 def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
                  budget: list[int]) -> int:
     months: dict[str, tuple[float, float, list[str]]] = {}
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone()
     for row in weekly:
-        key, start, end = _month_of(float(row["period_start"]))
+        key, start, end = _week_month(row, zone)
         months.setdefault(key, (start, end, []))[2].append(str(row["id"]))
     planned = 0
     for key, (start, end, parts) in sorted(months.items()):
@@ -212,7 +297,7 @@ def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.
                            (rid, tenant_id)).fetchone()
         if row is not None and (row["status"] == "forgotten" or _parts_of(conn, rid) == sorted(parts)):
             continue  # a tombstone, or written (or waiting) from these very parts
-        if not _month_settled(conn, tenant_id, start, end):
+        if not _month_settled(conn, tenant_id, key, zone):
             continue
         _mark_rebuild(conn, tenant_id=tenant_id, level="month", rollup_id=rid, key=key, start=start,
                       end=end, parts=sorted(parts), now=now)
@@ -336,7 +421,8 @@ def empty_rollups_of(conn: sqlite3.Connection, part_ids: Iterable[str]) -> list[
 
 
 def _what(level: str, row: sqlite3.Row) -> str:
-    return (f"the month of {rollup_label('month', row['period_start'], row['period_end'])}" if level == "month"
+    return (f"the month of {rollup_label('month', row['period_start'], row['period_end'], row['period_key'])}"
+            if level == "month"
             else "one topic over several weeks")
 
 
@@ -347,7 +433,8 @@ def _messages(level: str, row: sqlite3.Row, parts: list[sqlite3.Row]) -> list[di
     used = 0
     for part in parts:
         text = " ".join(str(part["summary_text"] or "").split())[:ROLLUP_PART_CHARS]
-        line = f"{rollup_label('week', part['period_start'], part['period_end'])} -- {part['title']}: {text}"
+        line = (f"{rollup_label('week', part['period_start'], part['period_end'], part['period_key'])} -- "
+                f"{part['title']}: {text}")
         if used + len(line) > _PROMPT_CHARS:
             break
         shown.append(line)
@@ -363,7 +450,8 @@ def _read_parts(conn: sqlite3.Connection, rollup_id: str, tenant_id: str) -> lis
     if not ids:
         return []
     return conn.execute(
-        "SELECT id, status, title, summary_text, period_start, period_end, updated_at FROM memory_summaries "
+        "SELECT id, status, title, summary_text, period_key, period_start, period_end, updated_at "
+        "FROM memory_summaries "
         f"WHERE id IN ({','.join('?' for _ in ids)}) AND tenant_id = ? ORDER BY period_start, id",
         (*ids, tenant_id)).fetchall()
 
@@ -444,7 +532,10 @@ async def rebuild_rollup(conn: sqlite3.Connection, row: sqlite3.Row, *, chat: An
             logger.warning("[summaries] no model to write roll-up %s -- retried later", row["id"])
             return False
     try:
-        parsed = _parse(await chat(_messages(level, row, live)), words=_ROLLUP_WORDS)
+        # The prompt names months in the operator's zone, a settings read:
+        # built off the loop.
+        messages = await asyncio.to_thread(_messages, level, row, live)
+        parsed = _parse(await chat(messages), words=_ROLLUP_WORDS)
     except LLMError as exc:
         logger.warning("[summaries] the model call for roll-up %s failed: %s -- retried later", row["id"], exc)
         return False

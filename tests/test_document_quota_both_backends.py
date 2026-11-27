@@ -11,10 +11,22 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
+
+from tests._as_request import tests_own
+
+
+@pytest.fixture(autouse=True)
+def _the_tests_own_rows() -> Iterator[None]:
+    """A store test: what it seeds, reads and deletes is its own, of no space
+    -- the install's (S4-01 step 5). The doors of the store's callers are the
+    flow tests' and the door gates' (tests/test_row_work_gates.py)."""
+    with tests_own():
+        yield
 
 
 def _sqlite(tmp_path, quota):
@@ -112,10 +124,11 @@ def test_two_concurrent_publishers_cannot_both_pass_the_quota(tmp_path):
         salt, digest, blob = item
         barrier.wait(timeout=10)
         try:
-            repo.create_version(
-                tenant_id=tenant, document_id=doc.id, actor_id="owner", source_blob_id=blob.id,
-                source_sha256=digest, original_filename=f"{salt}.txt", mime_type="text/plain",
-            )
+            with tests_own():  # a thread of its own starts with nothing said
+                repo.create_version(
+                    tenant_id=tenant, document_id=doc.id, actor_id="owner", source_blob_id=blob.id,
+                    source_sha256=digest, original_filename=f"{salt}.txt", mime_type="text/plain",
+                )
             return "published"
         except ValueError as exc:
             assert "quota" in str(exc)

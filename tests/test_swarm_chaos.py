@@ -35,10 +35,12 @@ import ast
 import inspect
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from tests._as_request import as_owner, bound_like_a_request, not_armed
 from tests._no_models import finish_turn_memory, keep_models_out
 
 
@@ -57,6 +59,15 @@ sys.path.insert(0, str(REPO / "scripts"))
 import swarm_chaos  # noqa: E402
 
 pytestmark = pytest.mark.timeout(240)
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_request() -> Iterator[None]:
+    """Each test is the owner's swarm work, dispatched and read as the swarm
+    page and the swarm tool do: in the owner's space, as the tenant middleware
+    and the turn bind it (S4-01 step 5). Its apps have that middleware."""
+    with as_owner():
+        yield
 
 FAST = swarm_chaos.Timing(busy_ms=300, write_waits=(0.1, 0.2, 0.4), pg_pool_timeout=1.0)
 
@@ -101,7 +112,8 @@ def _postgres_dsn() -> str | None:
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("name", sorted(swarm_chaos.POSTGRES_CASES))
-async def test_the_postgres_store_going_down_ends_honestly(name: str, tmp_path: Path) -> None:
+async def test_the_postgres_store_going_down_ends_honestly(name: str, tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     """On a disposable server (the Postgres job's, or ``docker run --rm -p
     55433:5432 postgres:16-alpine``): a database of the case's own is created,
     taken down by refusing its connections and ending its sessions, and
@@ -109,6 +121,10 @@ async def test_the_postgres_store_going_down_ends_honestly(name: str, tmp_path: 
     dsn = _postgres_dsn()
     if not dsn:
         pytest.skip("needs KAZMA_DB_BACKEND=postgres and KAZMA_DATABASE_URL (a disposable server)")
+    # The case's own database never had the second lock's rules put in place,
+    # and a start arms only after putting them in place on its database and
+    # proving them (S4-01 step 6): a process on this one is not armed.
+    not_armed(monkeypatch)
     out = await swarm_chaos.run_case(name, tmp_path, timing=FAST, dsn=dsn)
     assert out.honest, (out.problems, out.returned, out.stored, out.recovered)
     if out.counted is not None:
@@ -250,7 +266,7 @@ def test_the_page_hears_an_unrecorded_approval(monkeypatch, unrecorded, status, 
     monkeypatch.setattr(routes_tasks, "get_swarm_service", lambda: _Svc())
     router = APIRouter()
     routes_tasks.register_tasks_routes(router, templates=None)
-    app = FastAPI()
+    app = bound_like_a_request(FastAPI())
     app.include_router(router)
     response = TestClient(app).post("/api/swarm/tasks/t1/approve")
     assert response.status_code == status, response.text
@@ -318,7 +334,7 @@ def test_the_panel_answers_a_store_refusal_with_503(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(ah, "_maybe_send_to_output_target", _no_send)
     router = APIRouter()
     routes_tasks.register_tasks_routes(router, templates=None)
-    app = FastAPI()
+    app = bound_like_a_request(FastAPI())
     app.include_router(router)
     try:
         with TestClient(app) as client:

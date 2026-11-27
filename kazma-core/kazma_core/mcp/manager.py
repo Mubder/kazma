@@ -215,6 +215,16 @@ def mcp_safe_allowlisted(tool_name: str) -> bool:
     return bool(leaf) and leaf in allow
 
 
+def mcp_safe_allowlist_names_a_tool() -> bool:
+    """True when ``KAZMA_MCP_SAFE_ALLOWLIST`` has any non-empty entry.
+
+    An empty variable, or a list of only blank tokens (``","``, ``" , "``),
+    names nothing. Membership of one tool is :func:`mcp_safe_allowlisted`.
+    """
+    raw = (os.environ.get("KAZMA_MCP_SAFE_ALLOWLIST") or "").strip()
+    return any(part.strip() for part in raw.split(","))
+
+
 # Argument names that hold a path, compared lower-case with "_" and "-"
 # removed, at any depth: the old fixed list (path, paths, directory,
 # filePath, source, destination, src, dst, target, folder), its spellings

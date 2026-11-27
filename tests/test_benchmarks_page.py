@@ -63,6 +63,28 @@ def test_kazma_s_turn_sits_beside_the_block_it_reads(tmp_path) -> None:
         in text
 
 
+def test_the_dev_table_says_what_kazmas_memory_held(tmp_path) -> None:
+    """The memory plan's W6 step 5: each number says what Kazma's memory
+    was written with -- a written run's own line, and the episodes alone
+    for a run that does not say (every run before it). The conversations
+    alone sit beside a written run as their own row."""
+    import json
+
+    module = _page_module()
+    rows = [{"id": "a", "kazma": True, "kazma_episodes": False}]
+    run = {"reader": "r", "judge": "j", "reader_reasoning": "default", "results": rows,
+           "overall": {"n": 1, "kazma": 1.0, "kazma_episodes": 0.0, "prompt_tokens_mean": {}}}
+    (tmp_path / "answers_dev.json").write_text(json.dumps(run), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert f"**What Kazma's memory held**: {module.WRITTEN_EPISODES}." in text
+    assert "| Kazma's recall on the conversations alone (no facts, summaries or merge) | 0.0 % |" in text
+    run["written_with"] = {"kazma": "written run w: the history's episodes, the facts of x"}
+    (tmp_path / "answers_dev.json").write_text(json.dumps(run), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert "**What Kazma's memory held**: written run w: the history's episodes, the facts of x." in text
+    assert module.WRITTEN_EPISODES not in text
+
+
 def test_the_dev_table_says_where_kazma_stands() -> None:
     """The main session's rule (22 Nov): the page says, from the run's own
     numbers, that the block alone answers less than plain top-10 retrieval

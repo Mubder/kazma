@@ -322,3 +322,131 @@ def test_recall_shows_the_stretch_that_answers(mem, question, answer, asked, exp
     assert expected in line
     assert f'memory_read("{eid}")' in line
     assert len(line) < limits.RECALL_LEAD_SHOW + 250
+
+
+# ── A line that cannot fit takes no room (the step 5 review, M1) ─────────
+
+def _five_ar() -> list[RecallHit]:
+    hits = []
+    for i in range(5):
+        answer = FILLER_AR * 40 + f"رمز الأوركيد للغرفة {i} هو {i}{i}{i}. " + FILLER_AR * 40
+        hits.append(_hit(f"a_{i}", f"أي رمز أوركيد اخترنا للغرفة {i}؟", answer))
+    return hits
+
+
+def _summary(text: str) -> RecallHit:
+    return RecallHit(id="sum_1", content=text[:80], score=0.5, kind="summary", source="summary",
+                     metadata={"level": "week", "display": "Week of May 1, 2023 -- " + text})
+
+
+def _with_and_without(language: str, budget: int, unfit: str = "summary") -> tuple[str, str]:
+    """The same recall at *budget* with one more line no step can fit (a long
+    weekly summary, or a long last conversation) and without it."""
+    if language == "en":
+        episodes, terms, long = _five(), _terms("Which orchid code for room 0?"), FILLER_EN * 80
+    else:
+        episodes, terms, long = _five_ar(), _terms("أي رمز أوركيد للغرفة 0؟"), FILLER_AR * 120
+    facts = [RecallHit(id=f"b_{i}", content=f"user likes item number {i} " + "x" * 120, score=1.0, kind="belief",
+                       metadata={}) for i in range(5)]
+    without = format_recall_block(RecallResult(beliefs=facts, episodes=episodes, focus_terms=terms),
+                                  max_tokens=budget)
+    if unfit == "summary":
+        more = RecallResult(beliefs=facts, episodes=episodes, summaries=[_summary(long)], focus_terms=terms)
+    else:
+        # a conversation with no sides is shown whole, at its own length
+        last = _hit("e_long", "a long conversation", long, sides=False)
+        more = RecallResult(beliefs=facts, episodes=[*episodes, last], focus_terms=terms)
+    return format_recall_block(more, max_tokens=budget), without
+
+
+#: Every tenth budget from a tight block to a roomy one (the delta review's
+#: sweep: 32 of 155 English and 28 of 244 Arabic budgets failed with the
+#: frame counted at its largest).
+_SWEEP = range(800, 4001, 10)
+_UNFIT_MARK = {"summary": "Week of May 1, 2023", "conversation": "e_long"}
+
+
+def _left_out_yet_different(language: str, unfit: str) -> list[int]:
+    """The budgets at which the unfit line is not shown, yet the block is not
+    the block without it."""
+    bad = []
+    for budget in _SWEEP:
+        with_one, without = _with_and_without(language, budget, unfit)
+        if _UNFIT_MARK[unfit] not in with_one and with_one != without:
+            bad.append(budget)
+    return bad
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_summary_that_cannot_fit_takes_no_room_from_the_excerpts(language):
+    """A long weekly summary no step can fit was dropped, but the excerpts
+    had shrunk for it (822 to 623 characters on LongMemEval): the block is
+    now the block without it, in English and Arabic."""
+    with_one, without = _with_and_without(language, _TIGHT)
+    assert "Week of May 1, 2023" not in with_one
+    assert with_one == without
+    lead = len(_history_lines(with_one)[0].split(" [", 1)[0])
+    assert lead > limits.RECALL_LEAD_LEAST + 50, lead
+
+
+@pytest.mark.parametrize("unfit", ["summary", "conversation"])
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_whenever_a_line_is_left_out_the_block_is_the_block_without_it(language, unfit):
+    """The class, at every tenth budget from 800 to 4,000: a block that
+    leaves out a line no step can fit, a summary or a later conversation, is
+    the same recall's block without that line, header and footer included."""
+    shown = sum(_UNFIT_MARK[unfit] not in _with_and_without(language, b, unfit)[0] for b in _SWEEP[::40])
+    assert shown, "the sweep never leaves the line out"
+    assert _left_out_yet_different(language, unfit) == []
+
+
+def test_control_the_frame_counted_at_its_largest_fails_the_sweep(monkeypatch):
+    """The negative control: room by rank with the frame counted at its
+    largest, the header and footer of a summary not shown included (0c1789cd5),
+    leaves out the summary yet differs from the block without it."""
+    real = recall_module._room_by_rank
+
+    def frame_counted(result, kept):
+        shown, _exact = real(result, lambda room, exact: kept(room, False))
+        return shown, False
+
+    monkeypatch.setattr(recall_module, "_room_by_rank", frame_counted)
+    assert _left_out_yet_different("en", "summary") or _left_out_yet_different("ar", "summary")
+
+
+def test_control_the_narrowest_step_fails_the_conversation_sweep(monkeypatch):
+    """The conversation half's negative control (the final review's L2): room
+    by rank as it was before M1 (2179116ec): the first step that keeps every
+    line, else the narrowest, the frame counted at its largest. It gives the
+    other conversations less room for a last conversation that cannot fit."""
+    real = recall_module._room_by_rank
+    every = (10**6,) * 3
+
+    def before_m1(result, kept):
+        calls = []
+
+        def all_or_nothing(room, _exact):
+            calls.append(room)
+            counts, all_fit = kept(room, False)
+            # the target is every line; a step reaches it only if all fit
+            if len(calls) == 2 or all_fit:
+                return every, all_fit
+            return counts, all_fit
+
+        shown, _exact = real(result, all_or_nothing)
+        return shown, False
+
+    monkeypatch.setattr(recall_module, "_room_by_rank", before_m1)
+    assert _left_out_yet_different("en", "conversation") or _left_out_yet_different("ar", "conversation")
+
+
+def test_a_summary_that_fits_still_takes_its_room():
+    """The control: a short summary that fits at a narrower step is shown,
+    and the excerpts give way for it, as before."""
+    facts = [RecallHit(id=f"b_{i}", content=f"user likes item number {i} " + "x" * 120, score=1.0, kind="belief",
+                       metadata={}) for i in range(5)]
+    terms = _terms("Which orchid code for room 0?")
+    short = _summary("The orchid codes were chosen for each room. " * 3)
+    block = format_recall_block(RecallResult(beliefs=facts, episodes=_five(), summaries=[short], focus_terms=terms),
+                                max_tokens=_TIGHT + 60)
+    assert "Week of May 1, 2023" in block and len(_history_lines(block)) == 5

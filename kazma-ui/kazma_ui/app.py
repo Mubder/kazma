@@ -2136,6 +2136,14 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(report_exposure), name="service-exposure")
 
+            # ── Windows' file check (Smart App Control) ──────────────
+            # Which native parts Windows allows, which ones Kazma replaced
+            # with a signed alternative (one INFO line), and the one alert
+            # only for a feature with none (2026-11-26). In the background.
+            from kazma_core.windows_trust import report_at_boot as _windows_file_check
+
+            spawn_background(_aio.to_thread(_windows_file_check), name="windows-file-check")
+
             # ── Secrets stored as plaintext move into the vault ──────
             # The lazy migration moves a row only when it is read (FA-271:
             # the GitHub App key stayed plaintext in every pg_dump).

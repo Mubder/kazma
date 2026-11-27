@@ -95,7 +95,9 @@ _EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
     "tui": ("textual", "bidi"),
     "observability": ("prometheus_client",),
     "web": ("playwright",),
-    "dev": ("pytest", "ruff", "mypy"),
+    # mypy only: pytest is the test extra's (Express's tests part), and an
+    # install with it alone must not gain dev's tools at its next update.
+    "dev": ("mypy",),
     "test": ("fakeredis",),
     "push": ("pywebpush",),
     "postgres": ("psycopg",),
@@ -2182,11 +2184,11 @@ _IMAGES_PROBE = (
     "from kazma_core.env_files import load_env_files\n"
     "load_env_files(include_cwd=False)\n"
     "from kazma_core import container_services as cs\n"
-    "from kazma_core.docker_cli import find_docker_cli\n"
+    "from kazma_core.docker_cli import docker_argv\n"
     "from kazma_core.paths import get_project_root\n"
-    "docker = find_docker_cli()\n"
-    "if not docker:\n"
+    "if docker_argv(['version']) is None:\n"
     "    raise SystemExit(0)\n"
+    "docker = docker_argv\n"
     "root = get_project_root()\n"
     "for state, outcome in cs.refresh_images(root, root / '.env', docker):\n"
     "    print(f'{state.svc.title}\\t{outcome}')\n"

@@ -1900,23 +1900,7 @@ class SettingsRouterBuilder:
             root = installed_project_root() or get_project_root()
             with read_only_diagnostic("/api/security/hardening"):
                 report = asyncio.run(SecurityHardeningRunner(root).run_all_checks())
-            return {
-                "total": report.total,
-                "passed": report.passed,
-                "failed": report.failed,
-                "critical_failures": report.critical_failures,
-                "timestamp": report.timestamp,
-                "checks": [
-                    {
-                        "name": c.name,
-                        "passed": c.passed,
-                        "severity": c.severity,
-                        "message": c.message,
-                        "recommendation": c.recommendation,
-                    }
-                    for c in report.checks
-                ],
-            }
+            return security_hardening_payload(report)
 
         @router.get("/api/divisions/status")
         def api_division_status() -> dict[str, Any]:
@@ -2274,6 +2258,32 @@ class SettingsRouterBuilder:
         self.router.include_router(self.models_router)
         self.router.include_router(self.mcp_router)
         return self.router
+
+
+def security_hardening_payload(report: Any) -> dict[str, Any]:
+    """The body of ``GET /api/security/hardening``.
+
+    ``ran`` is false when a check did not run, or ran only in part. A caller
+    must not read ``passed`` alone.
+    """
+    return {
+        "total": report.total,
+        "passed": report.passed,
+        "failed": report.failed,
+        "critical_failures": report.critical_failures,
+        "timestamp": report.timestamp,
+        "checks": [
+            {
+                "name": c.name,
+                "passed": c.passed,
+                "ran": c.ran,
+                "severity": c.severity,
+                "message": c.message,
+                "recommendation": c.recommendation,
+            }
+            for c in report.checks
+        ],
+    }
 
 
 def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templates: Jinja2Templates) -> APIRouter:

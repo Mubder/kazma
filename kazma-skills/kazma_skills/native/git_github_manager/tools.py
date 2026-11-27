@@ -36,12 +36,12 @@ async def git_status() -> str:
     # repository chose, and `git status` runs it. This read-tier tool (no
     # card) ran it until 2026-10-26 (audit AUD-089); its siblings did not.
     try:
-        code, out, _err = await _git_read(["status", "--porcelain"], timeout=5)
+        code, out, _err, _card = await _git_read(["status", "--porcelain"], timeout=5)
         if code != 0:
             return "Not a git repository or git command failed."
 
         # Get active branch name
-        _bcode, bout, _berr = await _git_read(["branch", "--show-current"], timeout=5)
+        _bcode, bout, _berr, _bcard = await _git_read(["branch", "--show-current"], timeout=5)
         branch = bout.strip() or "Detached HEAD"
 
         status_lines = out.strip()
@@ -70,37 +70,63 @@ _filter_driver_overrides = _shared_git_read.filter_driver_overrides
 _git_read_argv = _shared_git_read.read_argv
 
 
-async def _git_read(args: list[str], *, timeout: int = 15) -> tuple[int, str, str]:
-    """A read-only git command in the active workspace that starts no program
-    the repository chose.
+async def _git_read(args: list[str], *, timeout: int = 15) -> Any:
+    """A card-less git read in the active workspace (a ``CardLessRead``:
+    code, out, err, and ``card``, why it goes to the approval card instead).
 
-    The repository's fsmonitor, pager, hooks, signature program, external
-    diff and textconv drivers and filter drivers are all switched off
-    (``_git_read_argv``), and the child gets the tool child environment
-    without the variables that name a program (``_PROGRAM_ENV``). Until
-    2026-11-10 only fsmonitor was: ``git_diff`` on a repository whose
-    ``.git/config`` set ``diff.external`` ran that program with no approval
-    card.
+    The command must be one of ``ide.git_policy``'s card-less forms, checked
+    in the workspace, and is judged, run and filtered by
+    ``safety.git_kazma_files.run_card_less``: these tools show no card. It
+    starts no program the repository chose: the fsmonitor, pager, hooks,
+    signature program, external diff and textconv drivers and filter drivers
+    are all switched off (``_git_read_argv``), and the child gets the tool
+    child environment without the variables that name a program or another
+    repository (``_for_a_read``). Until 2026-11-10 only fsmonitor was:
+    ``git_diff`` on a repository whose ``.git/config`` set ``diff.external``
+    ran that program with no approval card.
     """
+    from pathlib import Path
+
+    from kazma_core.ide.git_policy import card_less_form
+    from kazma_core.safety.git_kazma_files import CardLessRead, run_card_less
     from kazma_core.security.child_env import tool_child_env
 
     cwd = await asyncio.to_thread(_get_workspace)
+    root = Path(str(cwd))
+    form = await asyncio.to_thread(card_less_form, list(args), root)
+    if form is None:
+        return CardLessRead(0, "", "", "outside the card-less forms")
     env = tool_child_env()
-    for name in _PROGRAM_ENV:
-        env.pop(name, None)
-    # Reading the configuration starts nothing; the driver names it lists
-    # are emptied for the command itself.
-    listing = await run_off_loop(
-        ["git", "config", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],
-        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
-        encoding="utf-8", errors="replace",
-    )
-    res = await run_off_loop(
-        _git_read_argv(args, listing.stdout or ""),
-        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
-        encoding="utf-8", errors="replace",
-    )
-    return res.returncode, res.stdout or "", res.stderr or ""
+    _for_a_read(env)
+
+    def run() -> CardLessRead:
+        # Reading the configuration starts nothing; the driver names it lists
+        # are emptied for every command of the read.
+        listing = subprocess.run(  # noqa: S603 -- git, reading its configuration
+            ["git", "config", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],
+            cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+        )
+
+        def ask(asked: Any) -> tuple[int, str, str]:
+            res = subprocess.run(  # noqa: S603 -- git, a hardened reading argv
+                _git_read_argv(list(asked), listing.stdout or ""), cwd=cwd, env=env,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=timeout, stdin=subprocess.DEVNULL,
+            )
+            return res.returncode, res.stdout or "", res.stderr or ""
+
+        return run_card_less(root, ask, form)
+
+    return await asyncio.to_thread(run)
+
+
+def _to_the_card(command: list[str], why: str) -> str:
+    """The answer for a read these tools do not run without an approval."""
+    import shlex
+
+    return (f"Error: `git {shlex.join(command)}` is not a read Kazma runs without an approval ({why}). "
+            "Ask for it with shell_exec: the operator sees the exact command on the approval card.")
 
 
 #: A branch or remote name a tool passes to git: never an option ("-..."),
@@ -172,9 +198,11 @@ async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
     if (path or "").strip():
         args += ["--", path.strip()]
     try:
-        code, out, err = await _git_read(args)
+        code, out, err, card = await _git_read(args)
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"Error executing git log: {e}"
+    if card is not None:
+        return _to_the_card(args, card)
     if code != 0:
         return f"Error: git log failed: {err.strip()[:300] or 'not a git repository'}"
     from kazma_core.safety.prompt_fence import fence_untrusted
@@ -183,65 +211,58 @@ async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
     return fence_untrusted(out.strip() or "No commits.", source="git_log")
 
 
-async def _content_read_refusal() -> str | None:
-    """Why a content read may not run in the workspace's repository, or None
-    (``safety.git_kazma_files.read_refusal``: a work tree git itself
-    accepts, and a repository that holds none of Kazma's files), asked with
-    this tool's own read argv and environment. git_diff shows no card."""
-    from pathlib import Path
+#: git's own variables a read keeps: its configuration files' names, and no
+#: prompt. Any other (GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
+#: GIT_ALTERNATE_OBJECT_DIRECTORIES...) would point a read at another
+#: repository than the workspace's.
+_GIT_ENV_KEPT = frozenset({"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
+                           "GIT_TERMINAL_PROMPT"})
 
-    from kazma_core.safety.git_kazma_files import read_refusal
-    from kazma_core.security.child_env import tool_child_env
 
-    cwd = await asyncio.to_thread(_get_workspace)
-    env = tool_child_env()
+def _for_a_read(env: dict[str, str]) -> None:
+    """*env* (the tool child environment), in place, for a read: without the
+    variables that name a program (``_PROGRAM_ENV``) and without git's own
+    but those kept."""
     for name in _PROGRAM_ENV:
         env.pop(name, None)
-
-    def ask(args: list[str]) -> tuple[int, str]:
-        res = subprocess.run(  # noqa: S603 -- git, a fixed argv of listings
-            _git_read_argv(list(args)), cwd=cwd, env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30, stdin=subprocess.DEVNULL,
-        )
-        return res.returncode, res.stdout or ""
-
-    return await asyncio.to_thread(read_refusal, Path(str(cwd)), ask)
+    for key in list(env):
+        if key.upper().startswith("GIT_") and key.upper() not in _GIT_ENV_KEPT:
+            env.pop(key)
 
 
 async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
     """Show uncommitted changes, or the changes of *target* (a commit, or a
     range like ``main..HEAD``), read-only. ``stat`` lists the files only.
 
-    It shows no approval card, so it reads only a repository that holds none
-    of Kazma's own files (:func:`_content_read_refusal`), and a network or
-    device path is refused on its text."""
+    It shows no approval card, so it runs only as a card-less read
+    (``_git_read``): every revision a commit of the repository's own
+    history, the sections of Kazma's own files left out with a line saying
+    how many. Anything else -- a tree, a blob, a note, a stash entry, a
+    commit no ref holds, a path that is one of Kazma's -- is answered with
+    the command to ask for through shell_exec, whose card shows it."""
     from kazma_core.workspace.remote_paths import remote_path_reason
 
     remote = remote_path_reason(path) if (path or "").strip() else None
     if remote:
         return f"Error: {remote}"
-    try:
-        refusal = await _content_read_refusal()
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return f"Error executing git diff: {e}"
-    if refusal:
-        return f"Error: {refusal}"
-    args = ["diff"]
+    command = ["diff"]
     ref = (target or "").strip()
     if ref:
         try:
             ref = _checked_revision(target)
         except RefusedBeforeEffect as refused:
             return str(refused)
-        args = ["show", "--format=%h %s", ref] if ".." not in ref else ["diff", ref]
+        command = ["diff", ref] if ".." in ref else ["show", "--format=%h %s", ref]
     if stat:
-        args.append("--stat")
+        command.insert(1, "--stat")
     if (path or "").strip():
-        args += ["--", path.strip()]
+        command += ["--", path.strip()]
     try:
-        code, out, err = await _git_read(args, timeout=30)
+        code, out, err, card = await _git_read(command, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"Error executing git diff: {e}"
+    if card is not None:
+        return _to_the_card(command, card)
     if code != 0:
         return f"Error: git diff failed: {err.strip()[:300] or 'not a git repository'}"
     text = out.strip() or "No changes."

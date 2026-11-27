@@ -31,6 +31,8 @@ import pytest
 from kazma_core.memory import consolidator, turn_reconcile
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
+from tests._as_request import in_space, tests_own
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -200,8 +202,9 @@ def _save(mem, session_id, messages, *, thread_id="", tenant="default"):
 
     store = SessionManager(db_path=str(mem.dir / "chat_sessions.db"))
     try:
-        store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
-                              messages=list(messages)))
+        with in_space(tenant):  # the chat page's save, in its chat's space
+            store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
+                                  messages=list(messages)))
     finally:
         store.close()
 
@@ -213,9 +216,11 @@ def _episodes(db):
 
 
 def _run(mem, budget=60.0, now=None):
-    return turn_reconcile._reconcile(
-        mem.db, ("", ""), time.monotonic() + budget, time.time() if now is None else now
-    )
+    # Through the door its pass declares (run_turn_reconcile_pass): every space's chats.
+    with tests_own("memory's turn reconcile reads every space's chats changed since its cursor"):
+        return turn_reconcile._reconcile(
+            mem.db, ("", ""), time.monotonic() + budget, time.time() if now is None else now
+        )
 
 
 def _queued(mem, task_type):

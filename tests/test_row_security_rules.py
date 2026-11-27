@@ -333,6 +333,57 @@ def test_the_script_reads_its_address_from_a_named_variable(monkeypatch: pytest.
         script.main(["check", "--url", "postgresql://kazma:secret@db/kazma"])
 
 
+def test_a_named_address_still_knows_this_installs_own_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 4 delta review N3: with ``--url-from``, this install's files were
+    not read, so ``is_kazma_database`` took its own database for another and
+    the backfill was skipped. The files hold its address; here a stand-in
+    loads them (the test session's dotenv reads nothing, and its shield takes
+    a database address back out of the environment)."""
+    pytest.importorskip("psycopg")  # an address is read with psycopg's conninfo
+    from kazma_core import env_files
+    from kazma_core.db import backend
+    from kazma_core.db.availability import is_kazma_database
+
+    script = _script()
+    own = "postgresql://kazma@db.example:5432/kazma"
+    monkeypatch.setattr(backend, "get_database_url", lambda: None)  # nothing read yet
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", own)
+    loaded: list[bool] = []
+
+    def load(**_kw: Any) -> list[str]:
+        loaded.append(True)
+        monkeypatch.setattr(backend, "get_database_url", lambda: own)  # as this install's .env holds it
+        return [".env"]
+
+    monkeypatch.setattr(env_files, "load_env_files", load)
+    assert not is_kazma_database(own), "the control: unread, the address is no install's"
+    assert script._url("KAZMA_SCRATCH_URL") == own and loaded
+    assert is_kazma_database(own), "read, it is this install's own"
+
+
+@pytest.mark.parametrize("skipped", [True, False], ids=["not backfilled", "the control: backfilled"])
+def test_a_backfill_that_did_not_run_is_said_loudly(monkeypatch: pytest.MonkeyPatch,
+                                                    capsys: pytest.CaptureFixture[str], skipped: bool) -> None:
+    """N3: a skipped backfill was one ``[NOTE]`` under "The rules are in
+    place.", and arming on that database would leave old threads the owner's."""
+    pytest.importorskip("psycopg")  # the script's apply reads Postgres
+    script = _script()
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", "postgresql://kazma@elsewhere.example/kazma")
+    done = row_security.Applied()
+    if skipped:
+        done.not_backfilled = "checkpoints: not the database this install's own address names"
+        done.notes.append(done.not_backfilled)
+    monkeypatch.setattr(row_security, "apply", lambda url, **_kw: done)
+    code = script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"])
+    out = capsys.readouterr().out
+    if skipped:  # second delta review L2: not a success, one message, its remedy named
+        assert code == 1 and out.count("NOT BACKFILLED") == 1 and "[NOTE]" not in out, out
+        assert "run apply with this install's own address" in out
+        assert "The rules are in place." not in out.splitlines(), "no success line of its own"
+    else:
+        assert code == 0 and "NOT BACKFILLED" not in out and "The rules are in place." in out, out
+
+
 @pytest.mark.parametrize("argv", [
     ["check", "--url", "postgresql://kazma:s3cret-pw@db/kazma"],
     ["check", "--url-from", "X", "postgresql://kazma:s3cret-pw@db/kazma"],
@@ -479,3 +530,79 @@ def test_the_gate_sees_a_planted_declaration() -> None:
         "        with row_security.install_inside_a_space('mine'):\n"
         "            return 1\n")}
     assert _declarers(planted)["install_inside_a_space"] == {"kazma-core/kazma_core/planted.py::Store.read"}
+
+
+# ── a catalog read names each column once (S4-01 step 5) ─────────────────
+
+_CAST = re.compile(r"::\w+(?:\[\])?")
+
+
+def _output_names(sql: str) -> list[str]:
+    """The output column names of *sql*'s first SELECT list, as Postgres
+    names them: the alias, else a column's own name, else a function's."""
+    start = re.match(r"(?is)\s*SELECT\s+(?:DISTINCT\s+)?", sql)
+    if not start:
+        return []
+    items, depth, begin, i = [], 0, start.end(), start.end()
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and ch == ",":
+            items.append(sql[begin:i])
+            begin = i + 1
+        elif depth == 0 and re.match(r"(?i)\s+FROM\b", sql[i:]):
+            break
+        i += 1
+    items.append(sql[begin:i])
+    names = []
+    for item in (_CAST.sub("", part).strip() for part in items):
+        alias = re.search(r"(?i)\bAS\s+(\w+)\s*$", item)
+        call = re.match(r"([\w.]+)\s*\(", item)
+        if alias:
+            names.append(alias.group(1).lower())
+        elif call:
+            names.append(call.group(1).split(".")[-1].lower())
+        elif re.fullmatch(r"[\w.]+", item):
+            names.append(item.split(".")[-1].lower())
+        else:
+            names.append("?column?")
+    return names
+
+
+def _reads_naming_two_alike(source: str) -> tuple[int, list[str]]:
+    """How many literal queries ``_rows`` reads, and each that names two
+    output columns alike: a store's dict-row cursor keeps one of them."""
+    read, found = 0, []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_rows"
+                and len(node.args) >= 2):
+            continue
+        try:
+            sql = ast.literal_eval(node.args[1])
+        except ValueError:
+            continue  # built when it runs: _rows itself refuses a row that came back short
+        read += 1
+        names = _output_names(sql)
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:
+            found.append(f"{node.lineno}: {', '.join(twice)}")
+    return read, found
+
+
+def test_every_catalog_read_names_each_column_once() -> None:
+    source = Path(row_security.__file__).read_text(encoding="utf-8")
+    read, found = _reads_naming_two_alike(source)
+    assert read >= 10, "the gate reads the module's catalog queries"
+    assert found == []
+
+
+def test_the_gate_sees_two_columns_alike() -> None:
+    old = ('def _policies(cur, table):\n'
+           '    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = \'{0}\'::oid[], "\n'
+           '                      "pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) "\n'
+           '                      "FROM pg_policy WHERE polrelid = to_regclass(%s)", (table,))\n')
+    assert _reads_naming_two_alike(old) == (1, ["2: pg_get_expr"])
+    assert _output_names("SELECT p.oid::regprocedure::text, count(*), a.b AS c FROM x") == ["oid", "count", "c"]

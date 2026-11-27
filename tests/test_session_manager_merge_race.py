@@ -34,6 +34,8 @@ import pytest
 
 from kazma_ui.session_manager import ChatSession, SessionManager
 
+from tests._as_request import as_owner
+
 # Verified against a real Postgres (throwaway postgres:16, twice); the CI
 # Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
 pytestmark = pytest.mark.postgres
@@ -51,7 +53,8 @@ def test_put_survives_a_concurrent_merge(manager) -> None:
     """
     seed = ChatSession(session_id="seed", thread_id="seed", title="seed")
     seed.add_message("user", "hello")
-    manager.put(seed)
+    with as_owner():  # each save is a request's or a turn's
+        manager.put(seed)
 
     errors: list[BaseException] = []
     stop = threading.Event()
@@ -64,7 +67,8 @@ def test_put_survives_a_concurrent_merge(manager) -> None:
                     session_id=f"w{i}", thread_id=f"w{i}", title=f"w{i}"
                 )
                 s.add_message("user", "x")
-                manager.put(s)
+                with as_owner():  # a thread of its own starts with nothing bound
+                    manager.put(s)
             except BaseException as exc:  # noqa: BLE001 — the point of the test
                 errors.append(exc)
                 return
@@ -108,7 +112,8 @@ def test_merge_still_pulls_rows_it_did_not_have(manager, tmp_path) -> None:
     """The swap removal must not break what the merge is FOR."""
     s = ChatSession(session_id="fromdb", thread_id="fromdb", title="from db")
     s.add_message("user", "persisted")
-    manager.put(s)
+    with as_owner():
+        manager.put(s)
 
     # A second manager over the same file starts cold, then merges.
     other = SessionManager(db_path=str(tmp_path / "race.db"))

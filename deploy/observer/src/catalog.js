@@ -77,6 +77,7 @@ export const CATALOG = {
   {"key": "dbsvc.down", "sender": "guard", "severity": "critical", "title": "Kazma's database service is down", "title_ar": "خدمة قاعدة بيانات كاظمه متوقفة", "page": "/settings?tab=system", "closed_by": "dbsvc.back", "condition": "database_away", "owner": true},
   {"key": "deps.container_recovered", "sender": "guard", "severity": "success", "title": "A container Kazma needs runs again", "title_ar": "عادت حاوية يحتاجها كاظمه تعمل", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "deps.container_start_failed", "sender": "guard", "severity": "warn", "title": "A container Kazma needs will not start", "title_ar": "حاوية يحتاجها كاظمه لا تبدأ", "page": "/dashboard", "closed_by": "deps.container_recovered", "condition": "", "owner": true},
+  {"key": "deps.docker_cli_waits", "sender": "guard", "severity": "warn", "title": "Kazma could not keep a feature working on this PC", "title_ar": "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", "page": "/settings?tab=system", "closed_by": "", "condition": "", "owner": true},
   {"key": "deps.engine_down", "sender": "guard", "severity": "warn", "title": "Docker does not answer", "title_ar": "Docker لا يستجيب", "page": "/dashboard", "closed_by": "deps.engine_up", "condition": "docker_away", "owner": true},
   {"key": "deps.engine_up", "sender": "guard", "severity": "success", "title": "Docker is back", "title_ar": "عاد Docker", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "disk.back", "sender": "guard", "severity": "success", "title": "Disk space is back", "title_ar": "عادت مساحة القرص", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
@@ -95,6 +96,7 @@ export const CATALOG = {
   {"key": "guard.port_still_held", "sender": "guard", "severity": "error", "title": "A restart did not take effect", "title_ar": "لم تنجح إعادة التشغيل", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "guard.recovered", "sender": "guard", "severity": "success", "title": "Kazma is healthy again", "title_ar": "عاد كاظمه سليمًا", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "guard.refused_to_start", "sender": "guard", "severity": "error", "title": "Kazma's guard did not start", "title_ar": "لم يبدأ حارس كاظمه", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
+  {"key": "guard.reload_waits", "sender": "guard", "severity": "info", "title": "An update waits; Kazma keeps running", "title_ar": "تحديث ينتظر، وكاظمه يواصل العمل", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "guard.restarting", "sender": "guard", "severity": "warn", "title": "Kazma stopped and is being restarted", "title_ar": "توقف كاظمه ويُعاد تشغيله", "page": "/dashboard", "closed_by": "guard.recovered", "condition": "kazma_restarting", "owner": true},
   {"key": "guard.test_page", "sender": "guard", "severity": "info", "title": "Test page", "title_ar": "صفحة تجريبية", "page": "/settings?tab=alerts", "closed_by": "", "condition": "", "owner": true},
   {"key": "health.dependency_down", "sender": "guard", "severity": "warn", "title": "Kazma is up, but not ready", "title_ar": "كاظمه يعمل لكنه غير جاهز", "page": "/dashboard", "closed_by": "health.ready_again", "condition": "dependency_down", "owner": true},
@@ -161,6 +163,7 @@ export const CATALOG = {
   {"key": "watch.observer_refused", "sender": "watch", "severity": "warn", "title": "The observer cannot pass Cloudflare Access", "title_ar": "لا يستطيع المراقب اجتياز Cloudflare Access", "page": "/dashboard", "closed_by": "watch.recovered", "condition": "observer_refused", "owner": true},
   {"key": "watch.recovered", "sender": "watch", "severity": "success", "title": "Kazma is back", "title_ar": "عاد كاظمه", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "watch.tunnel_down", "sender": "watch", "severity": "error", "title": "The tunnel is down; Kazma itself is running", "title_ar": "النفق متوقف؛ كاظمه نفسه يعمل", "page": "/dashboard", "closed_by": "watch.recovered", "condition": "tunnel_down", "owner": true},
-  {"key": "watch.unreachable", "sender": "watch", "severity": "error", "title": "Kazma is not reachable", "title_ar": "كاظمه غير متاح", "page": "/dashboard", "closed_by": "watch.recovered", "condition": "", "owner": true}
+  {"key": "watch.unreachable", "sender": "watch", "severity": "error", "title": "Kazma is not reachable", "title_ar": "كاظمه غير متاح", "page": "/dashboard", "closed_by": "watch.recovered", "condition": "", "owner": true},
+  {"key": "windows.feature_waits", "sender": "ops", "severity": "warn", "title": "Kazma could not keep a feature working on this PC", "title_ar": "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", "page": "/settings?tab=system", "closed_by": "", "condition": "", "owner": true}
  ]
 };

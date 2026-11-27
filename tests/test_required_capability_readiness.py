@@ -5,6 +5,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from kazma_core.docker_cli import DockerCommand
 
 from kazma_ui import health
 
@@ -73,7 +74,8 @@ def test_docker_cli_without_a_working_daemon_is_not_execution_ready(monkeypatch)
     import subprocess
     monkeypatch.setattr(e2b, "e2b_available", lambda: False)
     monkeypatch.setattr(code_exec, "local_exec_forbidden", lambda: True)
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "fixture-docker")
+    monkeypatch.setattr(code_exec, "_docker_command",
+                        lambda args, env=None: DockerCommand(["fixture-docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec, "use_docker_jail", lambda: True)
     monkeypatch.setattr(health.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 1, stdout="", stderr="daemon down"))
     assert health._check_code_execution()["status"] == "failed"
@@ -91,7 +93,8 @@ def docker_jail(monkeypatch):
 
     monkeypatch.setattr(e2b, "e2b_available", lambda: False)
     monkeypatch.setattr(code_exec, "local_exec_forbidden", lambda: True)
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "fixture-docker")
+    monkeypatch.setattr(code_exec, "_docker_command",
+                        lambda args, env=None: DockerCommand(["fixture-docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec, "use_docker_jail", lambda: True)
     monkeypatch.setattr(health, "_docker_answered_at", None)
     answers: list = []

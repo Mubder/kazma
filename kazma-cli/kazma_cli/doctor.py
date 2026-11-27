@@ -39,7 +39,7 @@ def _host(url: str) -> str:
         from urllib.parse import urlparse
 
         return urlparse(url).hostname or url
-    except Exception:  # noqa: BLE001
+    except ValueError:
         return url
 
 
@@ -442,17 +442,36 @@ def _cloud_profile_rows() -> list[tuple[str, str]]:
     return out
 
 
+#: How each line of Windows' file check is marked: Smart App Control and a
+#: signed alternative in use are information, never a finding; only a
+#: feature with no signed alternative is a warning, and it names the feature.
+_WINDOWS_MARKS = {"state": INFO, "allowed": OK, "alternative": INFO, "preferred": INFO, "not_needed": OK,
+                  "waits": WARN}
+
+
+def _windows_rows() -> list[tuple[str, str]]:
+    """Windows' file check (``kazma_core.windows_trust``): the setting and each
+    native part of Kazma's. Empty elsewhere than Windows."""
+    from kazma_core.windows_trust import check, lines
+
+    return [_line(_WINDOWS_MARKS[status], text) for status, text in lines(check())]
+
+
 def report_sections() -> list[tuple[str, list[tuple[str, str]]]]:
     """The sections :func:`run` prints, in that order.
 
     ``kazma self-check`` reads this rather than a second copy of the health
     checks. A group ``run`` prints only when it has rows is omitted when empty;
     the cloud profile is always present, as ``run`` always prints its heading.
+    Windows' file check is in this list, so doctor and self-check both show it.
     """
     sections: list[tuple[str, list[tuple[str, str]]]] = [
         ("Kazma doctor — provider & model resolution", collect()),
         ("System dependencies", _system_rows()),
     ]
+    windows = _windows_rows()
+    if windows:
+        sections.append(("Windows' file check", windows))
     database = _database_service_rows()
     if database:
         sections.append(("The database service", database))

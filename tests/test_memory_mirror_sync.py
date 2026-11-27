@@ -35,6 +35,8 @@ import pytest
 from kazma_core.memory import state_backend as sb
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
+from tests._as_request import tests_own
+
 REPO = Path(__file__).resolve().parents[1]
 THIS = "a" * 32
 OTHER = "b" * 32
@@ -441,25 +443,26 @@ def test_the_region_of_a_mirrored_row_is_read_from_postgres():
     rows = {f"e_region_{tag}_a": '{"region": "eu-1", "install": "x"}',
             f"e_region_{tag}_b": '{"install": "x"}',
             f"e_region_{tag}_c": 'not json "region": at all {'}
-    pg = backend._connect()
-    try:
-        backend._ensure()
-        cur = pg.cursor()
-        for rid, meta in rows.items():
-            cur.execute("INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, "
-                        "assistant_text, summary_text, tier, structural_importance, created_at, metadata_json) "
-                        "VALUES (%s, 'default', 's', 1, 'q', 'a', NULL, 'episodic', 1, %s, %s)",
-                        (rid, time.time(), meta))
-        pg.commit()
-        got = {k: v for k, v in backend.row_regions("kazma_episodes").items() if k.startswith(f"e_region_{tag}")}
-        assert got == {f"e_region_{tag}_a": "eu-1"}
-        assert backend.row_regions("not_a_mirror_table") == {}
-    finally:
-        cur = pg.cursor()
-        cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (list(rows),))
-        pg.commit()
-        pg.close()
-        backend.close()
+    with tests_own("as the mirror's sync pass reads it: every space's rows"):
+        pg = backend._connect()
+        try:
+            backend._ensure()
+            cur = pg.cursor()
+            for rid, meta in rows.items():
+                cur.execute("INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, "
+                            "assistant_text, summary_text, tier, structural_importance, created_at, metadata_json) "
+                            "VALUES (%s, 'default', 's', 1, 'q', 'a', NULL, 'episodic', 1, %s, %s)",
+                            (rid, time.time(), meta))
+            pg.commit()
+            got = {k: v for k, v in backend.row_regions("kazma_episodes").items() if k.startswith(f"e_region_{tag}")}
+            assert got == {f"e_region_{tag}_a": "eu-1"}
+            assert backend.row_regions("not_a_mirror_table") == {}
+        finally:
+            cur = pg.cursor()
+            cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (list(rows),))
+            pg.commit()
+            pg.close()
+            backend.close()
 
 
 @pytest.mark.postgres
@@ -497,7 +500,8 @@ def test_the_sync_digests_match_what_postgres_computes(tmp_path, monkeypatch):
     conn.commit()
     try:
         sb.sync_state_mirror(conn, full=True)
-        remote = backend.episode_digest()
+        with tests_own("as the mirror's sync pass reads it: every space's rows"):
+            remote = backend.episode_digest()
         for eid in ids:
             row = conn.execute("SELECT tier, user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
                                (eid,)).fetchone()
@@ -505,13 +509,14 @@ def test_the_sync_digests_match_what_postgres_computes(tmp_path, monkeypatch):
         again = sb.sync_state_mirror(conn, full=True)
         assert again["episodes_pushed"] == 0 and again["beliefs_pushed"] == 0
     finally:
-        pg = backend._connect()
-        try:
-            cur = pg.cursor()
-            cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (ids,))
-            cur.execute("DELETE FROM kazma_beliefs WHERE id = %s", (bid,))
-            pg.commit()
-        finally:
-            pg.close()
+        with tests_own():  # the test's own rows
+            pg = backend._connect()
+            try:
+                cur = pg.cursor()
+                cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (ids,))
+                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s", (bid,))
+                pg.commit()
+            finally:
+                pg.close()
         conn.close()
         backend.close()

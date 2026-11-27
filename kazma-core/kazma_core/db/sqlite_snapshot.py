@@ -18,7 +18,18 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-__all__ = ["snapshot_copy"]
+__all__ = ["snapshot_copy", "snapshot_into"]
+
+
+def _open_source(src: str | Path, timeout_s: float, read_only: bool) -> sqlite3.Connection:
+    """The source connection of a copy. A source that is a link leading
+    nowhere (its disk is away) is refused: SQLite made a new, empty database
+    where it leads, and the copy of that was a success."""
+    if Path(src).is_symlink() and not Path(src).exists():
+        raise FileNotFoundError(errno.ENOENT, "the link leads nowhere", str(src))
+    if read_only:
+        return sqlite3.connect(Path(src).resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout_s)
+    return sqlite3.connect(str(src), timeout=timeout_s)
 
 
 def snapshot_copy(
@@ -29,16 +40,24 @@ def snapshot_copy(
     *read_only* opens the source with ``mode=ro`` (a store this process must
     not write). ``closing()``, never a bare ``with sqlite3.connect()``: that
     commits and does not close, and on Windows an open file cannot be renamed
-    or removed. A source that is a link leading nowhere (its disk is away) is
-    refused: SQLite made a new, empty database where it leads, and the copy of
-    that was a success.
+    or removed. The source is opened first, so a refused source leaves no
+    *dest* file behind.
     """
-    if Path(src).is_symlink() and not Path(src).exists():
-        raise FileNotFoundError(errno.ENOENT, "the link leads nowhere", str(src))
-    if read_only:
-        source = sqlite3.connect(Path(src).resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout_s)
-    else:
-        source = sqlite3.connect(str(src), timeout=timeout_s)
-    with closing(source) as s, closing(sqlite3.connect(str(dest), timeout=timeout_s)) as d:
+    with closing(_open_source(src, timeout_s, read_only)) as s, \
+            closing(sqlite3.connect(str(dest), timeout=timeout_s)) as d:
         s.backup(d)  # pages=-1: the whole database, one read transaction
         d.commit()
+
+
+def snapshot_into(
+    src: str | Path, dest: sqlite3.Connection, *, timeout_s: float = 30.0, read_only: bool = True,
+) -> None:
+    """Copy the database *src* into the open connection *dest* in one step.
+
+    The same single-step backup as :func:`snapshot_copy`, for a caller that
+    holds its destination open (a private in-memory database, as the memory
+    benchmark seeds each question's). *read_only* defaults to True: such a
+    caller only reads *src*. Raises on failure; *dest* stays open.
+    """
+    with closing(_open_source(src, timeout_s, read_only)) as s:
+        s.backup(dest)  # pages=-1: the whole database, one read transaction

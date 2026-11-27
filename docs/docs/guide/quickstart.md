@@ -39,8 +39,10 @@ a window that shows each step. When Windows must restart for WSL, setup goes
 on by itself at the next sign-in. The Start menu then has **Kazma** (opens its
 page), **Update Kazma**, **Finish or repair Kazma setup** and the
 documentation. **Settings → Apps** uninstalls it with `kazma uninstall`, which
-keeps your data (`kazma-data`, `.env`). An installer that is not yet signed
-makes Windows show a SmartScreen warning: **More info → Run anyway**. Updating
+keeps your data (`kazma-data`, `.env`). Windows shows a SmartScreen notice for
+installers that aren't signed yet, and signed releases are on the way: choose
+**More info**, then **Run anyway**. With Smart App Control on, Windows may not
+run it until it is signed ([Kazma and Windows Smart App Control](windows-smart-app-control.md)). Updating
 is `kazma update`, from the next release's signed source archive
 ([Kazma Update](../ops/kazma-update.md#release-install)).
 
@@ -91,7 +93,7 @@ prints the same list):
 |---|---|---|---|
 | Meaning search (bge-m3) | yes | yes | memory recall and the Knowledge Library match words only |
 | Document reading and writing (PyMuPDF, PDFium, WeasyPrint) | yes | yes | PDFs are read by the simpler built-in readers (weaker on Arabic and tables) |
-| Kazma's test suite (pytest, ruff) | yes | yes | Kazma's tests cannot run here |
+| Kazma's test suite (pytest) | yes | yes | Kazma's tests cannot run here |
 | Code structure (tree-sitter) | yes | yes | the code index reads code by pattern only |
 | Database drivers (MySQL, MongoDB, Postgres) | yes | yes | the database tools reach SQLite files only |
 | Push notifications (Web Push) | yes | yes | no push notification when a task finishes (the chat still says it) |

@@ -358,6 +358,80 @@
   cut memory read whole, three tool rounds and no fourth with five as the
   control, the question's clock in recall with the real clock as the
   control, a refused call never judged).
+- **LongMemEval written as Kazma writes it** (2026-11-27, the memory plan's
+  W6 step 5, the framework audit's F-C (1)-(3)). The harness wrote each
+  history's episodes alone, though every real block has facts, summaries and
+  the merge. Now one seeding serves `kazma`, `kazma_whole` and `kazma_turn`
+  (`longmemeval_bench.seed_from`): `answer --written LABEL` reads each
+  question's store from `scripts/longmemeval_written.py`, which copies the
+  question's facts store (`longmemeval_facts_pilot.py extract`, or
+  `scripts/longmemeval_replay.py` from its kept replies through this
+  checkout's write path, no model call) and adds, at the question's time
+  with the product's own code, the summaries sweep (`queue_due_work`) and
+  the queue's own tasks for what it queues, then the nightly merge
+  (`run_global_reconsolidation`, the cadence's numbers, once a night the
+  history spans). **Harness differences, said:** everything is written at
+  the question's time, as after an import: the summaries' meaning bar
+  (`_meaning_bar`) reads the whole history (it differs in most weeks, and
+  would not exist yet in 38 weeks lived week by week; the groups differ in 1
+  of 250 weeks), and the merge runs after every fact, so no deep pass saw a
+  merged store. Days are read in UTC: the product reads weeks and months in
+  the operator's zone (`topic_summaries.memory_zone`, as recall reads days),
+  which the run patches. **The refusal** reads the store itself
+  (`store_unfinished`: the merge's errors or a twin left current, the same
+  words on the same day; a week left, queued or a summary to be written
+  again, the weeks left read by the product's own `_due_periods` on the
+  store at the question's time, and a week marked done whose summaries the
+  store no longer holds, so a store whose summaries were deleted is refused
+  with or without its week markers; a month or project roll-up the
+  product's `plan_rollups` would plan, run on a throwaway copy at the
+  question's time, so a deleted roll-up is refused too; a done file without
+  the question's time is refused), not only the done file; rounds whose deep pass was never answered
+  are said with every number (`written_with`: 144 of 12,089 on the pilot,
+  the extraction's failed passes). A question whose sweeps do not settle
+  says so (`--sweeps`), apart from a failed call. **The replay** finds a
+  reply's "replaces fN" by subject, value and a name of the same statement
+  (`fact_names.same_statement`; cross-name matches: none, counted on a
+  replay at the L1 code, `ed313074-w6-5r-qwen`, whose counts equal the
+  measured facts run's in every other column; the evidence writes null
+  where a run did not count them), hands the pass a fact held but not shown (`refs_added`), counts a
+  number it cannot place (`refs_lost`) and a round with no kept reply
+  (`no_reply`). The pilot's map (`facts-pilot/map-qwen`, 24 Nov) was made by
+  a scratch script of step 1's, not kept: it ran the extraction's code over
+  the Qwen run's kept replies (bd40b75a) and recorded each round's reply and
+  the facts shown; its own check, facts and dated events equal to the
+  extraction's in all 200 stores, held; what its `unmapped_ids` counts was
+  not recorded. `extract` now writes a map itself. **Measured on the
+  pilot's 50** (Qwen's replies replayed at step 4's head; summaries on
+  qwen3.8-flash, 1,333 calls, about $1.13): 1,275 weekly summaries, 49 month
+  and 3 project roll-ups, 20 twins merged; 10 questions hold no ended week.
+  20 of 50 blocks show a summary (27 lines; recall returned 38), and exactly
+  those 20 differ from the facts-only block; the merge changed no fact line.
+  Answered twice on eb58ed364's blocks (reader qwen3.7-plus, judges
+  qwen3.8-flash and qwen3.7-plus; `answers_dev_w6-5.json`, `_noise.json`):
+  0.78 written, 0.74 facts alone, 0.58 episodes alone in both runs, but the
+  written-against-facts gap is the reader's noise: most of it comes from
+  88432d0a_abs and gpt4_5501fe77, whose prompts were byte-identical in both
+  conditions, and on the 20 blocks that show a summary written answered 17
+  and 18, facts alone 18 and 18. 9bbe84a2 was lost in the main run,
+  gpt4_2d58bcd6 against the episodes in the noise run. The harness, not a
+  gain, is the step's value. It found a recall fault, fixed with it
+  (`recall._room_by_rank`, §15 F): a summary no step could fit still shrank
+  the excerpts (822 -> 623 characters, gpt4_1d80365e and gpt4_61e13b3c).
+  Rebuilt with the fix, 7 written and 5 facts-only blocks differ from the
+  answered ones (eb58ed364's): the same memories and lines, a wider first
+  conversation (619-629 -> 709-926 characters), the answer's words in each
+  as before; the evidence's note names them. Labels and months of a summary
+  come from its key ("2026-W23", "2026-06"), so a week a server wrote in its
+  own local time keeps its name and month in any operator zone (the delta
+  review's B).
+  Counts: `docs/audits/evidence/memory_ingestion/pilot_written.json`, made by
+  `longmemeval_written.py --evidence`. Gates: `tests/test_longmemeval_written.py`
+  (a scripted model: facts, one summary and the merge in the block and the
+  turn; controls: today's seeding, a week not ended, the facts run's twin; a
+  store lacking a step or left unfinished refuses the run),
+  `tests/test_longmemeval_replay.py`, `tests/test_recall_room_by_rank.py`
+  (the fault's EN and AR cases and its class), `tests/test_benchmarks_page.py`.
 - **Dataset v9: the facts under the names the product holds** (2026-11-26,
   the memory plan's W6, the framework audit's F-C (5)). v8 seeded the user's
   role as `job_title` and name as `name`, names no writer of the product keeps

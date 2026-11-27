@@ -21,12 +21,24 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.ingestion import DocumentIngestionService
 from kazma_core.documents.models import VersionId
+
+from tests._as_request import tests_own
+
+
+@pytest.fixture(autouse=True)
+def _the_tests_own_rows() -> Iterator[None]:
+    """A store test: what it seeds, reads and deletes is its own, of no space
+    -- the install's (S4-01 step 5). The doors of the store's callers are the
+    flow tests' and the door gates' (tests/test_row_work_gates.py)."""
+    with tests_own():
+        yield
 
 
 class _Clock:

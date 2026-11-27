@@ -15,9 +15,18 @@ import pytest
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import bind_scope
 
+from tests._as_request import not_armed
 from tests._space_door import Calls, watched_pool
 
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _report_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 0a and step 1's report mode: each checkout counted by its door,
+    nothing refused -- the reading of an install whose lock is not armed. The
+    same flows armed are tests/test_pg_armed_flows.py."""
+    not_armed(monkeypatch)
 
 
 @pytest.fixture

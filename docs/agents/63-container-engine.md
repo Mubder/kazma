@@ -31,7 +31,10 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   `docker_cli.py` (loaded by path) never reads settings: it takes the choice
   from the server's record (`guard_dependencies`, field `engine`) and hands
   the context to the document broker (`_BROKER_ENV_KEEP`), which restarts
-  when the choice changes.
+  when the choice changes: after the jobs it is running finish, at most
+  `BROKER_ENGINE_CHANGE_WAIT_S` (660 s), said in the guard's log
+  (`broker.engine_change_waits`, then `broker.engine_changed` or
+  `broker.engine_change_wait_ended`; §71).
 - **Mount paths follow the context** (`docker_cli.engine_host_path`): Kazma's
   engine mounts fixed drive `G:` at `/g` (its distro's `[automount] root=/`);
   a share, mapped, `subst` or removable drive is refused with the reason;
@@ -74,10 +77,13 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   blocked this file", WinError 4551; it was chosen because the file was
   there, every docker call failed, the guard restarted an engine that
   answered and code execution waited). A CLI Windows refuses by policy
-  (`docker_cli._REFUSALS`) is passed over for the next, said once at
-  WARNING and tried again every 5 minutes; a file that is no program is
-  not a refusal (gate: `tests/test_docker_cli_discovery.py`, the old choice
-  as the control). The guard keeps its copy of the module until the
+  (`windows_policy.REFUSAL_CODES`, §71; Kazma's own engine needs no Windows CLI
+  at all since 2026-11-26: `docker_cli.docker_command` runs the distro's docker
+  through `wsl.exe`) is passed over for the next, said
+  once at INFO and tried again every 5 minutes (one that started, after 15);
+  while Smart App Control is on, Docker Desktop's signed CLI comes first; a
+  file that is no program is not a refusal (gate:
+  `tests/test_docker_cli_discovery.py`, the old choice as the control). The guard keeps its copy of the module until the
   `KazmaAgent` task restarts. The check took Docker
   Desktop's CLI for Kazma's, so the owner's PC never got its own, and
   uninstalling Docker Desktop would have cut Kazma off from its engine; the

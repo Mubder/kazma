@@ -244,8 +244,17 @@ def _one(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
 
 
 def _rows(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """*sql*'s rows as tuples, whatever rows the caller's cursor gives: a
+    store's dict-row cursor reaches here through ``apply_made_tables``. A
+    dict row keeps one column of two of one name, so a read whose row came
+    back short is refused, never read with a column missing (S4-01 step 5:
+    the two ``pg_get_expr`` of ``_policies``); every query here names each
+    column once."""
     cur.execute(sql, params or None)
-    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in cur.fetchall()]
+    rows = cur.fetchall()
+    if rows and isinstance(rows[0], dict) and len(rows[0]) != len(cur.description or ()):
+        raise ValueError(f"a catalog read names two columns alike, and a dict row keeps one: {sql[:80]}")
+    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in rows]
 
 
 def _quoted(table: str) -> str:
@@ -398,8 +407,8 @@ def _direct_rights(cur: Any, table: str) -> set[str]:
 
 
 def _policies(cur: Any, table: str) -> list[tuple[Any, ...]]:
-    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[], "
-                      "pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) "
+    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[] AS to_public, "
+                      "pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS checked "
                       "FROM pg_policy WHERE polrelid = to_regclass(%s) ORDER BY polname", (_quoted(table),))
 
 
@@ -533,6 +542,14 @@ class Applied:
     unresolved: list[str] = field(default_factory=list)
     #: Checkpoint rows given their thread's space by the backfill (step 4).
     backfilled: int = 0
+    #: What the pass did not do and why, without keeping the lock from
+    #: holding (a backfill on a database that is not this install's own).
+    notes: list[str] = field(default_factory=list)
+    #: Why no checkpoint row's space was backfilled, when none was (a
+    #: database that is not this install's own). The rules hold without it,
+    #: but armed on it those threads' old state stays the owner's: the script
+    #: says it loudly (step 4 delta review N3).
+    not_backfilled: str = ""
 
     @property
     def complete(self) -> bool:
@@ -746,8 +763,10 @@ def apply(url: str, *, tables: Iterable[str] | None = None, vector_table: str | 
             if not _take(conn, table, all_rules[table], result, lock_timeout_ms, tries, deadline):
                 result.left.append(table)
         stamped = [t for t in present if all_rules[t].column == SPACE_COLUMN and t not in result.left]
-        if stamped:
-            _backfill(conn, stamped, result, lock_timeout_ms, tries, deadline)
+        # A whole pass only (step 4 review L6): a table made later (the
+        # checkpointer's setup, at every open) gets its rule, not a backfill.
+        if stamped and tables is None:
+            _backfill(url, conn, stamped, result, lock_timeout_ms, tries, deadline)
     _mark_in_place()
     if result.left:
         logger.warning("[row_security] %d table(s) could not be taken in time and keep no rule until the next "
@@ -779,70 +798,166 @@ def _take(conn: Any, table: str, rule: Rule, result: Applied, lock_timeout_ms: i
 
 # ── the checkpoints' backfill (S4-01 step 4, design 7.3) ────────────────
 
-#: Threads per statement of the backfill.
-_BACKFILL_BATCH = 500
+#: The longest a backfill statement may run (step 4 review L6): one that
+#: would run longer is stopped, and its table is left for the next pass.
+_BACKFILL_STATEMENT_MS = 15000
+#: The temporary table the thread records are loaded into, once per pass.
+_HOMES = "kazma_thread_homes"
 
 
-def _backfill(conn: Any, tables: list[str], result: Applied, lock_timeout_ms: int, tries: int,
+def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_timeout_ms: int, tries: int,
               deadline: float) -> None:
     """Every checkpoint row gets its thread's space: the record store's
     (``thread_scopes.db``) for a thread of another space, NULL for the
     owner's -- a thread with no record is from before Spaces (N19), and a
-    wrong stamp (a thread moved to the owner) goes back. At every pass, not
-    once: an older build run after a revert writes NULL for another space's
-    thread. In batches, one transaction each under the schema lock, waiting
-    at most *lock_timeout_ms*; a table not taken in time is in ``left``. A
-    record store that cannot be read is said in ``unresolved``: the lock is
-    not to be armed on a half backfill."""
-    import sqlite3
+    wrong stamp (a thread moved to the owner) goes back. At every whole
+    pass, not once: an older build run after a revert writes NULL for
+    another space's thread.
 
-    import psycopg
+    Only on this install's own database (step 4 review M2): the records are
+    this install's, and on a replica or another database they would undo its
+    stamps -- Spaces on replicas is not covered. The store is read
+    read-only (M1): a missing one is said in ``unresolved``, never read as
+    "no threads", and so is an empty one while rows carry a space's stamp;
+    one that cannot be read the same. The lock is not to be armed on a half
+    backfill. Set-based (L6): the records go once into a temporary table,
+    then two statements per table, each its own transaction under the
+    schema lock with a lock wait and a statement timeout; a table not
+    finished is in ``left``."""
+    import sqlite3
 
     from kazma_core.spaces import threads
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
+    if not _this_installs_own(url, conn):
+        result.not_backfilled = ("checkpoints: not the database this install's own address names (compared by "
+                                 "server and database), so their spaces are not backfilled from this install's "
+                                 "thread records (Spaces on replicas is not covered)")
+        result.notes.append(result.not_backfilled)
+        return
     try:
         homes = threads.thread_spaces()
+    except FileNotFoundError:
+        result.unresolved.append("checkpoints: this install's thread records are not there: their spaces "
+                                 "were not backfilled")
+        logger.warning("[row_security] the checkpoints' backfill found no thread records: nothing was changed")
+        return
     except (sqlite3.Error, OSError) as exc:
         result.unresolved.append(f"checkpoints: the threads' spaces could not be read ({type(exc).__name__})")
         logger.warning("[row_security] the checkpoints' backfill could not read the thread records: %s",
                        type(exc).__name__)
         return
-    by_space: dict[str, list[str]] = {}
-    for thread_id, space in homes.items():
-        if space and space != OWNER_SPACE_ID:
-            by_space.setdefault(space, []).append(thread_id)
-    others = [t for ids in by_space.values() for t in ids]
-    for table in tables:
-        statements: list[tuple[str, tuple[Any, ...]]] = []
-        for space, ids in sorted(by_space.items()):
-            for i in range(0, len(ids), _BACKFILL_BATCH):
-                statements.append((f"UPDATE public.{table} SET {SPACE_COLUMN} = %s "  # nosec B608 - a rule's table
-                                   f"WHERE thread_id = ANY(%s) AND {SPACE_COLUMN} IS DISTINCT FROM %s",
-                                   (space, ids[i:i + _BACKFILL_BATCH], space)))
-        statements.append((f"UPDATE public.{table} SET {SPACE_COLUMN} = NULL "  # nosec B608 - a rule's table
-                           f"WHERE {SPACE_COLUMN} IS NOT NULL AND {SPACE_COLUMN} <> %s AND NOT (thread_id = ANY(%s))",
-                           (OWNER_SPACE_ID, others)))
-        for statement, params in statements:
-            done = False
-            for attempt in range(max(1, tries)):
-                if time.monotonic() >= deadline:
-                    break
-                try:
-                    with _table_transaction(conn, lock_timeout_ms) as cur:
-                        cur.execute(statement, params)
-                        result.backfilled += max(0, cur.rowcount)
-                    done = True
-                    break
-                except psycopg.Error as exc:
-                    if not _lock_wait(exc):
-                        raise
-                    time.sleep(min(0.2 * (attempt + 1), max(0.0, deadline - time.monotonic())))
-            if not done:
+    others = {t: s for t, s in homes.items() if s and s != OWNER_SPACE_ID}
+    if not homes and _any_stamped(conn, tables):
+        result.unresolved.append("checkpoints: this install's thread records list no thread, yet rows carry a "
+                                 "space: their spaces were not backfilled")
+        logger.warning("[row_security] the thread records are empty while checkpoints carry a space: the "
+                       "backfill changed nothing")
+        return
+    try:
+        with conn.transaction(), conn.cursor() as cur:
+            cur.execute(f"CREATE TEMP TABLE IF NOT EXISTS {_HOMES} (thread_id text PRIMARY KEY, "
+                        "space_id text NOT NULL) ON COMMIT PRESERVE ROWS")
+            cur.execute(f"TRUNCATE {_HOMES}")
+            with cur.copy(f"COPY {_HOMES} (thread_id, space_id) FROM STDIN") as copy:
+                for thread_id, space in others.items():
+                    copy.write_row((thread_id, space))
+        for table in tables:
+            if not _backfill_table(conn, table, result, lock_timeout_ms, tries, deadline):
                 result.left.append(f"{table} (its rows' spaces)")
-                break
+    finally:
+        with conn.transaction(), conn.cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS {_HOMES}")
     if result.backfilled:
         result.changed.append(f"checkpoints: {result.backfilled} row(s) given their thread's space")
+
+
+def _server_identity(cur: Any) -> tuple[str, str]:
+    """Which server and database *cur*'s connection reached: the cluster's
+    system identifier (its start time where a login may not read it) and the
+    database's name -- the same for two addresses of one database, whatever
+    host name or alias each names (second delta review L2)."""
+    import psycopg
+
+    try:
+        with cur.connection.transaction():
+            server = _one(cur, "SELECT system_identifier::text FROM pg_control_system()")
+    except psycopg.errors.InsufficientPrivilege:
+        server = None
+    if not server:
+        server = _one(cur, "SELECT pg_postmaster_start_time()::text")
+    return str(server), str(_one(cur, "SELECT current_database()"))
+
+
+def _this_installs_own(url: str, conn: Any) -> bool:
+    """Whether *url* (with *conn* on it) is the database this install's own
+    address names: the same address (``availability.is_kazma_database``), or
+    another way to the same server and database -- another host name, a
+    ``hostaddr`` alias -- told by its server identity, read on both
+    (second delta review L2: such a database counted as "elsewhere" and was
+    not backfilled)."""
+    import psycopg
+
+    from kazma_core.db.availability import is_kazma_database
+    from kazma_core.db.backend import get_database_url
+
+    if is_kazma_database(url):
+        return True
+    ours = get_database_url() or ""
+    if not ours.startswith(("postgres://", "postgresql://")):
+        return False
+    try:
+        with _owner_connect(ours, autocommit=True) as own, own.cursor() as theirs, conn.cursor() as cur:
+            return _server_identity(theirs) == _server_identity(cur)
+    except psycopg.Error as exc:
+        logger.warning("[row_security] this install's own database could not be compared with the one named "
+                       "(%s): it counts as another", type(exc).__name__)
+        return False
+
+
+def _any_stamped(conn: Any, tables: list[str]) -> bool:
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    with conn.transaction(), conn.cursor() as cur:
+        return any(_one(cur, f"SELECT EXISTS (SELECT 1 FROM public.{t} WHERE {SPACE_COLUMN} IS NOT NULL "  # noqa: S608  # nosec B608 - a rule's table
+                             f"AND {SPACE_COLUMN} <> %s)", (OWNER_SPACE_ID,)) for t in tables)
+
+
+def _backfill_table(conn: Any, table: str, result: Applied, lock_timeout_ms: int, tries: int,
+                    deadline: float) -> bool:
+    """One table's two statements: each row of a recorded thread of another
+    space gets that space, and a row stamped with a space whose thread is
+    not one goes back to the owner (NULL). False when one did not finish."""
+    import psycopg
+
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    statements = (
+        (f"UPDATE public.{table} AS c SET {SPACE_COLUMN} = h.space_id FROM {_HOMES} h "  # nosec B608 - a rule's table
+         f"WHERE c.thread_id = h.thread_id AND c.{SPACE_COLUMN} IS DISTINCT FROM h.space_id", ()),
+        (f"UPDATE public.{table} AS c SET {SPACE_COLUMN} = NULL "  # nosec B608 - a rule's table
+         f"WHERE c.{SPACE_COLUMN} IS NOT NULL AND c.{SPACE_COLUMN} <> %s "
+         f"AND NOT EXISTS (SELECT 1 FROM {_HOMES} h WHERE h.thread_id = c.thread_id)", (OWNER_SPACE_ID,)),
+    )
+    for statement, params in statements:
+        for attempt in range(max(1, tries)):
+            if time.monotonic() >= deadline:
+                return False
+            try:
+                with _table_transaction(conn, lock_timeout_ms) as cur:
+                    cur.execute(f"SET LOCAL statement_timeout = '{int(_BACKFILL_STATEMENT_MS)}ms'")
+                    cur.execute(statement, params or None)
+                    result.backfilled += max(0, cur.rowcount)
+                break
+            except psycopg.Error as exc:
+                if getattr(exc, "sqlstate", None) == "57014":  # stopped at its timeout: left for the next pass
+                    return False
+                if not _lock_wait(exc):
+                    raise
+                time.sleep(min(0.2 * (attempt + 1), max(0.0, deadline - time.monotonic())))
+        else:
+            return False
+    return True
 
 
 # ── tables made later (review H3) ───────────────────────────────────────

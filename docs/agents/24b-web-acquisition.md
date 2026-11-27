@@ -92,7 +92,11 @@
   install, host, pid, start time and a lease renewed on every write (300 s,
   KB-E07): a dead owner on this host is recovered, another host's only after
   its lease lapsed, and the taken-over owner's next write is refused; rows of
-  another install are never read. **A job's writers in one process take turns**
+  another install are never read. The owner's start and its stamp (Linux:
+  boot id and start ticks) are compared only through
+  `kazma_core.process_start` (§35): a fresh reading of the start compared
+  exactly moved with the Linux boot time, and a running crawl read its own
+  owner as gone (2026-11-27). **A job's writers in one process take turns**
   (`_job_lock`, `_REGISTRY_LOCK`, 2026-10-31): the compare-and-set is for other
   processes, with a random pause between its 8 attempts (`_retry_pause`).
   Racing it, a research run's four parallel fetches starved each other

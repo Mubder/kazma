@@ -18,6 +18,8 @@ import pytest
 
 from kazma_core.memory import chat_history
 
+from tests._as_request import as_owner, in_space
+
 _SESSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS sessions (
     tenant_id TEXT, session_id TEXT, messages TEXT, created_at TEXT, total_cost REAL,
@@ -44,8 +46,9 @@ def _save(data, session_id, messages, *, thread_id="", title="", tenant="default
 
     store = _store(data)
     try:
-        store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
-                              title=title, messages=list(messages)))
+        with in_space(tenant):  # the chat page's save, in its chat's space
+            store.put(ChatSession(session_id=session_id, tenant_id=tenant, thread_id=thread_id,
+                                  title=title, messages=list(messages)))
     finally:
         store.close()
 
@@ -226,8 +229,9 @@ def test_search_reads_the_store_the_web_ui_writes(data):
     sid = f"hist-{uuid.uuid4().hex[:8]}"
     _save(data, sid, [{"role": "user", "content": f"the {token} plan"},
                       {"role": "assistant", "content": "noted"}], title="plans")
-    hits = chat_history.search_sessions([token], limit=3)
+    with as_owner():  # the past-chats tool, in the owner's turn
+        hits = chat_history.search_sessions([token], limit=3)
+        copies = chat_history.conversations_for(sid, strict=True)
     assert [h["session_id"] for h in hits] == [sid]
     assert token in hits[0]["messages"]
-    copies = chat_history.conversations_for(sid, strict=True)
     assert [m["content"] for m in copies[0]["messages"]][0] == f"the {token} plan"

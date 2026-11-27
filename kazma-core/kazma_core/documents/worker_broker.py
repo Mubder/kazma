@@ -358,14 +358,18 @@ class _Broker:
         self._token = settings.token.encode("utf-8")
 
     # ── docker CLI ──────────────────────────────────────────────────────
-    def _env(self) -> dict[str, str]:
+    def _env(self, route: dict[str, str] | None = None) -> dict[str, str]:
+        """The docker CLI's environment: the names it needs, and what Kazma's
+        route adds to a call (``WSL_UTF8`` on the wsl.exe route, review L-b)."""
         upper = {key.upper(): key for key in os.environ}
-        return {upper[name]: os.environ[upper[name]] for name in _ALLOWED_ENV if name in upper}
+        env = {upper[name]: os.environ[upper[name]] for name in _ALLOWED_ENV if name in upper}
+        env.update(route or {})
+        return env
 
     def _docker(self, *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
         """Run the docker CLI; a slow engine is a failed call, never an exception."""
 
-        argv = [self.settings.docker, *args]
+        argv, route = _docker_call(self.settings.docker, list(args))
         try:
             return subprocess.run(  # nosec B603 - fixed argv, docker CLI from operator config, no shell
                 argv,
@@ -374,7 +378,7 @@ class _Broker:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
-                env=self._env(),
+                env=self._env(route),
                 check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
@@ -531,14 +535,15 @@ class _Broker:
         if self.image_id is None:
             raise RuntimeError("worker image is not resolved")
         timeout = min(float(timeout_seconds), float(self.limits.max_timeout_seconds))
-        argv = [self.settings.docker, *_container_argv(self.settings, self.image_id, run_id, worker)]
+        argv, route = _docker_call(self.settings.docker,
+                                   list(_container_argv(self.settings, self.image_id, run_id, worker)))
         started = time.monotonic()
         process = subprocess.Popen(  # nosec B603 - fixed policy argv, no shell
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=self._env(),
+            env=self._env(route),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         name = container_name(self.settings.name, run_id)
@@ -1113,25 +1118,57 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _find_docker_cli() -> str | None:
-    """Kazma's one docker lookup (``kazma_core/docker_cli.py``: an explicit
-    path, PATH, Docker's install folders -- a Docker Desktop update once took
-    the CLI off PATH), loaded BY PATH because the broker stays standard-library
-    only and never imports ``kazma_core``. The broker image is this file alone
-    and names its CLI in ``KAZMA_DOCKER_BIN``."""
-    import importlib.util
-    import sys
+#: ``--docker`` names a CLI; without it the broker takes Kazma's one docker
+#: route (``docker_cli.docker_command``: Kazma's engine through wsl.exe, else
+#: the docker CLI found the way Kazma finds it), held as this marker.
+_ROUTE = "<kazma docker route>"
+_DOCKER_MODULE = None
 
-    sibling = Path(__file__).resolve().parents[1] / "docker_cli.py"
-    if sibling.is_file():
+
+def _docker_module():
+    """``kazma_core/docker_cli.py``, loaded BY PATH because the broker stays
+    standard-library only and never imports ``kazma_core``; None when it is
+    not beside this file (the broker image is this file alone and names its
+    CLI in ``KAZMA_DOCKER_BIN``)."""
+    global _DOCKER_MODULE
+    if _DOCKER_MODULE is None:
+        import importlib.util
+        import sys
+
+        sibling = Path(__file__).resolve().parents[1] / "docker_cli.py"
+        if not sibling.is_file():
+            return None
         spec = importlib.util.spec_from_file_location("kazma_broker_docker_cli", sibling)
-        if spec is not None and spec.loader is not None:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module
-            spec.loader.exec_module(module)
-            return module.find_docker_cli()
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _DOCKER_MODULE = module
+    return _DOCKER_MODULE
+
+
+def _find_docker_cli() -> str | None:
+    """How the broker reaches Docker: :data:`_ROUTE` when Kazma's route
+    reaches an engine, else the CLI ``KAZMA_DOCKER_BIN`` names, else None."""
+    module = _docker_module()
+    if module is not None and module.docker_command(["version"]) is not None:
+        return _ROUTE
     named = os.environ.get("KAZMA_DOCKER_BIN", "").strip()
     return named if named and Path(named).is_file() else None
+
+
+def _docker_call(docker: str, args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """``docker <args>`` and what its route adds to the environment: by
+    Kazma's route for :data:`_ROUTE` (``DockerCommand.route_entries``, review
+    L-b), else by the CLI named with nothing added."""
+    if docker == _ROUTE:
+        module = _docker_module()
+        cmd = module.docker_command(args) if module is not None else None
+        if cmd is not None:
+            return cmd.argv, cmd.route_entries()
+        return ["docker", *args], {}
+    return [docker, *args], {}
 
 
 def _watch_for_requested_image(broker: _Broker, server: socketserver.BaseServer,

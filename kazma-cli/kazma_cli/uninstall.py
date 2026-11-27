@@ -227,11 +227,12 @@ def _service_items(machine: Machine, owner: str | None) -> list[Item]:
 
 def _container_items(machine: Machine, *, remove_data: bool) -> list[Item]:
     from kazma_core import container_services as cs
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_argv
 
     root = machine.root
-    docker = find_docker_cli() if root is not None else None
-    if root is None or not docker:
+    # Kazma's one docker route (its engine through wsl.exe, else the CLI).
+    docker = docker_argv if root is not None and docker_argv(["version"]) is not None else None
+    if root is None or docker is None:
         return []
     items: list[Item] = []
     env_path = root / ".env"
@@ -239,19 +240,19 @@ def _container_items(machine: Machine, *, remove_data: bool) -> list[Item]:
         state = cs._image_state(svc, root, docker, run=machine.run)
         if state.state in ("absent", "not_ours", "unknown"):
             continue
-        argv = [docker, "compose", "-f", str(root / svc.compose_file), "--env-file", str(env_path)]
+        argv = ["compose", "-f", str(root / svc.compose_file), "--env-file", str(env_path)]
         if svc.project:
             argv += ["-p", svc.project]
         if svc.profile:
             argv += ["--profile", svc.profile]
-        argv += ["rm", "--stop", "--force", svc.service]
+        argv = cs.docker_call(docker, [*argv, "rm", "--stop", "--force", svc.service])
         items.append(Item(f"{svc.title} (its container{'' if remove_data else '; its data is kept'})",
                           "remove", argv=tuple(argv)))
         # Its data is its named volumes (compose's own rm never removes those):
         # removed only when asked, after the container that holds them.
         if remove_data and state.volumes:
             items.append(Item(f"{svc.title}'s data ({', '.join(state.volumes)})", "remove",
-                              argv=(docker, "volume", "rm", *state.volumes)))
+                              argv=tuple(cs.docker_call(docker, ["volume", "rm", *state.volumes]))))
     return items
 
 

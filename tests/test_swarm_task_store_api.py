@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,20 @@ from kazma_core.swarm import (
 from kazma_core.swarm.task_store import TaskStore
 from kazma_ui.swarm_panel import _reset_swarm_state, create_swarm_router
 
+from tests._as_request import as_owner, bound_like_a_request
+
 # Verified against a real Postgres (throwaway postgres:16, twice); the CI
 # Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _the_owners_request() -> Iterator[None]:
+    """Each test is the owner's swarm work, dispatched and read as the swarm
+    page and the swarm tool do: in the owner's space, as the tenant middleware
+    and the turn bind it (S4-01 step 5). Its apps have that middleware."""
+    with as_owner():
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +50,7 @@ def _make_app(store: TaskStore | None = None) -> tuple[FastAPI, TestClient]:
     """Create a FastAPI app with the swarm router."""
     from unittest.mock import MagicMock
 
-    app = FastAPI()
+    app = bound_like_a_request(FastAPI())
     templates = MagicMock()
     templates.TemplateResponse = MagicMock(side_effect=Exception("no template"))
     router = create_swarm_router(templates)

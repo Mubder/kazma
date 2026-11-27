@@ -480,6 +480,12 @@ class _FakeCursor:
             found = self._cur.connection.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (params[0],)).fetchone()
             self._answer = [{"exists": found is not None}]
             return self
+        if "pg_policy" in sql:
+            # Whether this database holds the second lock's rules (asked of a
+            # table just made once a process has put them in place: an armed
+            # run, S4-01): nothing ever put them in place here.
+            self._answer = [{"holds": False}]
+            return self
         translated = self._translate(sql)
         if params is None and "ADD COLUMN IF NOT EXISTS" in translated:
             # Emulate idempotent PostgreSQL schema evolution through the same

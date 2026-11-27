@@ -1,12 +1,15 @@
 """``kazma self-check`` — one read-only report of what already needs attention.
 
 It calls the checks Kazma already has, and it does not run at startup. A check
-that did not run is reported as not run. It is never counted as a pass, and
-the command exits 1 when any check needs attention or did not run.
+that did not run, or ran only in part, is reported as not run. It is never
+counted as a pass. An info row and a check that does not apply are shown and
+do not by themselves make the command exit 1. The command exits 1 when any
+check needs attention or did not run.
 
 The lines a called check already wrote (``kazma doctor``, the security report,
-the backup drill, a skill's own reason) stay in that check's words. The
-verdict of each section is written in English and Arabic.
+the backup drill, a skill's own reason) stay in that check's words, marked
+English when they have no Arabic of their own. The verdict of each section is
+written in English and Arabic.
 """
 
 from __future__ import annotations
@@ -17,17 +20,19 @@ import json
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 __all__ = [
     "ATTENTION",
+    "INFO",
+    "NOT_APPLICABLE",
     "NOT_RUN",
     "OK",
+    "REPORT_VERSION",
     "SECTION_ORDER",
     "Item",
     "ReleaseArtifact",
@@ -41,12 +46,15 @@ __all__ = [
 OK = "ok"
 ATTENTION = "attention"
 NOT_RUN = "not_run"
-_STATUSES = frozenset({OK, ATTENTION, NOT_RUN})
+INFO = "info"
+NOT_APPLICABLE = "not_applicable"
+REPORT_VERSION = 1
+_STATUSES = frozenset({OK, ATTENTION, NOT_RUN, INFO, NOT_APPLICABLE})
+_BLOCKS = frozenset({ATTENTION, NOT_RUN})
 
 SECTION_ORDER = ("health", "security", "backup", "skills", "release", "gaps")
 
 _TITLES: dict[str, tuple[str, str]] = {
-    "health": ("Health", "السلامة"),
     "security": ("Security report", "تقرير الأمان"),
     "backup": ("Latest backup", "أحدث نسخة احتياطية"),
     "skills": ("Skill signatures", "تواقيع المهارات"),
@@ -58,27 +66,70 @@ _STATUS_WORDS: dict[str, tuple[str, str]] = {
     OK: ("ok", "سليم"),
     ATTENTION: ("needs attention", "يحتاج انتباهاً"),
     NOT_RUN: ("not run", "لم يُجرَ"),
+    INFO: ("info", "معلومة"),
+    NOT_APPLICABLE: ("not applicable", "لا ينطبق"),
 }
 
-#: What ``skill_integrity`` returns when its own check raises (catalog.py).
-_INTEGRITY_FAILED = "the integrity check failed:"
+_SIGSTORE_EN = (
+    "This check reads Sigstore's root of trust online, or the copy on this "
+    "machine when it cannot be refreshed."
+)
+_SIGSTORE_AR = "يقرأ هذا الفحص جذر ثقة Sigstore عبر الشبكة، أو النسخة على هذا الجهاز إذا تعذّر تحديثها."
+
+_NO_BUNDLE: dict[str, tuple[str, str]] = {
+    "git": (
+        "This is a source checkout. No signature bundle is kept, so the release signature was not checked.",
+        "هذه نسخة مصدر. لا تُحفظ حزمة التوقيع، فلم يُفحص توقيع الإصدار.",
+    ),
+    "release": (
+        "This is a release install. The installer does not keep the signature bundle, so the release signature was not checked.",
+        "هذا تثبيت إصدار. المُثبِّت لا يحتفظ بحزمة التوقيع، فلم يُفحص توقيع الإصدار.",
+    ),
+    "pip": (
+        "This is a wheel install. kazma update checks the wheel and does not keep the signature bundle, so the release signature was not checked again.",
+        "هذا تثبيت حزمة. يفحص kazma update الحزمة ولا يحتفظ بحزمة التوقيع، فلم يُفحص توقيع الإصدار مرة أخرى.",
+    ),
+}
+
+_DATA_REASONS: dict[str, tuple[str, str]] = {
+    "missing": (
+        "The data folder is not there. Nothing was read and nothing was created.",
+        "مجلد البيانات غير موجود. لم يُقرأ شيء ولم يُنشأ شيء.",
+    ),
+    "not_a_directory": (
+        "The data folder path is not a folder. Nothing was read and nothing was created.",
+        "مسار مجلد البيانات ليس مجلداً. لم يُقرأ شيء ولم يُنشأ شيء.",
+    ),
+    "empty": (
+        "The data folder is empty. Nothing was read and nothing was created.",
+        "مجلد البيانات فارغ. لم يُقرأ شيء ولم يُنشأ شيء.",
+    ),
+    "unreadable": (
+        "The data folder could not be read. Nothing was created.",
+        "تعذّرت قراءة مجلد البيانات. لم يُنشأ شيء.",
+    ),
+}
 
 
 @dataclass
 class Item:
-    """One line inside a section."""
+    """One line inside a section.
+
+    ``title_ar`` and ``detail_ar`` are ``None`` when that line is the called
+    check's own English and has no Arabic of its own.
+    """
 
     status: str
     title_en: str
-    title_ar: str
+    title_ar: str | None
     detail_en: str = ""
-    detail_ar: str = ""
+    detail_ar: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
-            "title": {"en": _mask(self.title_en), "ar": _mask(self.title_ar)},
-            "detail": {"en": _mask(self.detail_en), "ar": _mask(self.detail_ar)},
+            "title": _text(self.title_en, self.title_ar),
+            "detail": _text(self.detail_en, self.detail_ar),
         }
 
 
@@ -98,8 +149,8 @@ class Section:
         return {
             "id": self.id,
             "status": self.status,
-            "title": {"en": _mask(self.title_en), "ar": _mask(self.title_ar)},
-            "detail": {"en": _mask(self.detail_en), "ar": _mask(self.detail_ar)},
+            "title": _text(self.title_en, self.title_ar),
+            "detail": _text(self.detail_en, self.detail_ar),
             "items": [item.to_dict() for item in self.items],
         }
 
@@ -113,10 +164,11 @@ class Report:
     @property
     def needs_attention(self) -> bool:
         """True when a check needs a person, or did not run."""
-        return any(section.status != OK for section in self.sections)
+        return any(section.status in _BLOCKS for section in self.sections)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "version": REPORT_VERSION,
             "needs_attention": self.needs_attention,
             "sections": [section.to_dict() for section in self.sections],
         }
@@ -132,11 +184,31 @@ class ReleaseArtifact:
     bundle: bytes | None = None
 
 
-def _mask(text: str) -> str:
-    """A report line with any URL password removed. The doctor's rows already pass this."""
+def _mask(text: str | None) -> str:
+    """A report line with secrets and URL passwords removed."""
+    if not text:
+        return ""
+    from kazma_core.errors import redact_secrets
     from kazma_core.security.url_credentials import mask_urls_in_text
 
-    return mask_urls_in_text(text or "")
+    return redact_secrets(mask_urls_in_text(text))
+
+
+def _text(en: str, ar: str | None) -> dict[str, Any]:
+    """One bilingual field. English-only lines say so, and never copy English into ``ar``."""
+    shown = {"en": _mask(en), "ar": None if ar is None else _mask(ar)}
+    if ar is None:
+        shown["source_language"] = "en"
+    return shown
+
+
+def _titles(section_id: str) -> tuple[str, str]:
+    """Section titles. Health uses the catalog's word (``الصحة``), not a copy."""
+    if section_id == "health":
+        from kazma_ui.i18n import t
+
+        return t("dashboard.memory_health_kpi", "en"), t("dashboard.memory_health_kpi", "ar")
+    return _TITLES[section_id]
 
 
 def _section(
@@ -146,12 +218,15 @@ def _section(
     detail_ar: str,
     items: list[Item],
 ) -> Section:
-    title_en, title_ar = _TITLES[section_id]
+    title_en, title_ar = _titles(section_id)
     return Section(section_id, status, title_en, title_ar, detail_en, detail_ar, items)
 
 
 def _rollup(items: Sequence[Item], *, empty: str) -> str:
-    """The section status. An empty list uses *empty* (not run, or a finished check with nothing in it)."""
+    """The section status. Attention wins, then a check that did not run.
+
+    Info and not-applicable do not hide a pass. An empty list uses *empty*.
+    """
     statuses = {item.status for item in items}
     if ATTENTION in statuses:
         return ATTENTION
@@ -159,7 +234,13 @@ def _rollup(items: Sequence[Item], *, empty: str) -> str:
         return NOT_RUN
     if not items:
         return empty
-    return OK
+    if statuses <= {INFO}:
+        return INFO
+    if statuses <= {NOT_APPLICABLE}:
+        return NOT_APPLICABLE
+    if statuses <= {OK, INFO, NOT_APPLICABLE}:
+        return OK
+    return NOT_RUN
 
 
 def _not_run(section_id: str, detail_en: str, detail_ar: str) -> Section:
@@ -179,13 +260,12 @@ def _not_run_exc(section_id: str, exc: BaseException) -> Section:
 
 
 def _guard(section_id: str, fn: Callable[[], Section]) -> Section:
-    from kazma_cli.known_gap_settings import _FAILURES
+    from kazma_cli.known_gap_settings import _guarded
 
-    try:
-        section = fn()
-    except _FAILURES as exc:
+    section, exc = _guarded(fn)
+    if exc is not None:
         return _not_run_exc(section_id, exc)
-    if section.status not in _STATUSES:
+    if not isinstance(section, Section) or section.status not in _STATUSES:
         return _not_run(
             section_id,
             "This check returned a status this command does not know, so it was not counted as passed.",
@@ -195,32 +275,38 @@ def _guard(section_id: str, fn: Callable[[], Section]) -> Section:
 
 
 def _health_from(rows: Sequence[tuple[str, str]]) -> Section:
-    """Map ``kazma doctor`` rows. ``info`` is shown and does not need attention.
+    """Map ``kazma doctor`` rows. ``info`` is shown and is not a pass.
 
     No rows means the health check produced nothing: not run, not a pass.
+    The doctor's lines stay in the doctor's words.
     """
-    from kazma_cli.doctor import BAD, INFO, WARN
+    from kazma_cli.doctor import BAD, INFO as DOCTOR_INFO, WARN
     from kazma_cli.doctor import OK as DOCTOR_OK
 
     items: list[Item] = []
     for status, rendered in rows:
-        if status in (DOCTOR_OK, INFO):
+        if status == DOCTOR_OK:
             item_status = OK
+        elif status == DOCTOR_INFO:
+            item_status = INFO
         elif status in (WARN, BAD):
             item_status = ATTENTION
         else:
             item_status = NOT_RUN
-        items.append(Item(item_status, rendered, rendered))
+        items.append(Item(item_status, rendered, None))
     status = _rollup(items, empty=NOT_RUN)
     if status == OK:
         detail_en = "Nothing in the health checks needs attention."
-        detail_ar = "لا شيء في فحوص السلامة يحتاج انتباهاً."
+        detail_ar = "لا شيء في فحوص الصحة يحتاج انتباهاً."
+    elif status == INFO:
+        detail_en = "The health checks are information only. Nothing needs attention."
+        detail_ar = "فحوص الصحة معلومات فقط. لا شيء يحتاج انتباهاً."
     elif status == ATTENTION:
         detail_en = "A health check needs attention."
-        detail_ar = "فحص من فحوص السلامة يحتاج انتباهاً."
+        detail_ar = "فحص من فحوص الصحة يحتاج انتباهاً."
     else:
         detail_en = "The health checks did not run."
-        detail_ar = "فحوص السلامة لم تُجرَ."
+        detail_ar = "فحوص الصحة لم تُجرَ."
     if items:
         detail_en += "\nThe lines below are kazma doctor's own words."
         detail_ar += "\nالأسطر التالية هي كلام kazma doctor كما هو."
@@ -248,7 +334,12 @@ def _security_from(report: object) -> Section:
             item_status = ATTENTION
         name = str(getattr(check, "name", "") or "check")
         message = str(getattr(check, "message", "") or "")
-        items.append(Item(item_status, name, name, message, message))
+        recommendation = str(getattr(check, "recommendation", "") or "")
+        if message and recommendation:
+            detail = f"{message}\n{recommendation}"
+        else:
+            detail = message or recommendation
+        items.append(Item(item_status, name, None, detail, None))
     status = _rollup(items, empty=NOT_RUN)
     if status == OK:
         detail_en = "The security report found nothing that needs attention."
@@ -276,6 +367,25 @@ def _security() -> Section:
     return _security_from(report)
 
 
+def _backup_when(backup_dir: str) -> tuple[str, str]:
+    """When the backup was taken, from its manifest, else a numeric folder name."""
+    path = Path(backup_dir)
+    stamp: int | None = None
+    try:
+        data = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+        raw = data.get("timestamp") if isinstance(data, dict) else None
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            stamp = int(raw)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
+        stamp = None
+    if stamp is None and path.name.isdigit():
+        stamp = int(path.name)
+    if stamp is None:
+        return "", ""
+    shown = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(stamp))
+    return (f"The backup was taken {shown}.", f"أُخذت النسخة الاحتياطية في {shown}.")
+
+
 def _backup_from(result: object) -> Section:
     """Map a :class:`DrillResult`. ``UNVERIFIED`` and an empty result are not run, never a pass."""
     from kazma_core.backup.restore_drill import DrillResult
@@ -287,6 +397,7 @@ def _backup_from(result: object) -> Section:
             "فحص النسخة الاحتياطية لم يسجّل شيئاً، فهذه ليست نتيجة نجاح.",
         )
     evidence = result.summary()
+    when_en, when_ar = _backup_when(result.backup_dir)
     verdict = result.verdict
     if verdict == "PASS":
         status = OK
@@ -300,7 +411,10 @@ def _backup_from(result: object) -> Section:
         status = NOT_RUN
         detail_en = "The backup drill did not finish every check, so this is not a pass. The drill's own words follow."
         detail_ar = "فحص النسخة الاحتياطية لم يُكمل كل بنوده، فهذه ليست نتيجة نجاح. كلام الفحص كما هو يلي."
-    return _section("backup", status, detail_en, detail_ar, [Item(status, evidence, evidence)])
+    if when_en:
+        detail_en = f"{when_en}\n{detail_en}"
+        detail_ar = f"{when_ar}\n{detail_ar}"
+    return _section("backup", status, detail_en, detail_ar, [Item(status, evidence, None)])
 
 
 def _backup() -> Section:
@@ -309,13 +423,11 @@ def _backup() -> Section:
     return _backup_from(run_drill())
 
 
-def _skill_status(state: str, reason: str) -> str:
+def _skill_status(state: str) -> str:
     if state == "verified":
         return OK
     if state == "refused":
         return ATTENTION
-    if state == "unsigned" and str(reason or "").startswith(_INTEGRITY_FAILED):
-        return NOT_RUN
     if state == "unsigned":
         return ATTENTION
     return NOT_RUN
@@ -335,11 +447,13 @@ def _skills_from(rows: Sequence[tuple[str, str, str]]) -> Section:
     """Map ``(name, state, reason)`` from :func:`skill_integrity`.
 
     No installed skills is a finished check: nothing was counted as signed.
+    A skill's own reason stays in that skill's words.
     """
-    items = [
-        Item(_skill_status(state, reason), *_skill_title(name, state, _skill_status(state, reason)), reason, reason)
-        for name, state, reason in rows
-    ]
+    items = []
+    for name, state, reason in rows:
+        status = _skill_status(state)
+        title_en, title_ar = _skill_title(name, state, status)
+        items.append(Item(status, title_en, title_ar, reason, None))
     status = _rollup(items, empty=OK)
     if status == OK and not items:
         detail_en = "No agent skills are installed. Nothing was signed, and nothing was counted as signed."
@@ -374,13 +488,18 @@ def _sigstore_present() -> bool:
     return importlib.util.find_spec("sigstore") is not None
 
 
-def _release_from(artifact: ReleaseArtifact, checker: Callable[[bytes, bytes], str]) -> Section:
+def _release_from(
+    artifact: ReleaseArtifact,
+    checker: Callable[[bytes, bytes], str],
+    install_type: str = "git",
+) -> Section:
     """Check a saved wheel bundle with ``checker`` (``release_signature.check_bundle``).
 
-    A source checkout, a missing bundle, or a missing sigstore package did not
-    run the check. None of those is a pass. ``checker`` is not called then.
+    Where no signature bundle is kept, the check is not applicable. The reason
+    comes from :func:`kazma_cli.update.detect_install_type`. A bundle that is
+    present is still checked. A missing sigstore package, with a bundle ready,
+    did not run the check.
     """
-    from kazma_cli.known_gap_settings import _FAILURES
     from kazma_cli.release_signature import SIGNED_FROM, SignatureRefused, must_be_signed
 
     signed_from = ".".join(str(part) for part in SIGNED_FROM)
@@ -395,13 +514,15 @@ def _release_from(artifact: ReleaseArtifact, checker: Callable[[bytes, bytes], s
             "Kazma's installed distribution could not be read, so the release signature was not checked." + older,
             "تعذّر قراءة حزمة كاظمه المثبّتة، فلم يُفحص توقيع الإصدار." + older_ar,
         )
-    if artifact.kind == "editable":
-        return _not_run(
-            "release",
-            "This install is a source checkout, not a signed release wheel, so the release signature was not checked."
-            + older,
-            "هذا التثبيت نسخة مصدر وليست حزمة إصدار موقّعة، فلم يُفحص توقيع الإصدار." + older_ar,
-        )
+    if artifact.kind in ("editable", "no_bundle"):
+        reason = _NO_BUNDLE.get(install_type)
+        if reason is None:
+            return _not_run(
+                "release",
+                "The kind of this install could not be read, so the release signature was not checked." + older,
+                "تعذّر معرفة نوع هذا التثبيت، فلم يُفحص توقيع الإصدار." + older_ar,
+            )
+        return _section("release", NOT_APPLICABLE, reason[0] + older, reason[1] + older_ar, [])
     if artifact.kind != "ready" or artifact.digest is None or artifact.bundle is None:
         return _not_run(
             "release",
@@ -420,17 +541,15 @@ def _release_from(artifact: ReleaseArtifact, checker: Callable[[bytes, bytes], s
         return _section(
             "release",
             ATTENTION,
-            f"The release signature does not hold. The checker's own words: {exc}",
-            f"توقيع الإصدار غير ثابت. كلام الفحص كما هو: {exc}",
+            f"The release signature does not hold. The checker's own words: {exc}\n{_SIGSTORE_EN}",
+            f"توقيع الإصدار غير ثابت. كلام الفحص كما هو: {exc}\n{_SIGSTORE_AR}",
             [],
         )
-    except _FAILURES as exc:
-        return _not_run_exc("release", exc)
     return _section(
         "release",
         OK,
-        f"The release signature holds. Signed by: {identity}",
-        f"توقيع الإصدار ثابت. الموقّع: {identity}",
+        f"The release signature holds. Signed by: {identity}\n{_SIGSTORE_EN}",
+        f"توقيع الإصدار ثابت. الموقّع: {identity}\n{_SIGSTORE_AR}",
         [],
     )
 
@@ -505,8 +624,9 @@ def _find_release_artifact() -> ReleaseArtifact:
 
 def _release() -> Section:
     from kazma_cli.release_signature import check_bundle
+    from kazma_cli.update import detect_install_type
 
-    return _release_from(_find_release_artifact(), check_bundle)
+    return _release_from(_find_release_artifact(), check_bundle, detect_install_type())
 
 
 def _gaps_from(judgements: Sequence[object]) -> Section:
@@ -567,8 +687,42 @@ def _collect() -> Report:
     return Report([_guard(name, builders[name]) for name in SECTION_ORDER])
 
 
+def _data_folder_problem() -> str | None:
+    """Why the data folder cannot be read, or ``None`` when it has something in it.
+
+    ``create=False`` and this check both run before the read-only diagnostic,
+    so a missing or empty folder is never created on the way to the answer.
+    """
+    from kazma_core.paths import data_dir
+
+    folder = data_dir(create=False)
+    if not folder.exists():
+        return "missing"
+    if not folder.is_dir():
+        return "not_a_directory"
+    try:
+        empty = not any(folder.iterdir())
+    except OSError:
+        return "unreadable"
+    if empty:
+        return "empty"
+    return None
+
+
+def _unreadable_data(reason: str) -> Report:
+    detail_en, detail_ar = _DATA_REASONS[reason]
+    return Report([_not_run(name, detail_en, detail_ar) for name in SECTION_ORDER])
+
+
 def collect() -> Report:
-    """The report, inside the read-only diagnostic. Writes to stores are refused."""
+    """The report. A missing, empty, or mistyped data folder is not created.
+
+    Otherwise the report runs inside the read-only diagnostic. Writes to stores
+    are refused, and the settings and approval databases are opened immutable.
+    """
+    problem = _data_folder_problem()
+    if problem is not None:
+        return _unreadable_data(problem)
     from kazma_core.diagnostic_scope import read_only_diagnostic
 
     with read_only_diagnostic("kazma self-check"):
@@ -589,11 +743,11 @@ def render(report: Report) -> str:
         for item in section.items:
             item_en, item_ar = _STATUS_WORDS[item.status]
             lines.append(f"  {item_en} — {_mask(item.title_en)}")
-            if item.title_ar != item.title_en:
+            if item.title_ar:
                 lines.append(f"  {item_ar} — {_mask(item.title_ar)}")
             if item.detail_en:
                 lines.append(f"    {_mask(item.detail_en)}")
-            if item.detail_ar and item.detail_ar != item.detail_en:
+            if item.detail_ar:
                 lines.append(f"    {_mask(item.detail_ar)}")
         lines.append("")
     if report.needs_attention:
@@ -616,7 +770,9 @@ def run(argv: list[str] | None = None) -> int:
         "skill signatures, the release signature, and known gaps that match this install's settings.",
     )
     parser.add_argument(
-        "--json", action="store_true", help="print one JSON object (English and Arabic) and nothing else"
+        "--json",
+        action="store_true",
+        help="print one JSON object (version, needs_attention, sections) and nothing else",
     )
     try:
         args = parser.parse_args([] if argv is None else argv)

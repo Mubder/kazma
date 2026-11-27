@@ -262,19 +262,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بعض الملفات التي تحفظها نقطة الاستعادة هذه صارت من ملفات Kazma الخاصة، فلا تُعرض هنا.",
         "en": "Some files this checkpoint holds are Kazma's own files now, so they are not shown here.",
     },
-    # Read-only git with no approval card (the IDE's git, /ide git, the
-    # agent's git_diff): safety.git_kazma_files.read_refusal.
-    "ide.git_not_a_repository": {
-        "ar": "لا يقرأ Kazma بـ Git دون موافقة إلا مستودعاً يقبله Git نفسه، وGit لا يقبل مساحة العمل هذه مستودعاً؛ لم يُقرأ شيء.",
-        "en": "Kazma reads with git, without an approval, only a repository git itself accepts, and git does not accept this workspace as one; nothing was read.",
+    # Git with no approval card (the IDE's git, /ide git, the agent's git
+    # read tools): ide.git_policy's card-less forms, run by
+    # safety.git_kazma_files. A read outside them goes to the card.
+    "ide.git_needs_approval": {
+        "ar": "أمر Git هذا ليس من القراءات التي يشغّلها Kazma دون موافقة، فهو يذهب إلى بطاقة الموافقة التي تعرض الأمر كما هو.",
+        "en": "This git command is not a read Kazma runs without an approval, so it goes to the approval card, which shows the exact command.",
     },
-    "ide.git_unlisted": {
-        "ar": "تعذّر على Git أن يسرد ما يحفظه هذا المستودع، فلم يُقرأ شيء.",
-        "en": "Git could not list what this repository holds, so nothing was read.",
+    # The sections of Kazma's own files a card-less git read left out.
+    "ide.git_items_not_shown.zero": {
+        "ar": "(لم يُترك شيء من ملفات Kazma الخاصة.)",
+        "en": "(No items of Kazma's own files left out.)",
     },
-    "ide.git_holds_kazma_files": {
-        "ar": "يحفظ هذا المستودع بعض ملفات Kazma الخاصة (أسراراً أو مخازن): {files}. لذلك لا يعرض Kazma شيئاً من محتواه عبر Git دون موافقة. أخرِجها من المستودع، أو شغّل Git في طرفية.",
-        "en": "This repository holds some of Kazma's own files (secrets or stores): {files}. So Kazma shows none of its contents through git without an approval. Take them out of the repository, or run git in a terminal.",
+    "ide.git_items_not_shown.one": {
+        "ar": "(عنصر واحد لم يُعرض: من ملفات Kazma الخاصة.)",
+        "en": "({n} item not shown: one of Kazma's own files.)",
+    },
+    "ide.git_items_not_shown.two": {
+        "ar": "(عنصران لم يُعرضا: من ملفات Kazma الخاصة.)",
+        "en": "({n} items not shown: Kazma's own files.)",
+    },
+    "ide.git_items_not_shown.few": {
+        "ar": "({n} عناصر لم تُعرض: من ملفات Kazma الخاصة.)",
+        "en": "({n} items not shown: Kazma's own files.)",
+    },
+    "ide.git_items_not_shown.many": {
+        "ar": "({n} عنصرًا لم يُعرض: من ملفات Kazma الخاصة.)",
+        "en": "({n} items not shown: Kazma's own files.)",
+    },
+    "ide.git_items_not_shown.other": {
+        "ar": "({n} عنصر لم يُعرض: من ملفات Kazma الخاصة.)",
+        "en": "({n} items not shown: Kazma's own files.)",
     },
     "ide.undo_patch": {
         "ar": "تراجع عن الرقعة",

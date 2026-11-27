@@ -415,33 +415,50 @@ def _keep_sides(result: RecallResult, query: str, *, conn: sqlite3.Connection | 
                 hit.metadata["beyond"] = tuple(max(0, w - len(h)) for w, h in zip(whole, heads, strict=True))
 
 
-def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]:
+def _room_by_rank(result: RecallResult, kept: Any) -> tuple[dict[str, tuple[str, int]], bool]:
     """Each roomy conversation's line (display, characters left out) at its
     room by rank (the memory plan's W1a): the best one at
     ``RECALL_LEAD_SHOW`` characters, every other at ``RECALL_OTHER_SHOW``,
-    each cut around the question's words. When *fits* says the block would
-    leave a line out, the others give way first, in steps, down to
-    ``RECALL_OTHER_LEAST``, then the best, down to ``RECALL_LEAD_LEAST``.
+    each cut around the question's words. When the block would leave a line
+    out, the others give way first, in steps, down to ``RECALL_OTHER_LEAST``,
+    then the best, down to ``RECALL_LEAD_LEAST``: the widest step that keeps
+    as many lines of each kind as the narrowest does (*kept* counts them,
+    ``kept(shown, exact)``). A line that cannot fit even there (a long
+    summary, a long last conversation) takes no room from the others: it was
+    dropped and the excerpts shrank for nothing (822 to 623 characters on
+    LongMemEval, the step 5 review's M1). Once a line is left out, the lines
+    are counted against the block itself (*exact*), so the header, the
+    footer's count and the place of a line left out cost nothing either (the
+    step 5 delta review's A). Returns the room and whether it was counted
+    exactly.
     Measured on LongMemEval's dev questions: 0.48 answered with the fixed
     200 + 300 bounds, 0.74 with this shape
     (docs/plans/RECALL_BLOCK_BOUNDS_PROPOSAL.md). Empty when no line is
     roomy: the block is made as before."""
     roomy = [h for h in result.episodes if (h.metadata or {}).get("sides") is not None and _roomy(h)]
     if not roomy:
-        return {}
+        return {}, False
     terms = result.focus_terms
     steps = [(RECALL_LEAD_SHOW, other)
              for other in range(RECALL_OTHER_SHOW, RECALL_OTHER_LEAST - 1, -RECALL_OTHER_STEP)]
     steps += [(lead, RECALL_OTHER_LEAST)
               for lead in range(RECALL_LEAD_SHOW - RECALL_LEAD_STEP, RECALL_LEAD_LEAST - 1, -RECALL_LEAD_STEP)]
-    shown: dict[str, tuple[str, int]] = {}
+
+    def at(lead: int, other: int) -> dict[str, tuple[str, int]]:
+        return {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
+                                 h.metadata.get("beyond") or (0, 0, 0), anchor=h.metadata.get("passage"))
+                for i, h in enumerate(roomy)}
+
+    widest = at(*steps[0])
+    if kept(widest, False)[1]:
+        return widest, False  # every line fits at the widest
+    least = at(*steps[-1])
+    target = kept(least, True)
     for lead, other in steps:
-        shown = {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
-                                  h.metadata.get("beyond") or (0, 0, 0), anchor=h.metadata.get("passage"))
-                 for i, h in enumerate(roomy)}
-        if fits(shown):
-            break
-    return shown
+        shown = least if (lead, other) == steps[-1] else at(lead, other)
+        if all(got >= want for got, want in zip(kept(shown, True)[0], target[0], strict=True)):
+            return shown, True
+    return least, True
 
 
 #: What this recall's question asks (part F), for this recall only: its time
@@ -3467,7 +3484,8 @@ def _summary_display(row: Any) -> str:
     text, bounded."""
     from kazma_core.memory.topic_rollups import rollup_label
 
-    when = rollup_label(str(row["level"] or "week"), row["period_start"], row["period_end"])
+    key = row["period_key"] if "period_key" in row.keys() else ""
+    when = rollup_label(str(row["level"] or "week"), row["period_start"], row["period_end"], str(key or ""))
     text = " ".join(str(row["summary_text"] or "").split())
     if len(text) > _SUMMARY_SHOW_CHARS:
         text = text[: _SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
@@ -3486,7 +3504,8 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         return []
     try:
         rows = conn.execute(
-            "SELECT id, period_start, period_end, level, title, summary_text, embedding, embedding_model_version "
+            "SELECT id, period_key, period_start, period_end, level, title, summary_text, embedding, "
+            "embedding_model_version "
             "FROM memory_summaries WHERE tenant_id = ? AND status = 'active'",
             (space_named_or_bound(tenant_id),),
         ).fetchall()
@@ -3498,7 +3517,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
 
     ask = _ASK.get()
     level = {str(row["id"]): str(row["level"] or "week") for row in rows}
-    span = {str(row["id"]): (float(row["period_start"] or 0), float(row["period_end"] or 0)) for row in rows}
+    span = _spans(rows)
     if ask is not None and ask.period and ask.said:
         months = _months_said_in(query, ask, rows, level, span)
         if months:
@@ -3538,6 +3557,18 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
                 hit.metadata["display"] = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
         return hits[:_LIST_SUMMARY_LIMIT]
     return hits[:_SUMMARY_LIMIT]
+
+
+def _spans(rows: list[Any]) -> dict[str, tuple[float, float]]:
+    """Each summary's stretch of time in the operator's zone, from its key
+    (``topic_rollups.stretch_of``), as the question's period is read."""
+    from kazma_core.memory.topic_rollups import stretch_of
+
+    zone = _memory_zone()
+    return {str(row["id"]): stretch_of(str(row["level"] or "week"),
+                                       str((row["period_key"] if "period_key" in row.keys() else "") or ""),
+                                       row["period_start"], row["period_end"], zone)
+            for row in rows}
 
 
 def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:
@@ -4593,24 +4624,31 @@ def format_recall_block(
     frame = estimate_text_tokens(_assemble(
         [(kind, header, [""] * len(hits)) for kind, header, hits in sources if hits]))
 
-    def _select() -> list[tuple[str, str, list[str]]]:
+    def _select(exact: bool = False) -> list[tuple[str, str, list[str]]]:
         """Whole lines, in order, while the block's estimate stays inside
         *max_tokens* (a line that does not fit ends its section; a later
         section's shorter lines may still fit, as before); then lines left
-        out from the end until the finished block's own estimate does."""
+        out from the end until the finished block's own estimate does.
+        *exact*: each line is counted against the block it would make, so
+        what is left out costs nothing (room by rank, once a line is left
+        out)."""
         used = frame
         sections: list[tuple[str, str, list[str]]] = []
         for kind, header, hits in sources:
-            if not hits or used >= max_tokens:
+            if not hits or (used >= max_tokens and not exact):
                 continue
             lines: list[str] = []
             for h in hits:
                 line = _line(h)
-                cost = estimate_text_tokens(line + "\n")
-                if used + cost > max_tokens:
+                if exact:
+                    fits = estimate_text_tokens(_assemble([*sections, (kind, header, [*lines, line])])) <= max_tokens
+                else:
+                    cost = estimate_text_tokens(line + "\n")
+                    fits = used + cost <= max_tokens
+                    used += cost if fits else 0
+                if not fits:
                     break
                 lines.append(line)
-                used += cost
             if lines:
                 sections.append((kind, header, lines))
         while sections and estimate_text_tokens(_assemble(sections)) > max_tokens:
@@ -4619,15 +4657,21 @@ def format_recall_block(
                 sections.pop()
         return sections
 
-    def _fits(shown: dict[str, tuple[str, int]]) -> bool:
+    def _kept(shown: dict[str, tuple[str, int]], exact: bool) -> tuple[tuple[int, ...], bool]:
+        """The lines of each kind the block keeps at *shown*'s room, and
+        whether that is every line."""
         room.clear()
         room.update(shown)
-        return sum(len(lines) for _kind, _header, lines in _select()) == wanted
+        counts = {kind: len(lines) for kind, _header, lines in _select(exact)}
+        per_kind = tuple(counts.get(kind, 0) for kind, _header, _hits in sources)
+        return per_kind, sum(per_kind) == wanted
 
     # Room by rank (W1a): the widest that leaves no line out; when even the
-    # least leaves one out, lines are left out as before.
-    room.update(_room_by_rank(result, _fits))
-    return _assemble(_select())
+    # least leaves one out, the widest that keeps what the least keeps,
+    # counted against the block itself.
+    shown, exact = _room_by_rank(result, _kept)
+    room.update(shown)
+    return _assemble(_select(exact))
 
 
 def _summaries_header(summaries: list[RecallHit]) -> str:

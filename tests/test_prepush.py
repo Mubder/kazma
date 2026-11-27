@@ -195,6 +195,8 @@ def test_docker_desktop_first_and_no_docker_is_a_failure_not_a_skip(monkeypatch,
         return run
 
     monkeypatch.setattr(prepush, "docker_exe", lambda: "docker")
+    # The calls as the Windows CLI makes them (the wsl.exe route is docker_cli's, tested there).
+    monkeypatch.setattr(prepush, "docker_route", lambda context: (lambda args: ["docker", "--context", context, *args]))
     monkeypatch.setattr(prepush.subprocess, "run", docker({"desktop-linux", "kazma-engine"}))
     assert prepush.docker_context() == "desktop-linux" and asked == ["desktop-linux"]
     monkeypatch.setattr(prepush.subprocess, "run", docker({"kazma-engine"}))
@@ -441,27 +443,50 @@ def test_control_a_rerun_that_says_nothing_changes_nothing():
 # ── a program Windows refuses (2026-11-26) ───────────────────────────────
 
 
-def test_a_docker_cli_the_system_refuses_is_passed_over(monkeypatch):
+def _cli_module_with(monkeypatch, tmp_path, refused: set[str]) -> list[Path]:
+    """prepush's docker_cli (``kazma_core/docker_cli.py`` loaded by path),
+    with two CLIs on disk and a stand-in start that Windows refuses for *refused*."""
+    module = prepush._docker_cli_module()
+    clis = []
+    for name in ("first", "second"):
+        exe = tmp_path / name / "docker.exe"
+        exe.parent.mkdir()
+        exe.write_bytes(b"")
+        clis.append(exe)
     started: list[str] = []
 
-    def run(cmd, **kw):
-        started.append(cmd[0])
-        if cmd[0] == "refused-docker":
-            raise OSError(22, "An Application Control policy has blocked this file")
-        return subprocess.CompletedProcess(cmd, 0, "Docker version 29", "")
+    def start(candidate):
+        started.append(Path(candidate).parent.name)
+        if Path(candidate).parent.name in refused:
+            exc = OSError(22, "An Application Control policy has blocked this file")
+            exc.winerror = 4551
+            raise exc
 
-    monkeypatch.setattr(prepush, "_docker_candidates", lambda: ["refused-docker", "desktop-docker"])
+    monkeypatch.delenv("KAZMA_DOCKER_BIN", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(module, "_candidates", lambda: clis)
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(module, "_on_windows", lambda: True)
+    monkeypatch.setattr(module, "_checks_files", lambda: False)
+    monkeypatch.setattr(module, "_start", start)
+    monkeypatch.setattr(module, "_started", {})
+    monkeypatch.setattr(module, "_reported", set())
     monkeypatch.setattr(prepush, "_DOCKER", [])
-    monkeypatch.setattr(prepush.subprocess, "run", run)
-    assert prepush.docker_exe() == "desktop-docker"
-    assert prepush.docker_exe() == "desktop-docker" and started == ["refused-docker", "desktop-docker"]
+    clis.append(started)  # the starts, for the assertions
+    return clis
 
 
-def test_control_the_first_docker_that_starts_is_kept(monkeypatch):
-    monkeypatch.setattr(prepush, "_docker_candidates", lambda: ["path-docker", "desktop-docker"])
-    monkeypatch.setattr(prepush, "_DOCKER", [])
-    monkeypatch.setattr(prepush.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
-    assert prepush.docker_exe() == "path-docker"
+def test_a_docker_cli_the_system_refuses_is_passed_over(monkeypatch, tmp_path):
+    """prepush takes Kazma's own lookup (the audit's F6/F7, 2026-11-26): its
+    copy passed over any OSError and never read ``winerror``."""
+    first, second, started = _cli_module_with(monkeypatch, tmp_path, {"first"})
+    assert prepush.docker_exe() == str(second)
+    assert prepush.docker_exe() == str(second) and started == ["first", "second"]
+
+
+def test_control_the_first_docker_that_starts_is_kept(monkeypatch, tmp_path):
+    first, _second, _started = _cli_module_with(monkeypatch, tmp_path, set())
+    assert prepush.docker_exe() == str(first)
 
 
 def test_bandit_runs_as_a_module_and_other_tools_as_named():

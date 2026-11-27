@@ -169,8 +169,8 @@ Zed — `~/.config/zed/settings.json` (Windows: `%APPDATA%\Zed\settings.json`):
   "agent_servers": {
     "Kazma": {
       "type": "custom",
-      "command": "kazma",
-      "args": ["acp"]
+      "command": "C:\\kazma\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kazma_cli", "acp"]
     }
   }
 }
@@ -199,10 +199,12 @@ the same gate the chat window uses — that is the difference from
 ```json
 {
   "mcpServers": {
-    "kazma": { "command": "kazma", "args": ["mcp"] }
+    "kazma": { "command": "C:\\kazma\\.venv\\Scripts\\python.exe", "args": ["-m", "kazma_cli", "mcp"] }
   }
 }
 ```
+
+`command` is the install's Python (`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere) running `-m kazma_cli`, never the `kazma` launcher: on Windows the launcher is made on the PC and nothing signs it ([Windows Smart App Control](windows-smart-app-control)). `kazma mcp --help` prints the line with this install's own path.
 
 | Env var | Meaning |
 |---|---|
@@ -237,23 +239,38 @@ kazma self-check
 kazma self-check --json
 ```
 
-`--json` prints one JSON object and nothing else. Exit 0 only when every
-section is ok. Exit 1 when something needs attention, or when a check did
-not run. Exit 2 when the arguments are wrong. A check that did not run is
-reported as not run. It is never counted as a pass.
+`--json` prints one JSON object and nothing else. Its keys are `version`
+(currently `1`), `needs_attention`, and `sections`. Each section has `id`,
+`status`, `title`, `detail`, and `items`. `title` and `detail` are objects
+with `en` and `ar`. When a line is the called check's own English and has
+no Arabic, `ar` is `null` and that field also has `"source_language": "en"`.
+English is never copied into `ar`. An item has `status`, `title`, and
+`detail` in the same shape.
+
+The status words are `ok`, `attention`, `not_run`, `info`, and
+`not_applicable`. `info` is a doctor's note (the cloud profile off, a rule
+that could not be read). `not_applicable` is a check this install does not
+keep the evidence for. Neither is counted as a pass, and neither by itself
+makes `needs_attention` true.
+
+Exit 0 when every section is `ok`, `info`, or `not_applicable`. Exit 1 when
+something needs attention, or when a check did not run. Exit 2 when the
+arguments are wrong. A check that did not run, or ran only in part, is
+`not_run`. It is never counted as a pass. On an empty or mistyped data
+folder the command creates nothing and reports that.
 
 | Section | What it calls |
 |---|---|
-| Health | `kazma doctor` (`kazma_cli/doctor.py`). A warning needs attention here. `kazma doctor` itself exits 0 on a warning. |
-| Security report | The same runner as `GET /api/security/hardening` (`kazma_core/security/hardening.py`). The dependency check asks OSV about the installed versions. A scan that did not run is not a pass. |
-| Latest backup | The restore drill (`kazma_core/backup/restore_drill.py`): whether the newest backup can be read back now. It does not write the live data. Unverified, including a missing `pg_restore`, is not a pass. |
-| Skill signatures | Each installed Agent Skill, including disabled ones. No skills installed is a finished check: nothing was counted as signed. |
-| Release signature | `kazma update` checks the wheel and does not keep the bundle (`kazma_cli/release_signature.py`). A source checkout, or an install with no saved bundle, is not run. |
-| Known gaps | Open entries in `docs/KNOWN_GAPS.md` that match this install's settings (`kazma_cli/known_gap_settings.py`). A closed entry is not reported as applying. |
+| Health | `kazma doctor` (`kazma_cli/doctor.py`), including Windows' file check when that section has rows. A warning needs attention here. An info row stays `info`. `kazma doctor` itself exits 0 on a warning. |
+| Security report | The same runner as `GET /api/security/hardening` (`kazma_core/security/hardening.py`). The dependency check says when it asked OSV about the installed versions. A scan that did not run, including one that says "(not checked: ...)", is not a pass. Each check's recommendation is in the item. |
+| Latest backup | The restore drill (`kazma_core/backup/restore_drill.py`): whether the newest backup can be read back now, and the date it was taken. It does not write the live data. Unverified, including a missing `pg_restore`, is not a pass. |
+| Skill signatures | Each installed Agent Skill, including disabled ones. No skills installed is a finished check: nothing was counted as signed. A check that did not finish is `not_run`, not an unsigned skill. |
+| Release signature | `kazma update` checks the wheel and does not keep the bundle (`kazma_cli/release_signature.py`). Where no bundle is kept the section is `not_applicable`, and the reason is this install's kind (`kazma update`'s `detect_install_type`: a source checkout, a release install, or a wheel install). A release install is not called a source checkout. A bundle that is present is still checked, and that line says the check reads Sigstore's root of trust online. |
+| Known gaps | Open entries in `docs/KNOWN_GAPS.md` that match this install's settings (`kazma_cli/known_gap_settings.py`). A rule fires only when its setting is on: the Postgres gap only when the data folder was moved, the trusted-MCP gap only when a trusted server is configured. A failed settings read is not run. A closed entry is not reported as applying. |
 
-The verdict of each section is written in both languages. Lines a check
-already wrote stay in that check's words. The command is
-`kazma_cli/self_check.py`.
+The verdict of each section is written in both languages. Health uses the
+catalog word "Health" / "الصحة". Lines a check already wrote stay in that
+check's words. The command is `kazma_cli/self_check.py`.
 
 ### 2.10 `kazma version`
 

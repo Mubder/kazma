@@ -949,8 +949,24 @@ def recorded_decision_count() -> int:
     """How many approval questions the registry holds a decision for.
 
     The security report reads it: the registry is where an approval is
-    recorded (who decided, what, when).
+    recorded (who decided, what, when). ``kazma self-check`` counts on an
+    immutable connection and does not create the file.
     """
+    from kazma_core.diagnostic_scope import self_check_reading
+
+    if self_check_reading():
+        from pathlib import Path
+
+        path = Path(_db_path())
+        if not path.is_file():
+            raise FileNotFoundError(path.name)
+        conn = sqlite3.connect(path.resolve().as_uri() + "?immutable=1", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM hitl_gates WHERE decision != ''").fetchone()
+            return int(row[0] if row is not None else 0)
+        finally:
+            conn.close()
     ensure_gate_schema()
     conn = _connect()
     try:

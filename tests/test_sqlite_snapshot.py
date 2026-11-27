@@ -117,3 +117,46 @@ def test_every_copier_goes_through_the_helper():
     assert offenders == [], offenders
     planted = "import sqlite3\ndef copy(s, d):\n    s.backup(d, pages=100, sleep=0.01)\n"
     assert _copies(planted) == [3]  # negative control
+
+
+# ── a copy into an open connection (the memory benchmark's seeding, 2026-11-27) ──
+
+
+def _store(path: Path, rows: int = 50) -> Path:
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+        conn.executemany("INSERT INTO t (v) VALUES (?)", [(f"row {i}",) for i in range(rows)])
+    conn.close()
+    return path
+
+
+def test_snapshot_into_fills_an_open_connection_and_leaves_the_source_alone(tmp_path):
+    from kazma_core.db.sqlite_snapshot import snapshot_into
+
+    src = _store(tmp_path / "store with space.db")
+    before = src.read_bytes()
+    dest = sqlite3.connect(":memory:")
+    try:
+        snapshot_into(src, dest)
+        assert dest.execute("SELECT count(*) FROM t").fetchone()[0] == 50
+    finally:
+        dest.close()
+    assert src.read_bytes() == before  # read-only: the source is not written
+
+
+def test_snapshot_into_refuses_a_missing_source_instead_of_copying_an_empty_one(tmp_path):
+    import pytest
+    from kazma_core.db.sqlite_snapshot import snapshot_into
+
+    missing = tmp_path / "gone.db"
+    dest = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            snapshot_into(missing, dest)  # mode=ro never creates the file
+    finally:
+        dest.close()
+    assert not missing.exists()
+    # Negative control: a writable open of the same missing path makes an empty
+    # database, the silent "success" the read-only default prevents.
+    sqlite3.connect(missing).close()
+    assert missing.exists()
