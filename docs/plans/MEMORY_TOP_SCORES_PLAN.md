@@ -976,6 +976,19 @@ of in the other is the same person where the reply says so and the name is one
 person's in both (`memory/name_alphabets.py`). Decision 16's forty names were
 measured down to about ten kinds. Next: what W4 left, and the benchmark written
 as Kazma writes.
+Steps 3 and 4, built 2026-11-26 (§15 G (1), §15 H): every kind of fact asked
+alike in English, Gulf and MSA, without the other senses of their words; W4's
+left list ("No, Omar", a voice note, "Nothing is wrong"); dataset v9 (the
+facts under the names the product holds, which showed q601's miss). L1's
+"adds" rules were taken out after six review rounds and are step 4b
+(`memory/denial_adds.py`, on its own branch).
+Step 5, built 2026-11-27 (§15 G (2)): LongMemEval written as Kazma writes it,
+the product's own code at the question's time (`scripts/longmemeval_written.py`,
+`longmemeval_replay.py`, `answer --written`). The pilot's 50 answered within
+the reader's noise of the facts alone; the harness is the step's value. It
+found a recall fault, fixed with it: a summary that cannot fit took room from
+the excerpts (`recall._room_by_rank`), and weeks and months are read in the
+operator's zone. Not run: dev 200's summaries (5c).
 
 ### W8. Scale and speed (M)
 

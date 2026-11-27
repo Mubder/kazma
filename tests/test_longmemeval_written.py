@@ -108,15 +108,14 @@ class Model:
 @pytest.fixture
 def private(tmp_path, monkeypatch):
     import kazma_core.paths as paths
-    from kazma_core.memory import task_queue, topic_rollups, topic_summaries
+    from kazma_core.memory import recall, task_queue
 
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path / "home"))
     monkeypatch.setenv("KAZMA_OPS_ALERTS", "0")
     monkeypatch.delenv("KAZMA_MEMORY_STATE_DB", raising=False)
     # Restored afterwards: the scripts route these for the run's process.
     for module, name in ((paths, "primary_memory_db"), (paths, "memory_ops_db"),
-                         (topic_summaries, "_week_of"), (topic_rollups, "_month_of"),
-                         (task_queue, "enqueue_task")):
+                         (recall, "_memory_zone"), (task_queue, "enqueue_task")):
         monkeypatch.setattr(module, name, getattr(module, name))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
     monkeypatch.setattr("kazma_core.memory.embedder.encode_text_to_blob", lambda text: None)
@@ -193,7 +192,8 @@ def test_the_written_store_holds_the_facts_one_summary_and_the_merge(scripts, ma
     done = json.loads((store.parent.parent / "done" / "written_q.json").read_text(encoding="utf-8"))
     steps = done["written_with"]
     assert steps["facts"]["run"] == RUN
-    assert {k: steps["summaries"][k] for k in ("model", "weeks", "rollups", "tasks", "weeks_left")} ==         {"model": "scripted", "weeks": 1, "rollups": 0, "tasks": 1, "weeks_left": 0}
+    assert {k: steps["summaries"][k] for k in ("model", "weeks", "rollups", "tasks", "weeks_left")} == {
+        "model": "scripted", "weeks": 1, "rollups": 0, "tasks": 1, "weeks_left": 0}
     assert done["weekly"] == 1 and steps["merge"]["merged"] == 1
     # The merge's control: the facts run keeps the twin.
     assert _attended(made["facts"] / "stores" / "written_q.db") == 2 and _attended(store) == 1
@@ -315,6 +315,64 @@ def test_a_store_lacking_a_step_refuses_the_run(scripts, made, monkeypatch, step
     assert code == 2 and not seen and result is None
 
 
+def _undone(store: Path, done: Path, how: str) -> None:
+    """Leave one step undone in *store*, or say so in its *done* file."""
+    held = json.loads(done.read_text(encoding="utf-8"))
+    if how == "merge_errors":
+        held["written_with"]["merge"]["errors"] = 1
+    elif how == "weeks_left":
+        held["written_with"]["summaries"]["weeks_left"] = 1
+    done.write_text(json.dumps(held), encoding="utf-8")
+    conn = sqlite3.connect(str(store))
+    try:
+        if how == "week_queued":
+            conn.execute("UPDATE memory_summary_periods SET status = 'queued'")
+        elif how == "summary_to_rebuild":
+            conn.execute("UPDATE memory_summaries SET status = 'rebuild'")
+        elif how == "twin_left":
+            row = conn.execute("SELECT * FROM beliefs WHERE predicate = 'attended' AND valid_until IS NULL").fetchone()
+            names = [d[0] for d in conn.execute("SELECT * FROM beliefs LIMIT 0").description]
+            twin = dict(zip(names, row, strict=True))
+            twin.update(id=twin["id"] + "-left", object=twin["object"].upper())
+            conn.execute(f"INSERT INTO beliefs ({','.join(twin)}) VALUES ({','.join('?' * len(twin))})",
+                         list(twin.values()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("how", ["merge_errors", "weeks_left", "week_queued", "summary_to_rebuild", "twin_left"])
+def test_a_store_left_unfinished_refuses_the_run(scripts, made, monkeypatch, how):
+    """The step 5 review, M2: the refusal reads the store itself and each
+    step's own counts, not only that the done file names the step."""
+    written, _turn = scripts
+    folder = written.written_folder(made["data"], LABEL)
+    _undone(folder / "stores" / "written_q.db", folder / "done" / "written_q.json", how)
+    assert written.bench.store_unfinished(folder / "stores" / "written_q.db",
+                                          json.loads((folder / "done" / "written_q.json").read_text())["written_with"])
+    code, seen, result = _answer(written, made["data"], monkeypatch)
+    assert code == 2 and not seen and result is None
+
+
+def test_control_a_finished_store_has_nothing_undone(scripts, made):
+    written, _turn = scripts
+    folder = written.written_folder(made["data"], LABEL)
+    steps = json.loads((folder / "done" / "written_q.json").read_text(encoding="utf-8"))["written_with"]
+    assert written.bench.store_unfinished(folder / "stores" / "written_q.db", steps) == []
+
+
+def test_the_rounds_never_answered_are_said_beside_the_number(scripts):
+    written, _turn = scripts
+    steps = {"a": {"facts": {"run": "r", "facts": "replayed", "deep": 90, "no_reply": 8, "deep_failed": 2},
+                   "summaries": {"model": "m"}},
+             "b": {"facts": {"run": "r", "facts": "replayed", "deep": 100, "no_reply": 0, "deep_failed": 0},
+                   "summaries": {"model": "m"}}}
+    assert "10 of 200 rounds' deep pass never answered" in written.bench.written_with("w", steps)
+    for step in steps.values():
+        step["facts"].update(no_reply=0, deep_failed=0)
+    assert "never answered" not in written.bench.written_with("w", steps)
+
+
 def test_a_question_without_its_facts_is_left_unwritten(scripts, private):
     written, _turn = scripts
     model = Model()
@@ -323,16 +381,33 @@ def test_a_question_without_its_facts_is_left_unwritten(scripts, private):
     assert written.bench.written_stores(private, LABEL, ["written_q"])[2] == ["written_q"]
 
 
-def test_weeks_and_months_are_read_in_utc(scripts):
+def test_weeks_and_months_are_read_in_the_operators_zone(scripts, monkeypatch):
+    """The product reads weeks and months in the operator's zone, as recall
+    reads days (the step 5 review, L2); the run patches that zone to UTC.
+    Sunday 30 Apr 2023 22:30 UTC is that week's in UTC and Monday's (the
+    next week's) in Kuwait, UTC+3."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall, topic_rollups, topic_summaries
+
     written, _turn = scripts
+
     def at(text):
         return datetime.fromisoformat(text).replace(tzinfo=UTC).timestamp()
-    assert written.week_of_utc(at("2023-05-01T00:30:00"))[0] == "2023-W18"
-    assert written.week_of_utc(at("2023-04-30T23:30:00"))[0] == "2023-W17"
-    key, start, end = written.week_of_utc(at("2023-05-03T12:00:00"))
-    assert (start, end) == (at("2023-05-01T00:00:00"), at("2023-05-08T00:00:00"))
-    assert written.month_of_utc(at("2023-12-31T23:30:00")) == ("2023-12", at("2023-12-01T00:00:00"),
-                                                               at("2024-01-01T00:00:00"))
+
+    monkeypatch.setattr(recall, "_memory_zone", lambda: UTC)
+    late_sunday = at("2023-04-30T22:30:00")
+    assert topic_summaries._week_of(late_sunday)[0] == "2023-W17"
+    assert topic_summaries._week_of(at("2023-05-03T12:00:00"))[1:] == (at("2023-05-01T00:00:00"),
+                                                                        at("2023-05-08T00:00:00"))
+    assert topic_rollups._month_of(at("2023-12-31T23:30:00")) == ("2023-12", at("2023-12-01T00:00:00"),
+                                                                  at("2024-01-01T00:00:00"))
+    monkeypatch.setattr(recall, "_memory_zone", lambda: ZoneInfo("Asia/Kuwait"))
+    assert topic_summaries._week_of(late_sunday)[0] == "2023-W18"
+    assert topic_rollups._month_of(at("2023-12-31T23:30:00"))[0] == "2024-01"
+    # The run's own patch is that zone, UTC.
+    written.in_utc()
+    assert recall._memory_zone() is UTC
 
 
 def test_the_nightly_merge_uses_the_cadences_numbers(scripts):
@@ -344,25 +419,23 @@ def test_the_nightly_merge_uses_the_cadences_numbers(scripts):
     assert f'"global_reconsolidation",\n                                       {{{numbers}}}' in source
 
 
-def test_the_pilots_evidence_holds_ids_and_counts_and_agrees_with_its_answers():
-    """The step's measured run as committed: no dataset text, every question
-    written with each step, and the answer files' scores beside it (the
-    written block not below the facts alone, nothing lost in both runs)."""
+def test_the_pilots_evidence_holds_ids_and_counts_and_says_what_was_measured():
+    """The step's measured run as committed (``longmemeval_written.py
+    --evidence``): no dataset text; every question written with each step;
+    a block changes exactly where it shows a summary, and the nightly merge
+    changed no fact line (the step 5 review, H2); the answer runs are named
+    with the blocks they were asked on, and no claim of a gain rests on them."""
     evidence = REPO / "docs" / "audits" / "evidence" / "memory_ingestion" / "pilot_written.json"
     held = json.loads(evidence.read_text(encoding="utf-8"))
     assert not {"question", "answer", "haystack_sessions", "content"} & _keys(held)
     rows = held["questions"]
-    assert len(rows) == 50 and sum(r["changed"] for r in rows) == 22
-    assert all(r["sweep"]["weeks_left"] == 0 for r in rows)
-    runs = [json.loads((REPO / path).read_text(encoding="utf-8")) for path in held["answers"]]
-    changed = {r["id"] for r in rows if r["changed"]}
-    lost = None
-    for run in runs:
+    assert len(rows) == 50 and all(r["sweep"]["weeks_left"] == 0 for r in rows)
+    assert all(r["changed"] == (r["blocks"]["written"]["summary_lines"] > 0) for r in rows)
+    assert not any(r["fact_lines_changed"] for r in rows)
+    assert "eb58ed364" in held["answers_note"]
+    for path in held["answers"]:
+        run = json.loads((REPO / path).read_text(encoding="utf-8"))
         assert run["written_with"]["kazma"].startswith("written run w6-5-qwen")
-        assert run["overall"]["kazma"] >= run["overall"]["facts_only"] >= run["overall"]["kazma_episodes"]
-        now = {r["id"] for r in run["results"] if r["id"] in changed and r["facts_only"] and not r["kazma"]}
-        lost = now if lost is None else lost & now
-    assert lost == set()
 
 
 def _keys(value) -> set:
@@ -371,3 +444,31 @@ def _keys(value) -> set:
     if isinstance(value, list):
         return set().union(*(_keys(v) for v in value)) if value else set()
     return set()
+
+
+def test_sweeps_that_do_not_settle_say_so_apart_from_a_failed_call(scripts, private):
+    """The step 5 review, L5: a question whose sweeps run out is said as that
+    (run again with more), never as a model call that failed."""
+    written, _turn = scripts
+    model = Model()
+    facts = _facts(written, private, model)
+    folder = written.written_folder(private, LABEL)
+    for sub in ("stores", "done"):
+        (folder / sub).mkdir(parents=True, exist_ok=True)
+    cached = written.pilot.CachedModel(model, folder / "replies.jsonl")
+    out = asyncio.run(written._write([_item()], facts, folder, cached, workers=1, sweeps=1))
+    assert out["unwritten"] == 1 and not (folder / "done" / "written_q.json").exists()
+    with mock.patch.object(written, "SWEEPS", 1):
+        reason = asyncio.run(_one_question_reason(written, private, facts, folder, cached))
+    assert reason.startswith("1 sweeps did not settle")
+    # Control: enough sweeps write it.
+    assert asyncio.run(written._write([_item()], facts, folder, cached, workers=1, sweeps=10))["written"] == 1
+
+
+async def _one_question_reason(written, data, facts, folder, cached):
+    written.pilot._route_memory_paths()
+    written.route_queue()
+    written.in_utc()
+    facts_with = written.facts_written_with(facts, "written_q")
+    with written.as_the_active_model(cached):
+        return await written.write_question(_item(), facts, folder, cached.config.model, facts_with, sweeps=1)

@@ -268,6 +268,15 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "install's .env would point Kazma at the live stores, and the model's key is named on the command "
         "line as an environment variable"
     ),
+    "scripts/longmemeval_replay.py": (
+        "writes each question's store again from kept replies, in the benchmark's data folder and a private "
+        "temporary data folder; no model is asked, and an install's .env would point Kazma at the live stores"
+    ),
+    "scripts/longmemeval_written.py": (
+        "copies the benchmark's facts stores and writes their summaries and merge in the benchmark's data "
+        "folder and a private temporary data folder; an install's .env would point Kazma at the live stores, "
+        "and the model's key is named on the command line as an environment variable"
+    ),
     "scripts/longmemeval_bench.py": (
         "measures recall on LongMemEval in private temp databases and a temp data folder; "
         "it reads no install"

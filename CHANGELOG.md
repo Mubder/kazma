@@ -1,14 +1,16 @@
 # CHANGELOG
 
-## Memory benchmarks: LongMemEval reads memory as Kazma writes it (2026-11-26)
+## Memory: a summary that cannot fit no longer shortens what you see (2026-11-27)
 
-- The LongMemEval benchmark now measures Kazma's memory as Kazma itself writes
-  it: the facts it keeps from each conversation, a summary of each topic once
-  its week has ended, monthly and project roll-ups, and the nightly merge. It
-  used to measure the conversations alone.
-- On 50 questions this answered 78 % right, against 74 % with the facts alone
-  and 58 % with the conversations alone, the same in two runs; no question was
-  lost. The benchmarks page now says what Kazma's memory held for each number.
+- When Kazma recalls a weekly summary too long for the room left, it no longer
+  shortens the conversations it shows for room the summary then cannot use:
+  they keep their whole excerpt, in English and Arabic.
+- Weekly summaries and monthly roll-ups now follow your own time zone, the
+  one your reminders use, not the server's.
+- Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:
+  facts, weekly summaries and roll-ups, and the nightly merge. On 50
+  questions this was within the reader's noise of the facts alone; it found
+  the summary fault above.
 
 ## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
 

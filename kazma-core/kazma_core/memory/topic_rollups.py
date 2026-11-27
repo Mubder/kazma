@@ -108,12 +108,16 @@ Reply with JSON only: {{"title": "...", "summary": "...", "skip": false}}
 # ── Periods ──────────────────────────────────────────────────────────────
 
 
-def _month_of(ts: float) -> tuple[str, float, float]:
-    """The calendar month holding *ts* in the install's local time: its key
-    (``"2026-10"``) and its start and end as epoch seconds."""
-    day = _dt.datetime.fromtimestamp(float(ts)).date()
-    start = _dt.datetime(day.year, day.month, 1)
-    end = _dt.datetime(day.year + (day.month == 12), day.month % 12 + 1, 1)
+def _month_of(ts: float, zone: Any = None) -> tuple[str, float, float]:
+    """The calendar month holding *ts* in the operator's zone
+    (``topic_summaries.memory_zone``): its key (``"2026-10"``) and its start
+    and end as epoch seconds."""
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone() if zone is None else zone
+    day = _dt.datetime.fromtimestamp(float(ts), zone).date()
+    start = _dt.datetime(day.year, day.month, 1, tzinfo=zone)
+    end = _dt.datetime(day.year + (day.month == 12), day.month % 12 + 1, 1, tzinfo=zone)
     return f"{day.year}-{day.month:02d}", start.timestamp(), end.timestamp()
 
 
@@ -121,11 +125,14 @@ def rollup_label(level: str, period_start: float, period_end: float) -> str:
     """How recall and the page name a summary's stretch of time, in English
     (recall's block is Kazma's own text): "Week of Oct 06, 2026",
     "October 2026", "Project, Sep 2026 to Nov 2026"."""
-    start = _dt.datetime.fromtimestamp(float(period_start or 0))
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone()
+    start = _dt.datetime.fromtimestamp(float(period_start or 0), zone)
     if level == "month":
         return start.strftime("%B %Y")
     if level == "project":
-        last = _dt.datetime.fromtimestamp(max(float(period_end or 0) - 1, float(period_start or 0)))
+        last = _dt.datetime.fromtimestamp(max(float(period_end or 0) - 1, float(period_start or 0)), zone)
         return f"Project, {start.strftime('%b %Y')} to {last.strftime('%b %Y')}"
     return f"Week of {start.strftime('%b %d, %Y')}"
 
@@ -198,8 +205,11 @@ def _month_settled(conn: sqlite3.Connection, tenant_id: str, start: float, end: 
 def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
                  budget: list[int]) -> int:
     months: dict[str, tuple[float, float, list[str]]] = {}
+    from kazma_core.memory.topic_summaries import memory_zone
+
+    zone = memory_zone()
     for row in weekly:
-        key, start, end = _month_of(float(row["period_start"]))
+        key, start, end = _month_of(float(row["period_start"]), zone)
         months.setdefault(key, (start, end, []))[2].append(str(row["id"]))
     planned = 0
     for key, (start, end, parts) in sorted(months.items()):
@@ -444,7 +454,10 @@ async def rebuild_rollup(conn: sqlite3.Connection, row: sqlite3.Row, *, chat: An
             logger.warning("[summaries] no model to write roll-up %s -- retried later", row["id"])
             return False
     try:
-        parsed = _parse(await chat(_messages(level, row, live)), words=_ROLLUP_WORDS)
+        # The prompt names months in the operator's zone, a settings read:
+        # built off the loop.
+        messages = await asyncio.to_thread(_messages, level, row, live)
+        parsed = _parse(await chat(messages), words=_ROLLUP_WORDS)
     except LLMError as exc:
         logger.warning("[summaries] the model call for roll-up %s failed: %s -- retried later", row["id"], exc)
         return False

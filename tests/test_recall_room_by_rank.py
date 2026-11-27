@@ -322,3 +322,66 @@ def test_recall_shows_the_stretch_that_answers(mem, question, answer, asked, exp
     assert expected in line
     assert f'memory_read("{eid}")' in line
     assert len(line) < limits.RECALL_LEAD_SHOW + 250
+
+
+# ── A line that cannot fit takes no room (the step 5 review, M1) ─────────
+
+def _five_ar() -> list[RecallHit]:
+    hits = []
+    for i in range(5):
+        answer = FILLER_AR * 40 + f"رمز الأوركيد للغرفة {i} هو {i}{i}{i}. " + FILLER_AR * 40
+        hits.append(_hit(f"a_{i}", f"أي رمز أوركيد اخترنا للغرفة {i}؟", answer))
+    return hits
+
+
+def _summary(text: str) -> RecallHit:
+    return RecallHit(id="sum_1", content=text[:80], score=0.5, kind="summary", source="summary",
+                     metadata={"level": "week", "display": "Week of May 1, 2023 -- " + text})
+
+
+def _with_and_without(language: str, budget: int) -> tuple[str, str]:
+    if language == "en":
+        episodes, terms, long = _five(), _terms("Which orchid code for room 0?"), FILLER_EN * 80
+    else:
+        episodes, terms, long = _five_ar(), _terms("أي رمز أوركيد للغرفة 0؟"), FILLER_AR * 120
+    facts = [RecallHit(id=f"b_{i}", content=f"user likes item number {i} " + "x" * 120, score=1.0, kind="belief",
+                       metadata={}) for i in range(5)]
+    without = format_recall_block(RecallResult(beliefs=facts, episodes=episodes, focus_terms=terms),
+                                  max_tokens=budget)
+    with_one = format_recall_block(RecallResult(beliefs=facts, episodes=episodes, summaries=[_summary(long)],
+                                                focus_terms=terms), max_tokens=budget)
+    return with_one, without
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_summary_that_cannot_fit_takes_no_room_from_the_excerpts(language):
+    """A long weekly summary no step can fit was dropped, but the excerpts
+    had shrunk for it (822 to 623 characters on LongMemEval): the block is
+    now the block without it, in English and Arabic."""
+    with_one, without = _with_and_without(language, _TIGHT)
+    assert "Week of May 1, 2023" not in with_one
+    assert _history_lines(with_one) == _history_lines(without)
+    lead = len(_history_lines(with_one)[0].split(" [", 1)[0])
+    assert lead > limits.RECALL_LEAD_LEAST + 50, lead
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+@pytest.mark.parametrize("budget", [1000, 1150, 1300, 1600, 2400, 4000])
+def test_whenever_the_summary_is_left_out_the_block_is_the_block_without_it(language, budget):
+    """The class: at any budget, a block whose summary is not shown holds the
+    same lines as the same recall with no summary."""
+    with_one, without = _with_and_without(language, budget)
+    if "Week of May 1, 2023" not in with_one:
+        assert _history_lines(with_one) == _history_lines(without), budget
+
+
+def test_a_summary_that_fits_still_takes_its_room():
+    """The control: a short summary that fits at a narrower step is shown,
+    and the excerpts give way for it, as before."""
+    facts = [RecallHit(id=f"b_{i}", content=f"user likes item number {i} " + "x" * 120, score=1.0, kind="belief",
+                       metadata={}) for i in range(5)]
+    terms = _terms("Which orchid code for room 0?")
+    short = _summary("The orchid codes were chosen for each room. " * 3)
+    block = format_recall_block(RecallResult(beliefs=facts, episodes=_five(), summaries=[short], focus_terms=terms),
+                                max_tokens=_TIGHT + 60)
+    assert "Week of May 1, 2023" in block and len(_history_lines(block)) == 5

@@ -71,27 +71,13 @@ TASK_TRIES = 3
 SWEEPS = 60
 
 
-def week_of_utc(ts: float) -> tuple[str, float, float]:
-    """``topic_summaries._week_of`` with the week read in UTC."""
-    year, week, _ = dt.datetime.fromtimestamp(float(ts), dt.UTC).date().isocalendar()
-    start = dt.datetime.combine(dt.date.fromisocalendar(year, week, 1), dt.time(), tzinfo=dt.UTC)
-    return f"{year}-W{week:02d}", start.timestamp(), (start + dt.timedelta(days=7)).timestamp()
-
-
-def month_of_utc(ts: float) -> tuple[str, float, float]:
-    """``topic_rollups._month_of`` with the month read in UTC."""
-    day = dt.datetime.fromtimestamp(float(ts), dt.UTC).date()
-    start = dt.datetime(day.year, day.month, 1, tzinfo=dt.UTC)
-    end = dt.datetime(day.year + (day.month == 12), day.month % 12 + 1, 1, tzinfo=dt.UTC)
-    return f"{day.year}-{day.month:02d}", start.timestamp(), end.timestamp()
-
-
 def in_utc() -> None:
-    """The product's weeks and months, read in UTC for this process."""
-    from kazma_core.memory import topic_rollups, topic_summaries
+    """Memory's days, for this process, in UTC: the benchmark's zone for the
+    operator's. The product reads weeks and months in the operator's zone
+    (``topic_summaries.memory_zone``), as recall reads days."""
+    import kazma_core.memory.recall as recall
 
-    topic_summaries._week_of = week_of_utc  # type: ignore[assignment]
-    topic_rollups._month_of = month_of_utc  # type: ignore[assignment]
+    recall._memory_zone = lambda: dt.UTC  # type: ignore[assignment]
 
 
 #: The tasks the running question's sweep queued, run here in its order.
@@ -171,16 +157,18 @@ def summary_counts() -> dict[str, int]:
         conn.close()
 
 
-async def sweep(now: float, model: str) -> dict[str, Any] | None:
+async def sweep(now: float, model: str, sweeps: int = SWEEPS) -> dict[str, Any] | str:
     """The summaries sweep at *now* (``topic_summaries.queue_due_work``: the
     weeks due, the roll-ups it plans) and the queue's tasks for what it
-    queued, until a sweep queues nothing; None when a task failed past its
-    tries or the sweeps never settled."""
+    queued, until a sweep queues nothing; why not, when a task failed past
+    its tries or *sweeps* sweeps did not settle it (the step 5 review, L5:
+    the two were one message, and a rerun from a fresh copy can only settle
+    the second with more sweeps)."""
     from kazma_core.memory.topic_summaries import queue_due_work
 
     handlers = _handlers()
     counts = {"model": model, "weeks": 0, "rollups": 0, "tasks": 0}
-    for passes in range(1, SWEEPS + 1):
+    for passes in range(1, sweeps + 1):
         queued: list[tuple[str, dict[str, Any]]] = []
         token = _QUEUED.set(queued)
         try:
@@ -196,9 +184,9 @@ async def sweep(now: float, model: str) -> dict[str, Any] | None:
                 if await handlers[task_type](payload):
                     break
             else:
-                return None
+                return f"a {task_type} task's model call failed {TASK_TRIES} times; written again on the next run"
             counts["tasks"] += 1
-    return None
+    return f"{sweeps} sweeps did not settle its summaries; run again with a larger --sweeps"
 
 
 def nightly_merge(db: Path, first: float, now: float) -> dict[str, Any]:
@@ -255,18 +243,17 @@ def _first_day(db: Path) -> float:
 
 
 async def write_question(item: dict[str, Any], facts: Path, folder: Path, model: str,
-                         facts_with: dict[str, Any]) -> dict[str, Any] | None:
+                         facts_with: dict[str, Any], sweeps: int = SWEEPS) -> dict[str, Any] | str:
     """*item*'s facts store, copied, with its summaries, roll-ups and nightly
-    merge as of the question's time; what wrote each step, or None when a
-    model call failed past its tries (the question is written again on the
-    next run)."""
+    merge as of the question's time; what wrote each step, or why it was not
+    written (:func:`sweep`)."""
     qid = str(item["question_id"])
     db, ops = await asyncio.to_thread(_copy, facts, folder, qid)
     pilot._STORE.set((str(db), str(ops)))
     now = bench.parse_date(item["question_date"])
-    summaries = await sweep(now, model)
-    if summaries is None:
-        return None
+    summaries = await sweep(now, model, sweeps)
+    if isinstance(summaries, str):
+        return summaries
     merge = await asyncio.to_thread(nightly_merge, db, await asyncio.to_thread(_first_day, db), now)
     counts = await asyncio.to_thread(summary_counts)
     return {**counts, "merged": merge["merged"],
@@ -291,7 +278,8 @@ def written_folder(data: Path, label: str) -> Path:
     return data / "cache" / "written" / label
 
 
-async def _write(items: list[dict[str, Any]], facts: Path, folder: Path, model: Any, workers: int) -> dict[str, int]:
+async def _write(items: list[dict[str, Any]], facts: Path, folder: Path, model: Any, workers: int,
+                 sweeps: int = SWEEPS) -> dict[str, int]:
     """Every question of *items* written (a store already done is kept), on
     *model* as the active model."""
     pilot._route_memory_paths()
@@ -312,10 +300,10 @@ async def _write(items: list[dict[str, Any]], facts: Path, folder: Path, model: 
             print(f"  {qid}: its facts were not written ({facts.name})", flush=True)
             return
         async with gate:
-            stats = await write_question(item, facts, folder, model.config.model, facts_with)
-        if stats is None:
+            stats = await write_question(item, facts, folder, model.config.model, facts_with, sweeps)
+        if isinstance(stats, str):
             out["unwritten"] += 1
-            print(f"  {qid}: a summary's model call failed; written again on the next run", flush=True)
+            print(f"  {qid}: {stats}", flush=True)
             return
         done.write_text(json.dumps(stats, ensure_ascii=False) + "\n", encoding="utf-8")
         out["written"] += 1
@@ -326,6 +314,92 @@ async def _write(items: list[dict[str, Any]], facts: Path, folder: Path, model: 
     return out
 
 
+def _lines_under(block: str, header: str) -> int:
+    """How many lines the block shows under *header* ("## Known Facts")."""
+    if header not in block:
+        return 0
+    body = block.split(header, 1)[1].split("\n\n", 1)[0]
+    return sum(1 for line in body.splitlines() if line.startswith("- "))
+
+
+def compare_blocks(data: Path, facts: Path, folder: Path, ids: list[str]) -> list[dict[str, Any]]:
+    """Each question's block on its written store, on its facts store alone and
+    on its episodes alone: what each shows (memories, the lines under each
+    header, tokens) and whether the answer's words are in it. Ids and counts
+    only."""
+    from unittest import mock
+
+    items = {str(x["question_id"]): x for x in bench.load(data)}
+    embedder = pilot.PilotEmbedder(*_embedder_parts(data), folder / "vectors-extra.npz")
+    embedder.vectors.update(pilot.PilotEmbedder(None, data / "cache" / "none.npz", embedder.model,
+                                                facts / "vectors-extra.npz").added)
+    rows = []
+    with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder),             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
+        for qid in ids:
+            item = items[qid]
+            history, words = bench.history_rows(item), bench.answer_words(item)
+            row: dict[str, Any] = {"id": qid, "type": str(item["question_type"])}
+            blocks = {}
+            for name, store in (("written", folder / "stores" / f"{qid}.db"),
+                                ("facts", facts / "stores" / f"{qid}.db"), ("episodes", None)):
+                block, _whole, shown = bench.kazma_history(item, history, store)
+                blocks[name] = block
+                row[name] = {"tokens": bench.shown_tokens(block), **shown,
+                             "fact_lines": _lines_under(block, "## Known Facts"),
+                             "summary_lines": _lines_under(block, "## Weekly Summaries")
+                             + _lines_under(block, "## Summaries\n"),
+                             "answer_in_block": bench.holds_answer(block, words) if words else None}
+            row["changed"] = blocks["written"].strip() != blocks["facts"].strip()
+            row["fact_lines_changed"] = (_fact_lines(blocks["written"]) != _fact_lines(blocks["facts"]))
+            rows.append(row)
+    embedder.save()
+    return rows
+
+
+def _fact_lines(block: str) -> list[str]:
+    if "## Known Facts" not in block:
+        return []
+    return [line for line in block.split("## Known Facts", 1)[1].split("\n\n", 1)[0].splitlines()
+            if line.startswith("- ")]
+
+
+def write_evidence(data: Path, facts: Path, label: str, out: Path, questions: str = "pilot",
+                   answers: list[str] | None = None, answers_note: str = "") -> dict[str, Any]:
+    """The written run's evidence file (``docs/audits/evidence/memory_ingestion``):
+    per question the stores' counts, the sweep's, and each block's
+    (:func:`compare_blocks`). It holds ids, counts and booleans only."""
+    folder = written_folder(data, label)
+    ids = pilot.pilot_ids(questions)
+    blocks = {r["id"]: r for r in compare_blocks(data, facts, folder, ids)}
+    usage = json.loads((folder / "usage.json").read_text(encoding="utf-8")) if (folder / "usage.json").is_file() else {}
+    rows = []
+    for qid in ids:
+        done = json.loads((folder / "done" / f"{qid}.json").read_text(encoding="utf-8"))
+        held = json.loads((facts / "done" / f"{qid}.json").read_text(encoding="utf-8"))
+        steps = done["written_with"]
+        rows.append({"id": qid, "type": blocks[qid]["type"], "changed": blocks[qid]["changed"],
+                     "fact_lines_changed": blocks[qid]["fact_lines_changed"],
+                     "facts_store": {k: held.get(k, 0) for k in ("deep", "no_reply", "deep_failed", "facts", "current",
+                                                                  "dated_events", "refs_added", "refs_lost",
+                                                                  "refs_cross_name")},
+                     "written_store": {k: done.get(k, 0) for k in ("weekly", "month", "project", "merged")},
+                     "sweep": {k: steps["summaries"].get(k, 0) for k in ("weeks", "rollups", "tasks", "weeks_left")},
+                     "blocks": {n: blocks[qid][n] for n in ("written", "facts", "episodes")}})
+    evidence = {
+        "what": "The memory plan's W6 step 5: each question's memory as Kazma writes it (written), the facts "
+                "store alone (facts) and the episodes alone (episodes); per question the stores' counts, the "
+                "summaries sweep's, and each block's memories, lines, tokens and whether the answer's words are "
+                "in it. Ids and counts only. Made by scripts/longmemeval_written.py evidence.",
+        "facts": f"facts run {facts.name}", "written": label,
+        "summaries": {"model": usage.get("model"), "calls": (usage.get("this_run") or {}).get("calls")},
+        **({"answers": list(answers), "answers_note": answers_note} if answers else {}),
+        "questions": rows,
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(evidence, indent=1) + "\n", encoding="utf-8", newline="\n")
+    return evidence
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")
@@ -333,14 +407,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", required=True, help="the written run's name (cache/written/LABEL)")
     p.add_argument("--questions", choices=("pilot", "dev"), default="pilot")
     p.add_argument("--model", default="qwen3.8-flash")
-    p.add_argument("--base-url", required=True)
+    p.add_argument("--base-url", default="", help="the model's OpenAI-shaped address (not for --evidence)")
     p.add_argument("--key-env", default="DASHSCOPE_API_KEY")
     p.add_argument("--workers", type=int, default=8, help="questions written at once")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--prices", type=float, nargs=3, metavar=("HIT", "MISS", "OUT"),
                    help="USD per million tokens: cache hit, cache miss, output")
     p.add_argument("--stop-usd", type=float, help="stop once the replies have cost this (needs --prices)")
+    p.add_argument("--sweeps", type=int, default=SWEEPS, help="the most summaries sweeps a question may take")
+    p.add_argument("--evidence", type=Path, default=None,
+                   help="write the run's evidence file here (ids and counts; no model call) instead of writing")
+    p.add_argument("--answers", nargs="*", default=[], help="with --evidence: the answer runs' result files")
+    p.add_argument("--answers-note", default="", help="with --evidence: what blocks the answers were asked on")
     args = p.parse_args(argv)
+    if args.evidence is not None:
+        bench._private_data_folder()
+        bench._limit_cpu_threads()
+        facts = args.data / "cache" / "facts-pilot" / args.facts
+        made = write_evidence(args.data, facts, args.label, args.evidence, args.questions, args.answers,
+                              args.answers_note)
+        print(f"wrote {args.evidence}: {len(made['questions'])} questions, "
+              f"{sum(r['changed'] for r in made['questions'])} blocks changed")
+        return 0
+    if not args.base_url:
+        p.error("--base-url is needed to write")
     if args.stop_usd is not None and not args.prices:
         p.error("--stop-usd needs --prices")
     key = os.environ.get(args.key_env, "")
@@ -370,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
           f"${spend.usd:.2f} spent", flush=True)
     try:
         with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder):
-            counts = asyncio.run(_write(items, facts, folder, model, args.workers))
+            counts = asyncio.run(_write(items, facts, folder, model, args.workers, args.sweeps))
     except pilot.SpendLimitError as exc:
         print(f"stopped at the spend limit: {exc}; usage this run {model.usage}", file=sys.stderr)
         return 3

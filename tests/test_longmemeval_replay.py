@@ -204,3 +204,20 @@ def test_a_fact_held_but_not_shown_is_handed_to_the_pass(replay):
     # Control: a fact no longer held is not placed.
     counts = {"refs_added": 0, "refs_lost": 0}
     assert replay.renumber(_entry("f3"), _shown(), _held_db(), "t", counts) == {}
+
+
+def test_a_number_is_never_placed_on_another_statement_of_the_value(replay):
+    """The step 5 review, L1: "replaces f1 (lives_in Porto)" is not "visited
+    Porto"; another name of the same statement is placed, and counted."""
+    counts = {"refs_added": 0, "refs_lost": 0}
+    entry = {"held": [{"ref": "f1", "subject": "user", "predicate": "lives_in", "object": "Porto"}],
+             "content": json.dumps({"beliefs": [{"subject": "user", "predicate": "lives_in", "object": "Lyon",
+                                                 "replaces": "f1"}]})}
+    assert replay.renumber(entry, _shown(("user", "visited", "Porto")), _held_db(), "t", counts) == {}
+    assert replay.renumber(entry, _shown(("user", "visited", "Porto")),
+                           _held_db(("user", "visited", "Porto")), "t", counts) == {}
+    job = {"held": [{"ref": "f1", "subject": "user", "predicate": "has_occupation", "object": "dentist"}],
+           "content": json.dumps({"beliefs": [{"subject": "user", "predicate": "current_role", "object": "surgeon",
+                                               "replaces": "f1"}]})}
+    assert replay.renumber(job, _shown(("user", "current_role", "dentist")), _held_db(), "t", counts) == {"f1": "f1"}
+    assert counts["refs_cross_name"] == 1

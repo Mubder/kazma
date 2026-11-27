@@ -38,6 +38,9 @@ def mem(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(tmp_path / "memory_state.db"))
+    # Months and weeks are read in the operator's zone (the step 5 review, L2);
+    # this file's days are written in the machine's own, so that is the zone.
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: _dt.datetime.now().astimezone().tzinfo)
     monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(tmp_path / "memory_ops.db"))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
     monkeypatch.setattr("kazma_core.memory.embedder.encode_text_to_blob", lambda text: None)

@@ -834,7 +834,9 @@ WRITTEN_STEPS = ("episodes", "facts", "summaries", "merge")
 
 def written_stores(data: Path, label: str, ids: list[str]) -> tuple[dict[str, Path], dict[str, Any], list[str]]:
     """The written run *label*'s store a question, what wrote each step, and
-    the questions whose store lacks a step (a run with any is refused)."""
+    the questions whose store lacks a step (a run with any is refused): its
+    done file names every step, and the store itself shows each done
+    (:func:`store_unfinished`), not only what the done file declares."""
     folder = data / "cache" / "written" / label
     stores: dict[str, Path] = {}
     written: dict[str, Any] = {}
@@ -842,21 +844,75 @@ def written_stores(data: Path, label: str, ids: list[str]) -> tuple[dict[str, Pa
     for qid in ids:
         done, store = folder / "done" / f"{qid}.json", folder / "stores" / f"{qid}.db"
         steps = (json.loads(done.read_text(encoding="utf-8")).get("written_with") or {}) if done.is_file() else {}
-        if not store.is_file() or any(not steps.get(step) for step in WRITTEN_STEPS):
+        if not store.is_file() or any(not steps.get(step) for step in WRITTEN_STEPS) or store_unfinished(store, steps):
             lacking.append(qid)
             continue
         stores[qid], written[qid] = store, steps
     return stores, written, lacking
 
 
+def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
+    """What a written store shows undone, read from the store and the steps'
+    own counts (the step 5 review, M2): the nightly merge's errors, or a
+    twin it left (one fact twice, current); a week left unsummarised at the
+    question's time, or a week or summary still queued or to be written
+    again. Empty when every step is done."""
+    out = []
+    merge, summaries = steps.get("merge") or {}, steps.get("summaries") or {}
+    if int(merge.get("errors") or 0):
+        out.append("the nightly merge failed")
+    if int(summaries.get("weeks_left") or 0):
+        out.append("a week left unsummarised")
+    conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
+    try:
+        def one(sql: str) -> int:
+            try:
+                return int(conn.execute(sql).fetchone()[0] or 0)
+            except sqlite3.OperationalError:
+                return 0
+
+        if one("SELECT COUNT(*) FROM memory_summary_periods WHERE status != 'done'"):
+            out.append("a week still queued")
+        if one("SELECT COUNT(*) FROM memory_summaries WHERE status = 'rebuild'"):
+            out.append("a summary still to be written again")
+        # One fact twice: the same words on the same day (an event on two
+        # days is two, ``fact_days.event_day``, and the merge keeps both).
+        if one("SELECT COUNT(*) FROM (SELECT 1 FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
+               "GROUP BY tenant_id, subject, predicate, lower(object), "
+               "COALESCE(json_extract(metadata_json, '$.started'), ''), "
+               "COALESCE(json_extract(metadata_json, '$.planned'), '') HAVING COUNT(*) > 1)"):
+            out.append("a twin fact left current")
+    finally:
+        conn.close()
+    return out
+
+
+def deep_pass_gaps(steps: dict[str, Any]) -> dict[str, int]:
+    """Rounds whose deep pass the facts run never had answered, over the
+    written run's stores: the extraction's failed passes, which the replay
+    finds with no reply kept (``no_reply``), and passes that failed
+    (``deep_failed``). Said beside every number, never hidden."""
+    out = {"no_reply": 0, "deep_failed": 0, "deep": 0}
+    for step in steps.values():
+        facts = step.get("facts") or {}
+        for key in out:
+            out[key] += int(facts.get(key) or 0)
+    return out
+
+
 def written_with(label: str, steps: dict[str, Any]) -> str:
-    """What a written run's conditions were written with, in a line."""
+    """What a written run's conditions were written with, in a line, the
+    rounds whose deep pass was never answered included."""
     first = next(iter(steps.values()), {}) if steps else {}
     facts = first.get("facts") or {}
     summaries = first.get("summaries") or {}
+    gaps = deep_pass_gaps(steps)
+    missing = gaps["no_reply"] + gaps["deep_failed"]
     return (f"written run {label}: the history's episodes, the facts of {facts.get('run', '?')} "
-            f"({facts.get('facts', 'extracted')}), weekly summaries and roll-ups on {summaries.get('model', '?')} "
-            "as of the question's time, and the nightly merge")
+            f"({facts.get('facts', 'extracted')}"
+            + (f"; {missing:,} of {missing + gaps['deep']:,} rounds' deep pass never answered" if missing else "")
+            + f"), weekly summaries and roll-ups on {summaries.get('model', '?')} "
+            "as of the question's time (written at once, as after an import), and the nightly merge")
 
 
 #: Reasoning a reader may be asked for: ``off``; ``default``, nothing sent

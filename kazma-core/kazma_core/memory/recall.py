@@ -415,13 +415,17 @@ def _keep_sides(result: RecallResult, query: str, *, conn: sqlite3.Connection | 
                 hit.metadata["beyond"] = tuple(max(0, w - len(h)) for w, h in zip(whole, heads, strict=True))
 
 
-def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]:
+def _room_by_rank(result: RecallResult, kept: Any) -> dict[str, tuple[str, int]]:
     """Each roomy conversation's line (display, characters left out) at its
     room by rank (the memory plan's W1a): the best one at
     ``RECALL_LEAD_SHOW`` characters, every other at ``RECALL_OTHER_SHOW``,
-    each cut around the question's words. When *fits* says the block would
-    leave a line out, the others give way first, in steps, down to
-    ``RECALL_OTHER_LEAST``, then the best, down to ``RECALL_LEAD_LEAST``.
+    each cut around the question's words. When the block would leave a line
+    out, the others give way first, in steps, down to ``RECALL_OTHER_LEAST``,
+    then the best, down to ``RECALL_LEAD_LEAST``: the widest step that keeps
+    as many lines of each kind as the narrowest does (*kept* counts them). A
+    line that cannot fit even there (a long summary) takes no room from the
+    others: it was dropped and the excerpts shrank for nothing (822 to 623
+    characters on LongMemEval, the step 5 review's M1).
     Measured on LongMemEval's dev questions: 0.48 answered with the fixed
     200 + 300 bounds, 0.74 with this shape
     (docs/plans/RECALL_BLOCK_BOUNDS_PROPOSAL.md). Empty when no line is
@@ -434,14 +438,23 @@ def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]
              for other in range(RECALL_OTHER_SHOW, RECALL_OTHER_LEAST - 1, -RECALL_OTHER_STEP)]
     steps += [(lead, RECALL_OTHER_LEAST)
               for lead in range(RECALL_LEAD_SHOW - RECALL_LEAD_STEP, RECALL_LEAD_LEAST - 1, -RECALL_LEAD_STEP)]
-    shown: dict[str, tuple[str, int]] = {}
+
+    def at(lead: int, other: int) -> dict[str, tuple[str, int]]:
+        return {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
+                                 h.metadata.get("beyond") or (0, 0, 0), anchor=h.metadata.get("passage"))
+                for i, h in enumerate(roomy)}
+
+    widest = at(*steps[0])
+    best = kept(widest)
+    if best[1]:
+        return widest  # every line fits at the widest
+    least = at(*steps[-1])
+    target = kept(least)
     for lead, other in steps:
-        shown = {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
-                                  h.metadata.get("beyond") or (0, 0, 0), anchor=h.metadata.get("passage"))
-                 for i, h in enumerate(roomy)}
-        if fits(shown):
-            break
-    return shown
+        shown = least if (lead, other) == steps[-1] else at(lead, other)
+        if all(got >= want for got, want in zip(kept(shown)[0], target[0], strict=True)):
+            return shown
+    return least
 
 
 #: What this recall's question asks (part F), for this recall only: its time
@@ -4619,14 +4632,18 @@ def format_recall_block(
                 sections.pop()
         return sections
 
-    def _fits(shown: dict[str, tuple[str, int]]) -> bool:
+    def _kept(shown: dict[str, tuple[str, int]]) -> tuple[tuple[int, ...], bool]:
+        """The lines of each kind the block keeps at *shown*'s room, and
+        whether that is every line."""
         room.clear()
         room.update(shown)
-        return sum(len(lines) for _kind, _header, lines in _select()) == wanted
+        counts = {kind: len(lines) for kind, _header, lines in _select()}
+        per_kind = tuple(counts.get(kind, 0) for kind, _header, _hits in sources)
+        return per_kind, sum(per_kind) == wanted
 
     # Room by rank (W1a): the widest that leaves no line out; when even the
-    # least leaves one out, lines are left out as before.
-    room.update(_room_by_rank(result, _fits))
+    # least leaves one out, the widest that keeps what the least keeps.
+    room.update(_room_by_rank(result, _kept))
     return _assemble(_select())
 
 

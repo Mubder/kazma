@@ -100,7 +100,12 @@ came up short, and archiving had erased 76 memories.
   then " … " and the stretch -- a memory often names its subject first --
   unless the stretch shown alone would begin inside the opening; when the
   block's budget would leave a line out the others give way first (to
-  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). **The
+  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`): the widest
+  step that keeps as many lines of each kind as the narrowest does, so a
+  line no step can fit (a long summary) takes no room from the excerpts
+  (it shrank them 822 -> 623 characters for nothing; W6 step 5's review, M1;
+  gate: a block whose summary is left out equals the block without it, EN
+  and AR, at every budget). **The
   budget is the whole block's** (`max_tokens`, 1,500 from the supervisor):
   rules, speakers note, fence and lines, counted as the context trim counts
   (`summarizer.estimate_text_tokens`, Arabic at about 2.5 characters a

@@ -1,33 +1,32 @@
 {
- "what": "The memory plan's W6 step 5 on the facts pilot's 50 dev questions: each question's memory as Kazma writes it (written), the facts store alone (facts) and the episodes alone (episodes); per question the stores' counts, the summaries sweep's, and each block's shown memories, tokens and whether the answer's words are in it. Ids and counts only.",
- "facts": "qwen3.8-flash's kept deep-pass replies (map-qwen) replayed through 98a4cfce4's write path (scripts/longmemeval_replay.py), no model call",
+ "what": "The memory plan's W6 step 5: each question's memory as Kazma writes it (written), the facts store alone (facts) and the episodes alone (episodes); per question the stores' counts, the summaries sweep's, and each block's memories, lines, tokens and whether the answer's words are in it. Ids and counts only. Made by scripts/longmemeval_written.py evidence.",
+ "facts": "facts run ed313074-w6-5-qwen",
+ "written": "w6-5-qwen",
  "summaries": {
   "model": "qwen3.8-flash",
-  "calls": 1333,
-  "usd_at_stop_prices": 1.1272,
-  "stop_prices_usd_per_million": [
-   0.03,
-   0.2,
-   0.6
-  ]
+  "calls": 1303
  },
  "answers": [
   "tests/fixtures/longmemeval/answers_dev_w6-5.json",
   "tests/fixtures/longmemeval/answers_dev_w6-5-noise.json"
  ],
+ "answers_note": "Answered on eb58ed364's blocks, before the step 5 review's M1 fix to recall: there gpt4_1d80365e and gpt4_61e13b3c showed no summary yet had shorter excerpts; with the fix their blocks equal the facts-only ones and these 20 changed blocks are the 20 that show a summary.",
  "questions": [
   {
    "id": "gpt4_2655b836",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 225,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 268,
     "current": 249,
     "dated_events": 13,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -47,6 +46,8 @@
      "shown": 5,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -54,6 +55,8 @@
      "shown": 5,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -61,6 +64,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -69,14 +74,17 @@
    "id": "6b7dfb22",
    "type": "single-session-preference",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 227,
     "no_reply": 6,
+    "deep_failed": 0,
     "facts": 303,
     "current": 298,
     "dated_events": 15,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 30,
@@ -96,6 +104,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -103,6 +113,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -110,6 +122,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -118,14 +132,17 @@
    "id": "778164c6",
    "type": "single-session-assistant",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 266,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 280,
     "current": 263,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 31,
@@ -145,6 +162,8 @@
      "shown": 3,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "facts": {
@@ -152,6 +171,8 @@
      "shown": 3,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -159,6 +180,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -167,14 +190,17 @@
    "id": "9bbe84a2",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 224,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 271,
     "current": 256,
     "dated_events": 25,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 16,
@@ -194,6 +220,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 2,
+     "fact_lines": 2,
+     "summary_lines": 2,
      "answer_in_block": true
     },
     "facts": {
@@ -201,6 +229,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -208,6 +238,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -216,14 +248,17 @@
    "id": "7a87bd0c",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 246,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 274,
     "current": 249,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 28,
@@ -243,6 +278,8 @@
      "shown": 4,
      "facts": 3,
      "summaries": 1,
+     "fact_lines": 3,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
@@ -250,6 +287,8 @@
      "shown": 4,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -257,6 +296,8 @@
      "shown": 4,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -265,14 +306,17 @@
    "id": "8752c811",
    "type": "single-session-assistant",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 237,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 252,
     "current": 245,
     "dated_events": 13,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 31,
@@ -292,6 +336,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 1,
+     "fact_lines": 0,
+     "summary_lines": 1,
      "answer_in_block": false
     },
     "facts": {
@@ -299,6 +345,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -306,6 +354,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -314,14 +364,17 @@
    "id": "6071bd76",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 240,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 301,
     "current": 279,
     "dated_events": 12,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 31,
@@ -341,6 +394,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 2,
+     "fact_lines": 1,
+     "summary_lines": 2,
      "answer_in_block": false
     },
     "facts": {
@@ -348,6 +403,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -355,6 +412,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -363,14 +422,17 @@
    "id": "gpt4_a1b77f9c",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 245,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 290,
     "current": 277,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 40,
@@ -390,6 +452,8 @@
      "shown": 8,
      "facts": 12,
      "summaries": 5,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -397,6 +461,8 @@
      "shown": 8,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -404,6 +470,8 @@
      "shown": 8,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -412,14 +480,17 @@
    "id": "gpt4_ab202e7f",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 237,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 302,
     "current": 294,
     "dated_events": 17,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 30,
@@ -439,6 +510,8 @@
      "shown": 5,
      "facts": 5,
      "summaries": 0,
+     "fact_lines": 5,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -446,6 +519,8 @@
      "shown": 5,
      "facts": 5,
      "summaries": 0,
+     "fact_lines": 5,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -453,6 +528,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -461,14 +538,17 @@
    "id": "a4996e51",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 249,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 309,
     "current": 290,
     "dated_events": 21,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 33,
@@ -488,6 +568,8 @@
      "shown": 6,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "facts": {
@@ -495,6 +577,8 @@
      "shown": 6,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -502,6 +586,8 @@
      "shown": 6,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -510,14 +596,17 @@
    "id": "c6853660",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 233,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 302,
     "current": 287,
     "dated_events": 22,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 26,
@@ -537,6 +626,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 2,
+     "fact_lines": 1,
+     "summary_lines": 2,
      "answer_in_block": false
     },
     "facts": {
@@ -544,6 +635,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -551,6 +644,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -559,14 +654,17 @@
    "id": "f0853d11",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 243,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 276,
     "current": 260,
     "dated_events": 16,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -586,6 +684,8 @@
      "shown": 7,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -593,6 +693,8 @@
      "shown": 7,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -600,6 +702,8 @@
      "shown": 7,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -608,14 +712,17 @@
    "id": "099778bb",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 227,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 262,
     "current": 242,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 25,
@@ -635,6 +742,8 @@
      "shown": 5,
      "facts": 1,
      "summaries": 1,
+     "fact_lines": 1,
+     "summary_lines": 1,
      "answer_in_block": null
     },
     "facts": {
@@ -642,6 +751,8 @@
      "shown": 5,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -649,6 +760,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -657,14 +770,17 @@
    "id": "77eafa52",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 259,
     "no_reply": 3,
+    "deep_failed": 0,
     "facts": 230,
     "current": 216,
     "dated_events": 13,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 30,
@@ -684,6 +800,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 2,
+     "fact_lines": 2,
+     "summary_lines": 2,
      "answer_in_block": null
     },
     "facts": {
@@ -691,6 +809,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -698,6 +818,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -706,14 +828,17 @@
    "id": "eaca4986",
    "type": "single-session-assistant",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 246,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 270,
     "current": 260,
     "dated_events": 21,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 29,
@@ -733,6 +858,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -740,6 +867,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -747,6 +876,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -755,14 +886,17 @@
    "id": "8550ddae",
    "type": "single-session-user",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 218,
     "no_reply": 6,
+    "deep_failed": 0,
     "facts": 302,
     "current": 286,
     "dated_events": 13,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 25,
@@ -778,10 +912,12 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1430,
+     "tokens": 1480,
      "shown": 5,
      "facts": 3,
      "summaries": 2,
+     "fact_lines": 3,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
@@ -789,6 +925,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -796,6 +934,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -804,14 +944,17 @@
    "id": "10d9b85a",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 230,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 277,
     "current": 254,
     "dated_events": 16,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -831,6 +974,8 @@
      "shown": 3,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -838,6 +983,8 @@
      "shown": 3,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -845,6 +992,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -853,14 +1002,17 @@
    "id": "50635ada",
    "type": "knowledge-update",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 263,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 298,
     "current": 283,
     "dated_events": 21,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 42,
@@ -880,6 +1032,8 @@
      "shown": 1,
      "facts": 4,
      "summaries": 0,
+     "fact_lines": 4,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "facts": {
@@ -887,6 +1041,8 @@
      "shown": 1,
      "facts": 4,
      "summaries": 0,
+     "fact_lines": 4,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -894,6 +1050,8 @@
      "shown": 1,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -902,14 +1060,17 @@
    "id": "b0479f84",
    "type": "single-session-preference",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 246,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 328,
     "current": 318,
     "dated_events": 19,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 28,
@@ -929,6 +1090,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -936,6 +1099,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -943,6 +1108,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -951,14 +1118,17 @@
    "id": "29f2956b",
    "type": "single-session-user",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 246,
     "no_reply": 0,
+    "deep_failed": 0,
     "facts": 293,
     "current": 275,
     "dated_events": 16,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 35,
@@ -978,13 +1148,17 @@
      "shown": 6,
      "facts": 12,
      "summaries": 1,
+     "fact_lines": 12,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
-     "tokens": 1411,
+     "tokens": 1485,
      "shown": 6,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -992,6 +1166,8 @@
      "shown": 6,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1000,14 +1176,17 @@
    "id": "db467c8c",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 231,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 243,
     "current": 229,
     "dated_events": 13,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 23,
@@ -1027,6 +1206,8 @@
      "shown": 4,
      "facts": 5,
      "summaries": 1,
+     "fact_lines": 5,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
@@ -1034,6 +1215,8 @@
      "shown": 4,
      "facts": 5,
      "summaries": 0,
+     "fact_lines": 5,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -1041,6 +1224,8 @@
      "shown": 4,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1049,14 +1234,17 @@
    "id": "dccbc061",
    "type": "single-session-user",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 244,
     "no_reply": 6,
+    "deep_failed": 0,
     "facts": 281,
     "current": 265,
     "dated_events": 29,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 30,
@@ -1076,6 +1264,8 @@
      "shown": 1,
      "facts": 1,
      "summaries": 1,
+     "fact_lines": 1,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
@@ -1083,6 +1273,8 @@
      "shown": 1,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -1090,6 +1282,8 @@
      "shown": 1,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1098,14 +1292,17 @@
    "id": "28dc39ac",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 213,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 339,
     "current": 318,
     "dated_events": 23,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 25,
@@ -1121,17 +1318,21 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1435,
+     "tokens": 1483,
      "shown": 8,
      "facts": 11,
      "summaries": 1,
+     "fact_lines": 11,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
-     "tokens": 1435,
+     "tokens": 1483,
      "shown": 8,
      "facts": 11,
      "summaries": 0,
+     "fact_lines": 11,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1139,6 +1340,8 @@
      "shown": 8,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1147,14 +1350,17 @@
    "id": "e9327a54",
    "type": "single-session-assistant",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 259,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 246,
     "current": 227,
     "dated_events": 20,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 32,
@@ -1174,6 +1380,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 1,
+     "fact_lines": 2,
+     "summary_lines": 1,
      "answer_in_block": false
     },
     "facts": {
@@ -1181,6 +1389,8 @@
      "shown": 5,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1188,6 +1398,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1196,14 +1408,17 @@
    "id": "c7dc5443",
    "type": "knowledge-update",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 236,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 277,
     "current": 248,
     "dated_events": 20,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 38,
@@ -1223,6 +1438,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 1,
+     "fact_lines": 3,
+     "summary_lines": 1,
      "answer_in_block": null
     },
     "facts": {
@@ -1230,6 +1447,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1237,6 +1456,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1245,14 +1466,17 @@
    "id": "b9cfe692",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 240,
     "no_reply": 0,
+    "deep_failed": 0,
     "facts": 275,
     "current": 254,
     "dated_events": 11,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -1272,6 +1496,8 @@
      "shown": 4,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1279,6 +1505,8 @@
      "shown": 4,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1286,6 +1514,8 @@
      "shown": 4,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1294,14 +1524,17 @@
    "id": "gpt4_7f6b06db",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 272,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 260,
     "current": 248,
     "dated_events": 16,
     "refs_added": 1,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 42,
@@ -1321,6 +1554,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1328,6 +1563,8 @@
      "shown": 3,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1335,6 +1572,8 @@
      "shown": 3,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1343,14 +1582,17 @@
    "id": "37f165cf",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 282,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 280,
     "current": 252,
     "dated_events": 11,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 31,
@@ -1370,6 +1612,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "facts": {
@@ -1377,6 +1621,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1384,6 +1630,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1392,14 +1640,17 @@
    "id": "6ade9755",
    "type": "single-session-user",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 245,
     "no_reply": 3,
+    "deep_failed": 0,
     "facts": 238,
     "current": 221,
     "dated_events": 9,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 36,
@@ -1419,6 +1670,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "facts": {
@@ -1426,6 +1679,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -1433,6 +1688,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1441,14 +1698,17 @@
    "id": "0bc8ad93",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 235,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 253,
     "current": 238,
     "dated_events": 12,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 39,
@@ -1468,6 +1728,8 @@
      "shown": 0,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1475,6 +1737,8 @@
      "shown": 0,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1482,6 +1746,8 @@
      "shown": 0,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1490,14 +1756,17 @@
    "id": "0bc8ad92",
    "type": "temporal-reasoning",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 215,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 266,
     "current": 255,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 33,
@@ -1517,6 +1786,8 @@
      "shown": 6,
      "facts": 6,
      "summaries": 1,
+     "fact_lines": 6,
+     "summary_lines": 1,
      "answer_in_block": null
     },
     "facts": {
@@ -1524,6 +1795,8 @@
      "shown": 6,
      "facts": 6,
      "summaries": 0,
+     "fact_lines": 6,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1531,6 +1804,8 @@
      "shown": 6,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1539,14 +1814,17 @@
    "id": "gpt4_18c2b244",
    "type": "temporal-reasoning",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 244,
     "no_reply": 3,
+    "deep_failed": 0,
     "facts": 309,
     "current": 292,
     "dated_events": 11,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 41,
@@ -1566,6 +1844,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 2,
+     "fact_lines": 3,
+     "summary_lines": 2,
      "answer_in_block": false
     },
     "facts": {
@@ -1573,6 +1853,8 @@
      "shown": 5,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1580,6 +1862,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1588,14 +1872,17 @@
    "id": "caf9ead2",
    "type": "single-session-user",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 229,
     "no_reply": 3,
+    "deep_failed": 0,
     "facts": 237,
     "current": 214,
     "dated_events": 17,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 33,
@@ -1615,6 +1902,8 @@
      "shown": 2,
      "facts": 1,
      "summaries": 1,
+     "fact_lines": 1,
+     "summary_lines": 1,
      "answer_in_block": true
     },
     "facts": {
@@ -1622,6 +1911,8 @@
      "shown": 2,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -1629,6 +1920,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1637,14 +1930,17 @@
    "id": "88432d0a_abs",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 248,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 312,
     "current": 295,
     "dated_events": 26,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 29,
@@ -1664,6 +1960,8 @@
      "shown": 5,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "facts": {
@@ -1671,6 +1969,8 @@
      "shown": 5,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1678,6 +1978,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1686,14 +1988,17 @@
    "id": "36b9f61e",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 238,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 296,
     "current": 285,
     "dated_events": 10,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 26,
@@ -1713,6 +2018,8 @@
      "shown": 5,
      "facts": 4,
      "summaries": 2,
+     "fact_lines": 4,
+     "summary_lines": 2,
      "answer_in_block": null
     },
     "facts": {
@@ -1720,6 +2027,8 @@
      "shown": 5,
      "facts": 4,
      "summaries": 0,
+     "fact_lines": 4,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1727,6 +2036,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1734,15 +2045,18 @@
   {
    "id": "gpt4_1d80365e",
    "type": "temporal-reasoning",
-   "changed": true,
+   "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 254,
     "no_reply": 0,
+    "deep_failed": 0,
     "facts": 262,
     "current": 242,
     "dated_events": 18,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 36,
@@ -1758,10 +2072,12 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1432,
+     "tokens": 1482,
      "shown": 6,
      "facts": 12,
      "summaries": 2,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1769,6 +2085,8 @@
      "shown": 6,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1776,6 +2094,8 @@
      "shown": 6,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1784,14 +2104,17 @@
    "id": "gpt4_5501fe77",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 254,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 271,
     "current": 250,
     "dated_events": 16,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 31,
@@ -1811,6 +2134,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "facts": {
@@ -1818,6 +2143,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -1825,6 +2152,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }
@@ -1832,15 +2161,18 @@
   {
    "id": "gpt4_61e13b3c",
    "type": "temporal-reasoning",
-   "changed": true,
+   "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 230,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 248,
     "current": 231,
     "dated_events": 20,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 35,
@@ -1856,10 +2188,12 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1436,
+     "tokens": 1486,
      "shown": 7,
      "facts": 7,
      "summaries": 1,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1867,6 +2201,8 @@
      "shown": 7,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1874,6 +2210,8 @@
      "shown": 7,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1882,14 +2220,17 @@
    "id": "gpt4_af6db32f",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 234,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 247,
     "current": 233,
     "dated_events": 19,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 38,
@@ -1909,6 +2250,8 @@
      "shown": 4,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -1916,6 +2259,8 @@
      "shown": 4,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -1923,6 +2268,8 @@
      "shown": 4,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -1931,14 +2278,17 @@
    "id": "d905b33f",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 250,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 307,
     "current": 294,
     "dated_events": 23,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 34,
@@ -1958,6 +2308,8 @@
      "shown": 2,
      "facts": 1,
      "summaries": 1,
+     "fact_lines": 1,
+     "summary_lines": 1,
      "answer_in_block": null
     },
     "facts": {
@@ -1965,6 +2317,8 @@
      "shown": 2,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -1972,6 +2326,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -1980,14 +2336,17 @@
    "id": "2a1811e2",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 228,
     "no_reply": 8,
+    "deep_failed": 0,
     "facts": 254,
     "current": 228,
     "dated_events": 25,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2007,6 +2366,8 @@
      "shown": 7,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -2014,6 +2375,8 @@
      "shown": 7,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -2021,6 +2384,8 @@
      "shown": 7,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -2029,14 +2394,17 @@
    "id": "720133ac",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 222,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 288,
     "current": 274,
     "dated_events": 11,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 32,
@@ -2056,6 +2424,8 @@
      "shown": 5,
      "facts": 4,
      "summaries": 1,
+     "fact_lines": 4,
+     "summary_lines": 1,
      "answer_in_block": null
     },
     "facts": {
@@ -2063,6 +2433,8 @@
      "shown": 5,
      "facts": 4,
      "summaries": 0,
+     "fact_lines": 4,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -2070,6 +2442,8 @@
      "shown": 5,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -2078,14 +2452,17 @@
    "id": "87f22b4a",
    "type": "multi-session",
    "changed": true,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 231,
     "no_reply": 5,
+    "deep_failed": 0,
     "facts": 294,
     "current": 272,
     "dated_events": 22,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 34,
@@ -2105,6 +2482,8 @@
      "shown": 2,
      "facts": 2,
      "summaries": 2,
+     "fact_lines": 2,
+     "summary_lines": 2,
      "answer_in_block": null
     },
     "facts": {
@@ -2112,6 +2491,8 @@
      "shown": 2,
      "facts": 2,
      "summaries": 0,
+     "fact_lines": 2,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -2119,6 +2500,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -2127,14 +2510,17 @@
    "id": "00ca467f",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 241,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 301,
     "current": 290,
     "dated_events": 14,
     "refs_added": 1,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2154,6 +2540,8 @@
      "shown": 6,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "facts": {
@@ -2161,6 +2549,8 @@
      "shown": 6,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -2168,6 +2558,8 @@
      "shown": 6,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -2176,14 +2568,17 @@
    "id": "5a7937c8",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 206,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 224,
     "current": 211,
     "dated_events": 24,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2199,17 +2594,21 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1475,
+     "tokens": 1496,
      "shown": 8,
      "facts": 6,
      "summaries": 0,
+     "fact_lines": 6,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
-     "tokens": 1475,
+     "tokens": 1496,
      "shown": 8,
      "facts": 6,
      "summaries": 0,
+     "fact_lines": 6,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -2217,6 +2616,8 @@
      "shown": 8,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -2225,14 +2626,17 @@
    "id": "gpt4_a56e767c",
    "type": "multi-session",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 235,
     "no_reply": 0,
+    "deep_failed": 0,
     "facts": 234,
     "current": 222,
     "dated_events": 9,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 29,
@@ -2248,17 +2652,21 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1412,
+     "tokens": 1488,
      "shown": 9,
      "facts": 7,
      "summaries": 1,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
-     "tokens": 1412,
+     "tokens": 1488,
      "shown": 9,
      "facts": 7,
      "summaries": 0,
+     "fact_lines": 7,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -2266,6 +2674,8 @@
      "shown": 9,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -2274,14 +2684,17 @@
    "id": "gpt4_8279ba03",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 241,
     "no_reply": 7,
+    "deep_failed": 0,
     "facts": 330,
     "current": 308,
     "dated_events": 19,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 38,
@@ -2301,6 +2714,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -2308,6 +2723,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -2315,6 +2732,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -2323,14 +2742,17 @@
    "id": "6613b389",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 222,
     "no_reply": 4,
+    "deep_failed": 0,
     "facts": 302,
     "current": 283,
     "dated_events": 21,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2346,17 +2768,21 @@
    },
    "blocks": {
     "written": {
-     "tokens": 1466,
+     "tokens": 1491,
      "shown": 9,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "facts": {
-     "tokens": 1466,
+     "tokens": 1491,
      "shown": 9,
      "facts": 12,
      "summaries": 0,
+     "fact_lines": 12,
+     "summary_lines": 0,
      "answer_in_block": null
     },
     "episodes": {
@@ -2364,6 +2790,8 @@
      "shown": 9,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": null
     }
    }
@@ -2372,14 +2800,17 @@
    "id": "gpt4_2f56ae70",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 226,
     "no_reply": 1,
+    "deep_failed": 0,
     "facts": 261,
     "current": 240,
     "dated_events": 20,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2399,6 +2830,8 @@
      "shown": 1,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "facts": {
@@ -2406,6 +2839,8 @@
      "shown": 1,
      "facts": 1,
      "summaries": 0,
+     "fact_lines": 1,
+     "summary_lines": 0,
      "answer_in_block": false
     },
     "episodes": {
@@ -2413,6 +2848,8 @@
      "shown": 1,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": false
     }
    }
@@ -2421,14 +2858,17 @@
    "id": "gpt4_2d58bcd6",
    "type": "temporal-reasoning",
    "changed": false,
+   "fact_lines_changed": false,
    "facts_store": {
     "deep": 233,
     "no_reply": 2,
+    "deep_failed": 0,
     "facts": 288,
     "current": 277,
     "dated_events": 15,
     "refs_added": 0,
-    "refs_lost": 0
+    "refs_lost": 0,
+    "refs_cross_name": 0
    },
    "written_store": {
     "weekly": 0,
@@ -2448,6 +2888,8 @@
      "shown": 2,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "facts": {
@@ -2455,6 +2897,8 @@
      "shown": 2,
      "facts": 3,
      "summaries": 0,
+     "fact_lines": 3,
+     "summary_lines": 0,
      "answer_in_block": true
     },
     "episodes": {
@@ -2462,6 +2906,8 @@
      "shown": 2,
      "facts": 0,
      "summaries": 0,
+     "fact_lines": 0,
+     "summary_lines": 0,
      "answer_in_block": true
     }
    }

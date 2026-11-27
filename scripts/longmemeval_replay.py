@@ -85,9 +85,14 @@ def read_map(folder: Path, qid: str) -> dict[str, dict[str, Any]]:
 def renumber(entry: dict[str, Any], shown: list[dict[str, Any]], conn: Any, tenant_id: str,
              counts: dict[str, int]) -> dict[str, str]:
     """The kept reply's fact numbers in this code's numbering: each fact the
-    reply says it replaces, found by what it was (subject and value, the
-    same name first) among *shown*, else among the facts held now -- added
-    to *shown* as one more numbered fact."""
+    reply says it replaces, found by what it was among *shown*, else among
+    the facts held now (added to *shown* as one more numbered fact). What it
+    was is its subject, its value and a name of the same statement
+    (``fact_names.same_statement``: "has_occupation" is "current_role",
+    "visited Porto" is never "lives_in Porto"); a match under another name
+    is counted (``refs_cross_name``, the step 5 review's L1)."""
+    from kazma_core.memory.fact_names import same_statement
+
     data = parse_reply(entry.get("content"))
     was = {str(h.get("ref")): h for h in entry.get("held") or []}
     refs: dict[str, str] = {}
@@ -96,16 +101,19 @@ def renumber(entry: dict[str, Any], shown: list[dict[str, Any]], conn: Any, tena
         old = was.get(ref)
         if not old or ref in refs:
             continue
-        same = sorted((h for h in shown if h["subject"] == old["subject"] and h["object"] == old["object"]),
+        same = sorted((h for h in shown if h["subject"] == old["subject"] and h["object"] == old["object"]
+                       and same_statement(h["predicate"], old["predicate"])),
                       key=lambda h: h["predicate"] != old["predicate"])
         if same:
             refs[ref] = same[0]["ref"]
+            counts["refs_cross_name"] = counts.get("refs_cross_name", 0) + (same[0]["predicate"] != old["predicate"])
             continue
-        row = conn.execute(
+        rows = conn.execute(
             "SELECT id, subject, predicate, predicate_type, object, extraction_method FROM beliefs WHERE "
             "tenant_id = ? AND subject = ? AND object = ? AND valid_until IS NULL AND invalidated_at IS NULL "
-            "ORDER BY predicate != ?, valid_from DESC LIMIT 1",
-            (tenant_id, old["subject"], old["object"], old["predicate"])).fetchone()
+            "ORDER BY predicate != ?, valid_from DESC",
+            (tenant_id, old["subject"], old["object"], old["predicate"])).fetchall()
+        row = next((r for r in rows if same_statement(r[2], old["predicate"])), None)
         if row is None:
             continue
         new = f"f{len(shown) + 1}"
@@ -113,6 +121,7 @@ def renumber(entry: dict[str, Any], shown: list[dict[str, Any]], conn: Any, tena
                       "predicate_type": row[3] or "set", "object": row[4], "method": row[5]})
         refs[ref] = new
         counts["refs_added"] += 1
+        counts["refs_cross_name"] = counts.get("refs_cross_name", 0) + (row[2] != old["predicate"])
     return refs
 
 
@@ -186,7 +195,7 @@ def _init(data: Path, source: Path, folder: Path, model: str) -> None:
 
     embedder = pilot.PilotEmbedder(get_embedder(), data / "cache" / "kazma_vectors.npz",
                                    get_embedding_model_name(), folder / "vectors-extra.npz")
-    counts = {"refs_added": 0, "refs_lost": 0}
+    counts = {"refs_added": 0, "refs_lost": 0, "refs_cross_name": 0}
     _install(model, counts, embedder)
     _STATE.update(data=data, source=source, folder=folder, counts=counts, embedder=embedder,
                   written_with=written_with(source))
@@ -206,7 +215,7 @@ async def replay_question(item: dict[str, Any], rounds: dict[str, dict[str, Any]
             Path(str(path) + suffix).unlink(missing_ok=True)
     pilot._STORE.set((str(db), str(ops)))
     rows = await asyncio.to_thread(pilot._seed, item, db, ops)
-    counts.update(refs_added=0, refs_lost=0)
+    counts.update(refs_added=0, refs_lost=0, refs_cross_name=0)
     stats = {"rounds": len(rows), "quick": 0, "deep": 0, "deep_failed": 0, "no_reply": 0}
     started = time.monotonic()
     for row in rows:
