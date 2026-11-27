@@ -268,8 +268,9 @@ def test_a_caller_that_names_sqlite_gets_its_file_whatever_the_address(monkeypat
 def test_a_cancel_in_the_pools_check_stays_a_cancel(monkeypatch: pytest.MonkeyPatch, kept: bool) -> None:
     """L1: psycopg_pool counts a cancel in its check as a bad connection, takes
     another and returns: a cancelled turn went on."""
+    # CI's light Tests job has no psycopg_pool: skipped there, collected everywhere.
+    AsyncConnectionPool = pytest.importorskip("psycopg_pool").AsyncConnectionPool  # noqa: N806
     from kazma_core import checkpoints_pg
-    from psycopg_pool import AsyncConnectionPool
 
     async def _cancelled(conn: Any) -> None:
         raise asyncio.CancelledError
@@ -294,8 +295,8 @@ def test_a_cancel_in_the_pools_check_stays_a_cancel(monkeypatch: pytest.MonkeyPa
 
 def test_a_closed_checkpointer_pool_makes_no_space_half() -> None:
     """L3: armed, a checkout after close() made a new half."""
+    PoolClosed = pytest.importorskip("psycopg_pool").PoolClosed  # noqa: N806 - see the test above
     from kazma_core import checkpoints_pg
-    from psycopg_pool import PoolClosed
 
     pool = checkpoints_pg._reported_pool_class()(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1,
                                                     open=False)
