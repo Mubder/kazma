@@ -952,17 +952,28 @@ class Owners:
     libraries: dict[str, str] = field(default_factory=dict)
 
 
+def _json_of(value: Any) -> dict[str, Any]:
+    """A JSON column's object: text on SQLite, already decoded from
+    ``jsonb`` on Postgres."""
+    if isinstance(value, dict):
+        return value
+    held = json.loads(_text_of(value) or "{}")
+    return held if isinstance(held, dict) else {}
+
+
 def _row_space(table: str, row: dict[str, Any], owners: Owners) -> tuple[str, str]:
     """``(how, space)``: how the row is told its space, and the space ("" for
     none). ``how`` is ``""`` when the row cannot be told one."""
     for column in _SPACE_COLUMNS:
         if column in row:
             return column, _text_of(row[column]).strip()
-    if "metadata" in row and table == "swarm_tasks":
-        meta = json.loads(_text_of(row["metadata"]) or "{}")
+    # A table keeps its name on SQLite and takes Kazma's prefix on Postgres
+    # (``kazma_swarm_tasks``).
+    if "metadata" in row and table.endswith("swarm_tasks"):
+        meta = _json_of(row["metadata"])
         return "metadata.tenant_id", str(meta.get("tenant_id") or "").strip()
-    if "payload_json" in row and table == "memory_task_queue":
-        payload = json.loads(_text_of(row["payload_json"]) or "{}")
+    if "payload_json" in row and table.endswith("memory_task_queue"):
+        payload = _json_of(row["payload_json"])
         return "payload.tenant_id", str(payload.get("tenant_id") or "").strip()
     if "thread_id" in row:
         return "thread record", owners.threads.get(_text_of(row["thread_id"]), "")
@@ -1062,20 +1073,16 @@ def _scan_sqlite(check: Check, ledger: Ledger, data: Path) -> None:
                     seen["tables"][table] = dict(told)
 
 
-def _scan_postgres(check: Check, ledger: Ledger, url: str) -> None:
-    """Kazma's own tables on Postgres, read whole as the install's login."""
+def _scan_postgres(check: Check, ledger: Ledger, url: str, data: Path) -> None:
+    """Kazma's own tables on Postgres, read whole as the install's login. A
+    thread's record and a Knowledge library are kept in the data folder's
+    SQLite files on either backend: rows are told their space from there."""
     import psycopg
     from kazma_core.db.pg_backup import KAZMA_PG_TABLES
     from psycopg.rows import dict_row
 
     with psycopg.connect(url, row_factory=dict_row, autocommit=True) as conn:
-        owners = Owners()
-        with contextlib.suppress(psycopg.Error):
-            owners.threads = {str(r["thread_id"]): str(r["space_id"])
-                              for r in conn.execute("SELECT thread_id, space_id FROM thread_scopes")}
-        with contextlib.suppress(psycopg.Error):
-            owners.libraries = {str(r["id"]): str(r["tenant_id"] or "")
-                                for r in conn.execute("SELECT id, tenant_id FROM knowledge_libraries")}
+        owners = _owners(data)
         present = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")}
         for table in sorted(set(KAZMA_PG_TABLES) & present):
@@ -1279,7 +1286,7 @@ def _check_all(stage: str, world: World, ledger: Ledger, covers: range, database
     _scan_sqlite(check, ledger, data)
     _scan_folders(check, ledger, data)
     if database_url:
-        _scan_postgres(check, ledger, database_url)
+        _scan_postgres(check, ledger, database_url, data)
     _check_reads(check, world, ledger)
     _check_unbound(check, world, ledger)
     _check_kept(check, ledger, covers)

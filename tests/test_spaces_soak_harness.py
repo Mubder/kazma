@@ -33,6 +33,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import uuid
 from collections import Counter
 from contextlib import closing
 from pathlib import Path
@@ -412,14 +413,55 @@ def test_full_text_tables_are_left_to_the_table_they_index():
 # ── Postgres ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.postgres
-def test_a_short_soak_on_postgres_is_healthy(tmp_path):
-    """The same soak with Kazma's stores on a throwaway Postgres, its tables
-    read whole by the check."""
-    if not os.environ.get("KAZMA_DATABASE_URL") or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
+def _kazma_rows(url: str) -> dict[str, int]:
+    """How many rows each of Kazma's tables holds in the database at *url*."""
+    from kazma_core.db.pg_backup import KAZMA_PG_TABLES
+
+    psycopg = pytest.importorskip("psycopg")
+    with psycopg.connect(url, autocommit=True) as conn:
+        present = {r[0] for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")}
+        return {t: conn.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]  # noqa: S608 -- Kazma's own names
+                for t in sorted(set(KAZMA_PG_TABLES) & present)}
+
+
+@pytest.fixture
+def soak_database(monkeypatch):
+    """A database of the soak's own on the test server, made for this run and
+    dropped after it, whatever happened: the soak makes people, spaces and
+    rows, and the server's shared database belongs to every other Postgres
+    test (the swarm refused them all once a soak left its people there)."""
+    psycopg = pytest.importorskip("psycopg")
+    base = os.environ.get("KAZMA_DATABASE_URL") or ""
+    if not base or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
         pytest.skip("needs a throwaway Postgres (scripts/postgres_suite.py)")
+    from urllib.parse import urlsplit, urlunsplit
+
+    name = f"kazma_spaces_soak_{uuid.uuid4().hex[:10]}"
+    url = urlunsplit(urlsplit(base)._replace(path=f"/{name}"))
+    before = _kazma_rows(base)
+    with psycopg.connect(base, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    try:
+        monkeypatch.setenv("KAZMA_SPACES_SOAK_DATABASE_URL", url)
+        yield {"url": url, "base": base, "before": before}
+    finally:
+        with psycopg.connect(base, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.mark.postgres
+def test_a_short_soak_on_postgres_is_healthy(tmp_path, soak_database):
+    """The same soak with Kazma's stores on Postgres, in a database of its
+    own, its tables read whole by the check; the shared database is left as
+    it was found."""
     code, report = _soak(tmp_path / "work", tmp_path / "report.json", "--cycles", "1",
-                         "--database-url-from", "KAZMA_DATABASE_URL")
+                         "--database-url-from", "KAZMA_SPACES_SOAK_DATABASE_URL")
     assert code == 0 and report["healthy"], report["violations"][:10]
     assert report["database"] == "postgres"
-    assert any(name.startswith("postgres:") for name in report["last_check"]["stores"]), report["last_check"]
+    stores = report["last_check"]["stores"]
+    assert stores.get("postgres:kazma_swarm_tasks", {}).get("marked_rows"), sorted(stores)
+    assert stores.get("postgres:kazma_chat_sessions", {}).get("marked_rows"), sorted(stores)
+    # The soak's rows are in its own database, none in the shared one.
+    assert _kazma_rows(soak_database["base"]) == soak_database["before"]
+    assert _kazma_rows(soak_database["url"])["kazma_swarm_tasks"]
