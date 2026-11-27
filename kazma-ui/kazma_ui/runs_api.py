@@ -88,12 +88,14 @@ async def _admin_denied(request: Request) -> JSONResponse | None:
 
 def _run_view(run: Any, lang: str) -> dict[str, Any]:
     from kazma_core.runs.kinds import KINDS
-    from kazma_core.runs.text import attention, state_word
+    from kazma_core.runs.text import attention, ended_word, state_word
 
     data = run.to_dict()
     spec = KINDS.get(run.kind)
     data["kind_label"] = (spec.label_ar if lang == "ar" else spec.label) if spec else run.kind
     data["state_label"] = state_word(run, lang)
+    # Why it ended from outside ("The chat was deleted"), in the page's words.
+    data["ended_label"] = ended_word(run.ended_reason, lang)
     data["attention"] = attention(run)
     return data
 

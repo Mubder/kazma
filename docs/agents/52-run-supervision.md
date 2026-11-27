@@ -56,6 +56,35 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   "found no URLs"), else the interruption, the stage, the page counts, else
   nothing; it gave "0 failed, 0 uncertain" for a search that found nothing
   (2026-11-05, `tests/test_failed_run_says_why.py`).
+- **A chat that goes away ends its runs** (`kazma_ui/chat_runs_end.py`,
+  2026-11-27). Live, a chat deleted while its turn waited on a `python_exec`
+  card left `chat_turn:<thread>` open in `reply_sink` with nothing running it,
+  and the supervisor paged "Chat turn is stuck: nothing is running it" (an
+  incident and a red Ops alert). Every way a chat goes away -- deleted (chat
+  page, the Dashboard's thread delete), archived, cleared (`/reset` on the web
+  and in the chat apps, clear-all, clearing the waiting approvals), moved to
+  another space, its space erased, the chat store's limit -- calls
+  `end_chat_runs` (from the loop, BEFORE the state goes) or `chat_went_away`
+  (the store's own removals, from a thread): a running turn is cancelled and
+  waited for with a bound (`cancel_and_wait`, §69; from a thread the cancel is
+  handed to the turn's loop), its gates are settled `not_needed` (the card
+  stamped settled in a chat that stays, its commitments dropped, `/long`
+  paused), the reply turn closed, a cut turn forgotten, and the run recorded
+  ended (`runs_chat_turn.record_ended`): listed `cancelled` with
+  `Run.ended_reason`, worded by the catalog's `runs.ended.<reason>` in EN and
+  AR (`text.ended_word`), never an incident. A thread another showing chat is
+  on goes on. `reply_sink.open_reply_turn` opens nothing on a thread whose
+  chat was deleted (a late closer named no turn and opened one). Gate:
+  `tests/test_chat_gone_ends_runs.py` -- the incident through the real route,
+  store, registry and supervisor (the old delete as the control, which pages),
+  each other way, and a class gate that finds every chat-store method that
+  deletes or archives a chat and every call that removes a chat's row
+  (`delete`, `delete_if`, `set_archived`) or its thread's state
+  (`adelete_thread`, `adelete_all_threads`) from the source and fails unless
+  it ends the runs first or is declared with why (planted removals, an ender
+  after the state, a store method that ends nothing as controls).
+  `scripts/deploy_live.py`'s test turn denies a card it raises through
+  `/api/approve` before it deletes its chat.
 - **Deciding** (`decide.py`): claim (the first decision wins; a second is
   told who decided what, where), then `registry.perform` asks the run as it
   is NOW and refuses an action it no longer offers, then the kind's own

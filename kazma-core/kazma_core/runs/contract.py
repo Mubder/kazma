@@ -105,6 +105,11 @@ class Run:
     link: str = ""
     #: A short failure reason from the kind's store (never a stack trace).
     detail: str = ""
+    #: Why the run ended when something other than its own work ended it, as
+    #: a code the catalog words (``runs.ended.<code>``, ``text.ended_word``):
+    #: a chat turn whose chat was deleted is ``chat_deleted``. Empty: it
+    #: ended (or runs) on its own.
+    ended_reason: str = ""
     #: Where the run started: {"platform", "target", "thread_id"} or {}.
     origin: dict[str, str] = field(default_factory=dict)
     #: Set when something else already tells the owner about THIS run (an

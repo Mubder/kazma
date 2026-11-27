@@ -343,3 +343,110 @@ def test_control_an_update_whose_own_code_failed_is_reverted(repos, stub, record
 def test_the_waits_exit_is_the_guards():
     text = (ROOT / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8")
     assert f"RELOAD_WAITS_EXIT = {deploy_live.RELOAD_WAITS_EXIT}\n" in text
+
+
+# ── a test turn that asks for an approval (2026-11-27) ───────────────────
+
+
+class _AskingStub(BaseHTTPRequestHandler):
+    """The chat stream raises approval cards and goes on only once each is
+    answered through ``/api/approve`` (as the live stream does); with no
+    answer within a few seconds it ends without a reply, as a stream cut at
+    the card would."""
+
+    cards = 1
+    answer = "OK"
+    calls: list[str] = []
+    bodies: list[dict] = []
+    answered: threading.Event
+
+    def _body(self) -> dict:
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        return json.loads(raw or b"{}")
+
+    def _send(self, status, body):
+        raw = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_PUT(self):
+        self._body()
+        self.calls.append(f"PUT {self.path}")
+        self._send(200, {"ok": True})
+
+    def do_DELETE(self):
+        self._body()
+        self.calls.append(f"DELETE {self.path}")
+        self._send(200, {"status": "ok"})
+
+    def do_POST(self):
+        body = self._body()
+        self.calls.append(f"POST {self.path}")
+        if self.path.startswith("/api/approve/"):
+            self.bodies.append(body)
+            self.answered.set()
+            return self._send(200, {"ok": True, "approved": False, "running": True})
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        for n in range(self.cards):
+            card = {"thread_id": "t-check", "interrupt_id": f"intr-{n}", "tool": "python_exec"}
+            self.wfile.write(f"event: approval_required\ndata: {json.dumps(card)}\n\n".encode())
+            self.wfile.flush()
+            if not self.answered.wait(5):
+                return  # nobody answered: the stream ends at the card
+            self.answered.clear()
+        self.wfile.write(f"event: done\ndata: {json.dumps({'content': self.answer})}\n\n".encode())
+        self.wfile.flush()
+
+    def log_message(self, *args):
+        return
+
+
+@pytest.fixture
+def asking():
+    from http.server import ThreadingHTTPServer
+
+    handler = type("Asking", (_AskingStub,), {"calls": [], "bodies": [], "cards": 1,
+                                             "answered": threading.Event()})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield handler, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_a_test_turn_that_asks_for_an_approval_is_denied_then_its_chat_deleted(asking, tmp_path):
+    """Never a chat deleted under a waiting card: the card is denied through
+    the approval route a person's Deny uses, the answer is read on, and only
+    then is the chat deleted."""
+    handler, url = asking
+    problem = deploy_live.test_turn(deploy_live.Server(tmp_path, base=url))
+    assert problem == ""
+    posts = [c for c in handler.calls if c.startswith(("POST", "DELETE"))]
+    assert posts[0] == "POST /api/chat/stream"
+    assert posts[1] == "POST /api/approve/t-check"
+    assert posts[2].startswith("DELETE /api/chat/sessions/deploy-check-")
+    assert handler.bodies == [{"action": "deny", "interrupt_id": "intr-0",
+                               "reason": "deploy check: a test turn runs no tool"}]
+
+
+def test_a_test_turn_that_keeps_asking_fails_and_is_still_ended(asking, tmp_path):
+    handler, url = asking
+    handler.cards = deploy_live.MAX_DENIALS + 1
+    problem = deploy_live.test_turn(deploy_live.Server(tmp_path, base=url))
+    assert problem == "the test turn kept asking for approvals"
+    assert len(handler.bodies) == deploy_live.MAX_DENIALS
+    assert handler.calls[-1].startswith("DELETE /api/chat/sessions/deploy-check-")
+
+
+def test_control_without_a_deny_the_turn_is_left_at_its_card(asking, tmp_path, monkeypatch):
+    """The check before: it read only ``done``, so the card was never
+    answered and the chat was deleted under it."""
+    handler, url = asking
+    monkeypatch.setattr(deploy_live, "deny_approval", lambda server, payload: "")
+    problem = deploy_live.test_turn(deploy_live.Server(tmp_path, base=url))
+    assert problem == "the test turn never finished"
+    assert handler.bodies == [] and handler.calls[-1].startswith("DELETE /api/chat/sessions/")

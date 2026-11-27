@@ -865,6 +865,12 @@ def create_sse_chat_router(
         # ── Intercept RESET command ────────────────────────────────
         if raw_msg.lower() == "/reset":
             live_graph = _get_graph()
+            # What the chat had running or waiting ends before its state goes
+            # (chat_runs_end): a turn waiting on an approval would otherwise
+            # stay open with nothing running it.
+            from kazma_ui.chat_runs_end import end_chat_runs
+
+            await end_chat_runs(thread_id, reason="chat_cleared", title=str(getattr(session, "title", "") or ""))
             if live_graph and hasattr(live_graph, "checkpointer") and live_graph.checkpointer:
                 try:
                     # The thread's checkpoint-mutation lock (TT-04).
@@ -1925,14 +1931,24 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/archive")
-    def archive_session(session_id: str) -> Any:
-        """Archive a chat session (hide from sidebar without deleting)."""
+    async def archive_session(session_id: str) -> Any:
+        """Archive a chat session (hide from sidebar without deleting).
+
+        What the chat had running or waiting ends (``chat_runs_end``): an
+        archived chat is one the person put away, and its turn stuck open
+        paged an incident. A thread another chat shows goes on there."""
         try:
-            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+            if (refused := await asyncio.to_thread(_whole_chat_refusal_sync, session_id)) is not None:
                 return refused
-            session = _get_store().set_archived(session_id, True)
+            session = await asyncio.to_thread(_get_store().set_archived, session_id, True)
             if session is None:
                 return {"status": "error", "error": "Session not found"}
+            thread_id = str(session.thread_id or session_id)
+            if not await asyncio.to_thread(_get_store().another_chat_on, thread_id, session_id, showing=True):
+                from kazma_ui.chat_runs_end import end_chat_runs
+
+                await end_chat_runs(thread_id, reason="chat_archived", session_id=session_id,
+                                    title=str(session.title or ""), graph=_get_graph())
             return {"status": "ok", "archived": True}
         except ChatDeleted:
             return _chat_deleted_answer()

@@ -15,7 +15,7 @@ from typing import Any
 from kazma_core.runs.contract import ACTIVE_STATES, Run, RunState, Verdict
 from kazma_core.runs.kinds import KINDS
 
-__all__ = ["ago", "attention", "describe_run", "format_listing", "state_word"]
+__all__ = ["ago", "attention", "describe_run", "ended_word", "format_listing", "state_word"]
 
 _STATE: dict[str, tuple[str, str]] = {
     RunState.QUEUED: ("Queued", "في الانتظار"),
@@ -85,6 +85,19 @@ def action_word(action: str, lang: str = "en") -> str:
     return _w(_ACTION.get(action, (action, action)), lang)
 
 
+def ended_word(reason: str, lang: str = "en") -> str:
+    """Why a run ended (its ``ended_reason``), in *lang*, from the UI's
+    catalog (``runs.ended.<reason>``); the code itself where the catalog is
+    not installed (a code a page can word)."""
+    if not reason:
+        return ""
+    try:
+        from kazma_ui.i18n import t
+    except ImportError:
+        return reason
+    return t(f"runs.ended.{reason}", lang)
+
+
 def attention(run: Run) -> bool:
     """Whether the run needs the owner: stalled, stuck, failed or unknown,
     and not already decided about (a retried or dismissed failure stays
@@ -102,6 +115,9 @@ def _line(run: Run, now: float, lang: str) -> str:
     elif run.state == RunState.FAILED and run.detail:
         # A failed run's reason, never its last step ("task_completed").
         parts.append(run.detail)
+    elif run.ended_reason and run.state not in ACTIVE_STATES:
+        # What ended it from outside: "The chat was deleted".
+        parts.append(ended_word(run.ended_reason, lang))
     elif run.progress_note and run.state in ACTIVE_STATES:
         parts.append(run.progress_note)
     if run.handled:

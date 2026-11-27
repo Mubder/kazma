@@ -84,6 +84,13 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
         "reads the thread from the caller's tenant-scoped session; an unknown "
         "session yields no thread",
     ),
+    ("POST", "/api/chat/sessions/{session_id}/archive", SSE): (
+        "session",
+        "archives the session the caller's tenant-scoped store holds, then ends "
+        "the runs of that session's own thread (chat_runs_end); an unknown "
+        "session archives and ends nothing",
+    ),
+    ("POST", "/api/sessions/clear-all", DASH): ("admin", ""),
     ("DELETE", "/api/chat/sessions/{session_id}", SSE): (
         "session",
         "looks the session up in the caller's tenant and deletes its thread's "

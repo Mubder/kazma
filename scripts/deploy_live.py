@@ -14,7 +14,8 @@ Then it checks, in order:
 1. the server answers ``/health/ready`` and ``/health/deep`` with the new
    commit (``/health/live``'s build);
 2. one test turn in a private chat kept out of memory ("Reply with the word
-   OK"), answered OK, then the chat deleted;
+   OK"), answered OK, then the chat deleted; an approval card it raises is
+   denied through the approval route first, never left waiting;
 3. no ERROR or CRITICAL line in the server's log since the new boot.
 
 When a check fails it undoes the deploy the only way the live install allows:
@@ -286,13 +287,41 @@ def check_health(server: Server) -> str:
     return ""
 
 
+#: Approval cards one test turn may raise; each is denied. More is a turn
+#: that keeps asking, and the check fails.
+MAX_DENIALS = 3
+
+
+def deny_approval(server: Server, payload: dict) -> str:
+    """Deny the card the test turn raised, through the approval route a
+    person's Deny uses (the card's own thread and interrupt id). Returns the
+    problem or ""."""
+    thread_id = str(payload.get("thread_id") or "")
+    if not thread_id:
+        return "the test turn asked for an approval that names no chat"
+    status, data = server.json("POST", f"/api/approve/{thread_id}",
+                               {"action": "deny", "interrupt_id": str(payload.get("interrupt_id") or ""),
+                                "reason": "deploy check: a test turn runs no tool"})
+    if status != 200:
+        reason = (data.get("reason") or data.get("error") or "") if isinstance(data, dict) else ""
+        return f"the test turn's approval could not be denied (HTTP {status}{': ' + str(reason) if reason else ''})"
+    return ""
+
+
 def test_turn(server: Server) -> str:
-    """One turn in a private chat kept out of memory; the chat deleted after."""
+    """One turn in a private chat kept out of memory; the chat deleted after.
+
+    A turn that stops for an approval is never left waiting: the card is
+    denied through the approval route, as a person's Deny is, the turn's
+    answer is read on, and only then is the chat deleted. Live 2026-11-27 the
+    check's model asked for ``python_exec``, the stream waited at the card,
+    the chat was deleted under it, and the run supervisor paged the turn
+    "stuck: nothing is running it"."""
     session = f"deploy-check-{uuid.uuid4().hex[:12]}"
     status, _ = server.json("PUT", f"/api/memory/v2/chats/{session}/memory", {"remember": False})
     if status not in (200, 404):
         return f"the test chat could not be kept out of memory (HTTP {status})"
-    answer, done = "", False
+    answer, done, denied, problem = "", False, 0, ""
     try:
         with server.request("POST", "/api/chat/stream",
                             {"message": "Reply with the word OK and nothing else.", "session_id": session},
@@ -302,19 +331,30 @@ def test_turn(server: Server) -> str:
                 line = raw.decode("utf-8", "replace").rstrip("\r\n")
                 if line.startswith("event:"):
                     event = line[6:].strip()
-                elif line.startswith("data:") and event in ("done", "turn_complete"):
-                    try:
-                        payload = json.loads(line[5:].strip() or "{}")
-                    except ValueError:
-                        payload = {}
-                    answer = str(payload.get("content") or answer)
-                    done = True
-                    if event == "done":
+                    continue
+                if not line.startswith("data:") or event not in ("done", "turn_complete", "approval_required"):
+                    continue
+                try:
+                    payload = json.loads(line[5:].strip() or "{}")
+                except ValueError:
+                    payload = {}
+                if event == "approval_required":
+                    denied += 1
+                    problem = ("the test turn kept asking for approvals" if denied > MAX_DENIALS
+                               else deny_approval(server, payload if isinstance(payload, dict) else {}))
+                    if problem:
                         break
+                    continue  # the turn goes on in this stream after the Deny
+                answer = str(payload.get("content") or answer) if isinstance(payload, dict) else answer
+                done = True
+                if event == "done":
+                    break
     except (urllib.error.URLError, OSError) as exc:
         return f"the test turn failed: {type(exc).__name__}"
     finally:
         server.json("DELETE", f"/api/chat/sessions/{session}", {})
+    if problem:
+        return problem
     if not done:
         return "the test turn never finished"
     if "OK" not in answer.upper():

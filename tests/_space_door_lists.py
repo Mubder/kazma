@@ -179,6 +179,9 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
         "SessionManager._load_one_from_primary", "SessionManager._upsert_db", "SessionManager.another_chat_on",
         "SessionManager.clear", "SessionManager.get_by_thread_id", "SessionManager.space_erased",
         "SessionManager.thread_is_exclusive",
+        # The threads of an erased space's chats, read before they go: what
+        # they ran ends with them (chat_runs_end). Under space_erased's door.
+        "SessionManager._threads_of_space",
     ),
 }
 

@@ -20,8 +20,11 @@ live crash-looping (2026-11-13).** **`scripts/deploy_live.py` does all of the ab
 plan C2): pull (refused over modified tracked files), the update and image
 build when their files changed, reload when idle, then the new commit on
 `/health/live`, ready and deep health, one test turn ("Reply with the word
-OK", kept out of memory, the chat deleted) and no ERROR/CRITICAL line since
-the boot. A failed check reverts what `origin/main` gained (the live pull is
+OK", kept out of memory, the chat deleted; a card it raises is denied through
+`/api/approve` first and its answer read on, so the check never leaves a turn
+waiting -- live 2026-11-27 it deleted a chat under a `python_exec` card and
+the run supervisor paged the turn stuck, `deny_approval`) and no
+ERROR/CRITICAL line since the boot. A failed check reverts what `origin/main` gained (the live pull is
 a merge, so never the live HEAD range) on `main` here, pushes, pulls the
 revert into the live install, reloads and pages the owner naming the check
 (`--no-revert` pages only). A reload that exits 4 (`RELOAD_WAITS_EXIT`: the

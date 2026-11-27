@@ -33,6 +33,15 @@ monitor's). Work that waits for you, such as an approval card or a post held
 for review, is never stalled. A verdict never cancels or fails anything by
 itself.
 
+## When a chat goes away
+
+Deleting, archiving or clearing a chat (`/reset`, the Dashboard's clear-all,
+clearing waiting approvals), moving it to another space or erasing its space
+ends what the chat had running or waiting: a running turn is stopped, and an
+approval card it waited on is closed as no longer needed. The turn is listed
+as cancelled with why, such as "The chat was deleted", under `/runs all` for a
+day, and no incident is opened for it.
+
 ## Where you are told
 
 - **In the chat the work started from**, as a card with one button per

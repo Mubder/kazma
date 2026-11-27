@@ -39,6 +39,7 @@ __all__ = [
     "gate_not_pending",
     "gate_resuming",
     "settle_thread_gates",
+    "stamp_waiting_card",
     "registry_on",
     "gate_row_to_pending_item",
     "pending_items_from_registry",
@@ -326,6 +327,41 @@ async def gate_resuming(interrupt_id: str, *, strict: bool = False) -> None:
             raise
 
 
+def stamp_waiting_card(thread_id: str, session_id: str, turn_id: str, state: str, *,
+                       without_card: bool = False) -> bool:
+    """The chat's waiting approval card stamped *state* in its transcript
+    (turn *turn_id* of chat *session_id*), so a reload never shows it live
+    again: ``/abort`` stamps it ``denied``, a chat that goes away and stays
+    (archived) ``settled`` (``chat_runs_end``). With *without_card* (the
+    abort's way since 2026-09-02) a turn with no card on record gets the
+    stamp too. Blocking (the chat store); False when nothing was written."""
+    if not (thread_id and session_id and turn_id):
+        return False
+    from kazma_ui.hitl_status import persisted_hitl_for_thread
+    from kazma_ui.turn_runtime import persist_reply
+
+    part = persisted_hitl_for_thread(thread_id) or {}
+    if not isinstance(part, dict) or not (part or without_card):
+        return False
+    raw_payload = part.get("payload")
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    iid = str(part.get("interrupt_id") or payload.get("interrupt_id") or "")
+    return persist_reply(
+        session_id,
+        turn_id,
+        "",
+        interrupted=False,
+        thread_id=thread_id,
+        parts=[{
+            "type": "hitl",
+            "tool": str(part.get("tool") or payload.get("tool") or ""),
+            "state": state,
+            "interrupt_id": iid,
+            "payload": payload,
+        }],
+    )
+
+
 async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
     """Release a paused HITL turn after ``/abort``. Never raises.
 
@@ -364,38 +400,11 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
             logger.warning("[GateBridge] abort settle failed", exc_info=True)
     if session_id:
         try:
-            from kazma_ui.hitl_status import persisted_hitl_for_thread
             from kazma_ui.reply_sink import resolve_reply_turn
-            from kazma_ui.turn_runtime import persist_reply
 
-            part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id) or {}
-            raw_payload = part.get("payload") if isinstance(part, dict) else None
-            payload = raw_payload if isinstance(raw_payload, dict) else {}
-            iid = str(
-                (part.get("interrupt_id") if isinstance(part, dict) else "")
-                or payload.get("interrupt_id")
-                or ""
-            )
             turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
-            await asyncio.to_thread(
-                persist_reply,
-                session_id,
-                turn_id,
-                "",
-                interrupted=False,
-                thread_id=thread_id,
-                parts=[{
-                    "type": "hitl",
-                    "tool": str(
-                        (part.get("tool") if isinstance(part, dict) else "")
-                        or payload.get("tool")
-                        or ""
-                    ),
-                    "state": "denied",
-                    "interrupt_id": iid,
-                    "payload": payload,
-                }],
-            )
+            await asyncio.to_thread(stamp_waiting_card, thread_id, session_id, turn_id, "denied",
+                                    without_card=True)
         except Exception:
             logger.debug("[GateBridge] abort HITL stamp skipped", exc_info=True)
     try:

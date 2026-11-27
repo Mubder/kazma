@@ -1443,8 +1443,13 @@ def register_misc_routes(self: Any) -> None:
                 # (Spaces S2-05): clearing denies them.
                 if not await asyncio.to_thread(clearable_thread, thread_id, item):
                     continue
+                from kazma_ui.chat_runs_end import end_chat_runs
                 from kazma_ui.thread_locks import thread_mutation
 
+                # Its turn ends first (chat_runs_end): its gates settled
+                # "cleared", its reply turn closed, the run recorded as ended
+                # -- it stayed open with nothing running it and was paged.
+                await end_chat_runs(thread_id, reason="approvals_cleared", gate_outcome="cleared")
                 # The thread's checkpoint-mutation lock (Time Travel TT-04).
                 async with thread_mutation(thread_id):
                     if hasattr(checkpointer, "adelete_thread"):
@@ -1456,17 +1461,6 @@ def register_misc_routes(self: Any) -> None:
                     else:
                         continue
                 cleared += 1
-                # Keep the gate registry honest: the pause is gone.
-                try:
-                    from kazma_core.safety.hitl_gates import (
-                        live_gates_async,
-                        settle_gate_async,
-                    )
-
-                    for row in await live_gates_async(thread_id):
-                        await settle_gate_async(row.gate_id, "cleared")
-                except Exception:
-                    logger.debug("[HITL] gate clear skipped", exc_info=True)
             return _JSONResponse({"status": "ok", "cleared": cleared})
         except Exception:
             logger.exception("[HITL] Failed to clear pending approvals")

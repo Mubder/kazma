@@ -625,6 +625,12 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
                             headers={"Retry-After": "5"} if outage else None)
 
     try:
+        # What the thread's chat had running or waiting ends before its
+        # state goes (chat_runs_end: a turn waiting on an approval stayed
+        # open with nothing running it, and was paged stuck).
+        from kazma_ui.chat_runs_end import end_chat_runs
+
+        await end_chat_runs(thread_id, reason="chat_deleted")
         # Postgres checkpointers reject the SQLite '?' placeholder. The
         # saver's own delete knows the dialect and the related tables.
         if hasattr(_checkpoint_manager, "adelete_thread"):
@@ -777,6 +783,14 @@ async def clear_all_sessions(request: Request) -> JSONResponse:
         return refused
 
     try:
+        # What every chat cleared had running or waiting ends first
+        # (chat_runs_end); once Spaces is enforced, the bound space's only.
+        from kazma_core.spaces import threads as _threads
+
+        from kazma_ui.chat_runs_end import end_every_chat_run
+
+        await end_every_chat_run(reason="chat_cleared",
+                                 mine=lambda thread_id: _threads.thread_refusal(thread_id) is None)
         if hasattr(_checkpoint_manager, "adelete_all_threads"):
             count = await _checkpoint_manager.adelete_all_threads()
         else:
