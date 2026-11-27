@@ -26,7 +26,9 @@ the whole size's time (linear grows four-fold, quadratic sixteen), or more
 than :data:`CLEARLY_SLOW_S` at the quarter or the whole size. The first slow
 input names the pattern. A quadratic pattern with a small constant
 (``<[^>]+>``: 3 ms at 3,000 characters, 0.5 s at 40,000) is caught by the
-growth, not by a time at one size.
+growth, not by a time at one size. A pattern with no unbounded repeat is
+linear by its shape (:func:`every_repeat_bounded`): only its time at each
+size is read, since a busy runner's timing of its growth decides nothing.
 
 The patterns run in a child process, one at a time; a pattern that does not
 finish within :data:`PATTERN_TIMEOUT_S` is named (the child is stopped and
@@ -461,12 +463,53 @@ def _run(compiled: re.Pattern[str], op: str, text: str) -> float:
 CONFIRMATIONS = 6
 
 
+def every_repeat_bounded(pattern: str, flags: int) -> bool:
+    """True when no repeat in *pattern* is unbounded (``*``, ``+``, ``{n,}``).
+
+    Then a match from any start reads at most a fixed number of characters, so
+    the work per start is bounded and the whole scan is linear in its input,
+    whatever one timing says. ``«[^»\\n]{0,600}»`` (the quoted spans a lesson
+    leaves out) takes 1.4 µs a character here and four times the input took
+    4.1-4.4 times as long; a busy CI runner read 8.9 times, the fastest of
+    seven runs, and named it (2026-11-27). Such a pattern's growth is not
+    timed; its time at each size still is (:data:`CLEARLY_SLOW_S`).
+    """
+
+    def bounded(items) -> bool:
+        for op, av in items:
+            if op in (sre_c.MAX_REPEAT, sre_c.MIN_REPEAT, sre_c.POSSESSIVE_REPEAT):
+                if av[1] == sre_c.MAXREPEAT or not bounded(av[2]):
+                    return False
+            elif op is sre_c.SUBPATTERN:
+                if not bounded(av[3]):
+                    return False
+            elif op is sre_c.ATOMIC_GROUP:
+                if not bounded(av):
+                    return False
+            elif op in (sre_c.ASSERT, sre_c.ASSERT_NOT):
+                if not bounded(av[1]):
+                    return False
+            elif op is sre_c.BRANCH:
+                if not all(bounded(branch) for branch in av[1]):
+                    return False
+            elif op is sre_c.GROUPREF_EXISTS:
+                if not bounded(av[1]) or (av[2] and not bounded(av[2])):
+                    return False
+        return True
+
+    try:
+        return bounded(sre_parse.parse(pattern, flags))
+    except (re.error, ValueError, TypeError):
+        return False
+
+
 def measure(literal: Literal) -> dict | None:
     """The first input on which *literal* grows faster than linear, with its times, or None."""
     try:
         compiled = re.compile(literal.pattern, literal.flags)
     except (re.error, ValueError, TypeError):
         return None
+    linear_by_shape = every_repeat_bounded(literal.pattern, literal.flags)
     for recipe in hostile_inputs(literal.pattern, literal.flags):
         # A quarter first: a cubic pattern takes minutes at the full size.
         quarter = _run(compiled, literal.op, recipe.text(N // 4))
@@ -475,7 +518,7 @@ def measure(literal: Literal) -> dict | None:
         whole = _run(compiled, literal.op, recipe.text(N))
         if whole > CLEARLY_SLOW_S:
             return {"input": str(recipe), "seconds at n": round(whole, 4)}
-        if whole < SUSPECT_S:
+        if whole < SUSPECT_S or linear_by_shape:
             continue
         four = _run(compiled, literal.op, recipe.text(4 * N))
         # Confirmed, so a late scheduling slice decides nothing: the fastest of
@@ -618,8 +661,44 @@ def test_a_paused_runner_is_no_patterns_time(monkeypatch, paused_runs, named):
         return slow if calls["four"] <= paused_runs else 4 * SUSPECT_S
 
     monkeypatch.setattr(sys.modules[__name__], "_run", run)
-    literal = Literal(*[{"pattern": "[a-z]", "flags": 0, "op": "sub"}.get(f, "x") for f in Literal.__dataclass_fields__])
+    # Unbounded, so its growth is timed (``[a-z]`` alone is linear by shape).
+    literal = Literal(*[{"pattern": "[a-z]+", "flags": 0, "op": "sub"}.get(f, "x") for f in Literal.__dataclass_fields__])
     assert (measure(literal) is not None) is named
+
+
+@pytest.mark.parametrize(("pattern", "bounded"), [
+    ('\\"[^\\"\\n]{0,600}\\"|“[^”\\n]{0,600}”|«[^»\\n]{0,600}»', True),
+    ("(?:can|could)\\s{1,3}you\\b[^?]{0,300}\\?", True),
+    ("(?<=a{2})b(?=c{0,9})|(x)(?(1)y{1,4}|z)", True),
+    ("[^?]{0,300}\\?\\s*", False),           # one unbounded repeat is enough
+    ("(?:a{0,3})*b", False),                 # bounded inside unbounded
+    ("(?>\\w+)x", False),
+    ("a{2,}", False),
+])
+def test_every_repeat_bounded_reads_the_shape(pattern, bounded):
+    assert every_repeat_bounded(pattern, 0) is bounded
+
+
+@pytest.mark.parametrize(("pattern", "named"), [
+    ('\\"[^\\"\\n]{0,600}\\"|“[^”\\n]{0,600}”|«[^»\\n]{0,600}»', False),
+    ("«[^»\\n]*»", True),  # control: the same pattern unbounded is timed and named
+])
+def test_a_bounded_pattern_is_not_named_for_a_noisy_growth(monkeypatch, pattern, named):
+    """CI 2026-11-27 read the lesson quote pattern at 4.2 ms, then 37.4 ms at
+    four times the size: a busy runner, as its shape bounds every start."""
+
+    def run(compiled, op, text):
+        if len(text) < N // 2:
+            return SUSPECT_S
+        return 0.0042 if len(text) < 3 * N else 0.0374
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", run)
+    assert (measure(Literal("x.py", 1, pattern, 0, "scan")) is not None) is named
+
+
+def test_a_bounded_pattern_that_is_slow_at_one_size_is_still_named(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_run", lambda compiled, op, text: 2 * CLEARLY_SLOW_S)
+    assert measure(Literal("x.py", 1, "«[^»\\n]{0,600}»", 0, "scan")) is not None
 
 
 def test_every_declaration_names_a_pattern_that_exists():

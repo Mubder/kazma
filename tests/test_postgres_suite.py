@@ -272,23 +272,57 @@ def test_the_env_gate_sees_each_shape():
 # ── 3. a test reaches psycopg only through importorskip ───────────────────
 
 
+_IMPORT_ERRORS = frozenset({"ImportError", "ModuleNotFoundError"})
+
+
+def _catches_import_error(handler: ast.ExceptHandler) -> bool:
+    kinds = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return any(isinstance(k, ast.Name) and k.id in _IMPORT_ERRORS for k in kinds)
+
+
+def _guarded_nodes(tree: ast.AST) -> set[int]:
+    """The nodes inside a ``try`` whose handler catches ImportError."""
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try) and any(_catches_import_error(h) for h in node.handlers):
+            for statement in node.body:
+                inside.update(id(n) for n in ast.walk(statement))
+    return inside
+
+
+def _skips_by_mark(tree: ast.Module) -> bool:
+    """A top-level ``pytestmark`` holding a ``skipif``: the module is collected and skipped."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark"
+                                                for t in node.targets):
+            return any(isinstance(n, ast.Attribute) and n.attr == "skipif" for n in ast.walk(node.value))
+    return False
+
+
 def _bare_psycopg_imports(sources: dict[str, str]) -> list[str]:
     """``import psycopg`` in a test: the main Tests job installs ``.[test]``,
     which does not include psycopg, so the test errors there instead of
-    skipping (CI 2026-09-25, two restore-rehearsal tests)."""
+    skipping (CI 2026-09-25, two restore-rehearsal tests).
+
+    An import inside ``try: ... except ImportError`` is not bare when the
+    module also skips itself by a ``pytestmark`` ``skipif``: that is how a
+    module is collected everywhere and skipped where psycopg is missing
+    (tests/test_postgres_tests_always_collected.py, 2026-11-27). Without the
+    mark its tests would fail on the missing module instead of skipping."""
     hits: list[str] = []
     for rel, text in sources.items():
         try:
             tree = ast.parse(text)
         except SyntaxError:
             continue
+        guarded = _guarded_nodes(tree) if _skips_by_mark(tree) else set()
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
                 names = [a.name for a in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module]
-            if any(n == "psycopg" or n.startswith("psycopg.") for n in names):
+            if any(n == "psycopg" or n.startswith("psycopg.") for n in names) and id(node) not in guarded:
                 hits.append(f"{rel}:{node.lineno}")
     return sorted(hits)
 
@@ -297,8 +331,11 @@ def test_tests_import_psycopg_only_through_importorskip():
     hits = _bare_psycopg_imports(_test_sources())
     assert not hits, (
         "A test imports psycopg directly. The main Tests job does not install it,\n"
-        "so the test ERRORS there; use `psycopg = pytest.importorskip(\"psycopg\")`\n"
-        "(and @pytest.mark.postgres if it should run in the Postgres job):\n  "
+        "so the test ERRORS there; use `psycopg = pytest.importorskip(\"psycopg\")` in a\n"
+        "test or fixture, or at module level `try: import psycopg` / `except ImportError:\n"
+        "psycopg = None` with `pytestmark = [pytest.mark.postgres, pytest.mark.skipif(psycopg\n"
+        "is None, ...)]` (never a module-level importorskip: see\n"
+        "test_postgres_tests_always_collected.py):\n  "
         + "\n  ".join(hits)
     )
 
@@ -318,3 +355,21 @@ def test_the_psycopg_gate_sees_both_import_forms():
         )
     }
     assert _bare_psycopg_imports(planted) == ["t.py:4", "t.py:6"]
+
+
+def test_a_guarded_import_passes_only_with_a_skip_mark():
+    guarded = textwrap.dedent(
+        '''
+        import pytest
+        try:
+            import psycopg
+        except ImportError:
+            psycopg = None
+        '''
+    )
+    marked = guarded + 'pytestmark = [pytest.mark.postgres, pytest.mark.skipif(psycopg is None, reason="x")]\n'
+    assert _bare_psycopg_imports({"t.py": marked}) == []
+    # Controls: no skip mark, so its tests fail on None; a handler that is not ImportError.
+    assert _bare_psycopg_imports({"t.py": guarded}) == ["t.py:4"]
+    other = marked.replace("except ImportError:", "except ValueError:")
+    assert _bare_psycopg_imports({"t.py": other}) == ["t.py:4"]

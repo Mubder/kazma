@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Two test rules agree on Postgres modules, and the regex sweep reads a bounded pattern by its shape (2026-11-27)
+
+- **The psycopg rule accepts the collected form**: a test module may import
+  psycopg inside `try` / `except ImportError` when a `pytestmark` `skipif`
+  skips it where psycopg is missing, the form the collection rule asks for.
+  The older rule took it for a bare import and failed CI. A guarded import
+  with no skip mark is still named, since its tests would fail on the
+  missing module.
+- **A pattern with no unbounded repeat is not timed for growth**: every
+  start reads a fixed number of characters at most, so it is linear by its
+  shape. The lesson pattern that leaves out quoted words (`{0,600}`) grows
+  4.1-4.4 times per four times the input here; a busy CI runner read 8.9
+  and named it. Its time at each size is still read.
+
 ## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
 
 - **A Word file's font table is read in linear time**: the pattern that takes
