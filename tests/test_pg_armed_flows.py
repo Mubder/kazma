@@ -24,9 +24,12 @@ import pytest
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import bind_scope
 
-pytestmark = pytest.mark.postgres
+try:
+    import psycopg
+except ImportError:  # CI's light job has no psycopg: collected and skipped, so the counts agree
+    psycopg = None
 
-psycopg = pytest.importorskip("psycopg")
+pytestmark = [pytest.mark.postgres, pytest.mark.skipif(psycopg is None, reason="psycopg is not installed")]
 
 
 @pytest.fixture

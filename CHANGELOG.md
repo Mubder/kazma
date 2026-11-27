@@ -7,6 +7,10 @@
   `<w:embed…` when no `>` followed, so a crafted file's time grew with the
   square of its size. It now stops at the next tag, and removes exactly what
   it did from well-formed XML.
+- **Postgres test modules count the same everywhere**: Spaces' Postgres test
+  modules skipped themselves whole where psycopg is missing, so CI's light job
+  counted 86 fewer tests than README said. They are now collected
+  everywhere and skipped by a mark, and a gate keeps new ones that way.
 - **The regex sweep's verdicts no longer depend on the machine**: the secret
   scanner's pattern is linear (every repeat bounded) but heavy, and its
   inputs ran out the sweep's clock on CI's slower runners; it is declared
