@@ -11,7 +11,6 @@ import hashlib
 import json
 import logging
 import os
-import psutil
 import sqlite3
 import threading
 import time
@@ -313,7 +312,10 @@ def _bounded_session_row(session):
 
 
 def _process_owner():
-    return [os.getpid(), psutil.Process().create_time()]
+    """This process as a session's owner: [pid, start read once]."""
+    from kazma_core import process_start
+
+    return process_start.own_identity()
 
 
 def _reconcile_sessions(connection):

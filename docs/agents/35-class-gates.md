@@ -16,7 +16,15 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   packages, and eleven scripts plus the guard's pager lost the vault key and
   the DSN). Untrusted XML: `kazma_core.security.safe_xml`. Child rlimits:
   `kazma_core.security.rlimits` (no `preexec_fn`). UI writes:
-  `window.kazmaSave` (never discard an awaited `fetch`).
+  `window.kazmaSave` (never discard an awaited `fetch`). A process's start
+  time (the pid-reuse guard of every owner record: crawls, research
+  sessions and storage, origin leases, document intakes, migration folders):
+  `kazma_core.process_start` -- this process's read once and matched
+  exactly, another's matched within a tolerance; no other module calls
+  `create_time()` (`tests/test_process_start.py`). On Linux psutil adds the
+  boot time, read again on every call, and it steps with the wall clock: on
+  Docker Desktop's WSL2 VM a whole second about every 30 s under load, and
+  the Knowledge ingest took a live crawl over (prepush, 2026-11-27).
 - **Every thread-taking route declares its rule** in
   `tests/test_thread_route_policy.py` (owner / admin / admin+owner / session).
 - **Closures scheduled from a loop bind the loop's names** as defaults or

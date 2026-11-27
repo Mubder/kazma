@@ -83,7 +83,7 @@ def lease_lapsed(row: dict[str, Any], now: float) -> bool:
 def _process_identity() -> tuple[str, str, int, str]:
     """(install, host, pid, start) of THIS process; start guards pid reuse."""
 
-    import psutil
+    from kazma_core import process_start
 
     try:
         from kazma_core.db.shared_store_peers import install_id
@@ -91,7 +91,7 @@ def _process_identity() -> tuple[str, str, int, str]:
         install = install_id() or ""
     except (ImportError, OSError):
         install = ""
-    started = f"{psutil.Process(os.getpid()).create_time():.3f}"
+    started = f"{process_start.own_start():.3f}"
     return install, socket.gethostname(), os.getpid(), started
 
 
@@ -143,6 +143,8 @@ def owner_state(owner: str) -> str:
 
     import psutil
 
+    from kazma_core import process_start
+
     try:
         recorded = json.loads(owner) if owner else None
     except json.JSONDecodeError:
@@ -167,7 +169,9 @@ def owner_state(owner: str) -> str:
         process = psutil.Process(owner_pid)
         if process.status() == psutil.STATUS_ZOMBIE:
             return "dead"
-        return "alive" if f"{process.create_time():.3f}" == owner_started else "dead"
+        # Through process_start: a reading of the start moves with the wall
+        # clock on Linux, and an exact match called a live owner dead.
+        return "alive" if process_start.is_start_of(process, owner_started) else "dead"
     except psutil.NoSuchProcess:
         return "dead"
     except psutil.Error:

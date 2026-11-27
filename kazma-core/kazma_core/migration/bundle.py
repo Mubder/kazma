@@ -378,12 +378,12 @@ def _folder_epoch(folder: Path, prefix: str) -> float:
 
 def _this_process() -> dict[str, object]:
     """Who uses a working folder: host, pid and start time (guards pid reuse)."""
-    import psutil
+    from kazma_core import process_start
 
     return {
         "host": socket.gethostname(),
         "pid": os.getpid(),
-        "started": f"{psutil.Process(os.getpid()).create_time():.3f}",
+        "started": f"{process_start.own_start():.3f}",
     }
 
 
@@ -423,9 +423,11 @@ def _working_folder_in_use(folder: Path) -> bool:
         return True
     import psutil
 
+    from kazma_core import process_start
+
     try:
         process = psutil.Process(pid)
-        if f"{process.create_time():.3f}" != started:
+        if not process_start.is_start_of(process, started):
             return False  # the pid was reused: the run that marked it is gone
         return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
     except psutil.NoSuchProcess:

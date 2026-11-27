@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## A process's start time is read once and compared in one place (2026-11-27)
+
+- **The failure**: prepush's Linux part failed once on
+  `test_a_second_crawl_of_a_library_is_its_own_code`: the Knowledge ingest
+  answered 200 instead of `library_busy`, and the running crawl's finish was
+  refused ("Crawl ownership ended"). The ingest had read the crawl's own
+  owner, this same process, as gone and taken the crawl over.
+- **The cause**: on Linux psutil's `create_time()` is the start's ticks since
+  boot plus `/proc/stat`'s boot time, read again on every call, and the boot
+  time moves whenever the wall clock is stepped. On Docker Desktop's WSL2 VM
+  (`hv_utils.timesync_implicit=Y`) it moved a whole second about every 30 s
+  while the PC was loaded (3.7 s in 90 s, measured), and one process's own
+  start went from `...883.48` to `...884.48` between two readings. The crawl
+  journal compared a recorded start with a fresh reading exactly. Waiting for
+  the boot time to step between the crawl's start and the ingest reproduced
+  the failure on that kernel every time, with no mocks.
+- **The class**: six owner records compared starts that way. The origin
+  table dropped this process's own live leases, research sessions of this
+  process read as interrupted, a research storage reservation as not live, a
+  live document intake owner as dead, and a migration working folder in use
+  as free to sweep. All now go through `kazma_core.process_start`: this
+  process's start is read once and matched exactly (an earlier process with
+  the same pid is still told apart), another process's is matched within
+  10 s where the boot time follows the wall clock (Linux, macOS) and to the
+  millisecond on Windows, whose kernel keeps the creation time. The document certification sampler counts a worker by
+  psutil's own identity.
+- **Gate**: `tests/test_process_start.py` runs every site with the clock
+  stepped (each failed on the old code), and reads the product source so
+  that no module but the helper calls `create_time()`, with controls for
+  each old shape and for a reused pid.
+
 ## The security policy, rewritten in English and Arabic (2026-11-27)
 
 - **One policy, in both languages**: `SECURITY.md` is rewritten in eleven
