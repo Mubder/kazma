@@ -846,8 +846,12 @@ async def start_deep_research(
     from kazma_core.workspace.binding import resolve_active_root
     root = await call(resolve_active_root)
     if resume_session_id is not None:
-        sess = await call(_claim_session, resume_session_id, _process_owner(), root,
-            on_cancel=lambda claimed: _complete_cancellation(claimed.id))
+        def claim() -> ResearchSession:
+            # The owner is read in the thread too: it reads /proc (Linux)
+            # or psutil (macOS), never on the loop (AGENTS §35).
+            return _claim_session(resume_session_id, _process_owner(), root)
+
+        sess = await call(claim, on_cancel=lambda claimed: _complete_cancellation(claimed.id))
         export_docx = bool(sess.meta.get('export_docx'))
     else:
         sess = await call(create_session, topic, depth=depth, max_sources=max_sources,

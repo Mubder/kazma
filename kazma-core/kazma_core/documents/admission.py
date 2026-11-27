@@ -161,7 +161,7 @@ def owner_state(owner: str) -> str:
         # Restored from a backup snapshot: its publisher wrote to another
         # database and can never resume against this one.
         return "dead"
-    install, host, pid, started = _process_identity()
+    install, host, _pid, _started = _process_identity()
     if not install or recorded.get("install") != install or recorded.get("host") != host:
         return "unknown"
     try:
@@ -169,15 +169,22 @@ def owner_state(owner: str) -> str:
         owner_started = str(recorded["started"])
     except (KeyError, TypeError, ValueError):
         return "unknown"
-    if owner_pid == pid and owner_started == started:
+    stamp = recorded.get("stamp")
+    # This process by its stamp first (an earlier process with this pid has
+    # another), by its start within 2 ms otherwise.
+    if process_start.is_this_process(owner_pid, owner_started, stamp):
         return "self"
     try:
         process = psutil.Process(owner_pid)
         if process.status() == psutil.STATUS_ZOMBIE:
             return "dead"
         # Through process_start: a reading of the start moves with the wall
-        # clock on Linux, and an exact match called a live owner dead.
-        return "alive" if process_start.is_start_of(process, owner_started, recorded.get("stamp")) else "dead"
+        # clock on Linux, and an exact match called a live owner dead. Where
+        # nothing settles it (macOS, the BSDs: the owner string is this
+        # process's fence token, so its start is the one read at its first
+        # intake), the owner is not proven dead and its lease decides.
+        verdict = process_start.start_verdict(process, owner_started, stamp)
+        return {True: "alive", False: "dead", None: "unknown"}[verdict]
     except psutil.NoSuchProcess:
         return "dead"
     except psutil.Error:

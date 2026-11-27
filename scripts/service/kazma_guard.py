@@ -1684,10 +1684,15 @@ def _recorded_child_is_ours(pid: int, data: dict, log: GuardLog) -> bool:
     creation time settles it when both sides are known; otherwise only a
     python image is ever reaped -- the rule reap_port_holder already follows.
     On Linux the recorded stamp (boot id and start ticks) settles it first,
-    exactly: the creation time there moves with the wall clock.
+    exactly: the creation time there moves with the wall clock. Only a stamp
+    recorded for this very pid: a guard from before the stamps merges a new
+    child's pid and time into the state and leaves the previous child's
+    stamp behind (a rollback, then a roll forward), and that stamp would
+    call the new child a reused pid -- not reaped, and a second server.
     """
     recorded_stamp = data.get("child_stamp")
-    actual_stamp = _process_start_stamp(pid) if isinstance(recorded_stamp, str) else None
+    bound = isinstance(recorded_stamp, str) and data.get("child_stamp_pid") == pid
+    actual_stamp = _process_start_stamp(pid) if bound else None
     if actual_stamp is not None:
         if actual_stamp != recorded_stamp:
             log("warn", "orphan.pid_reused", pid=pid,
@@ -1765,6 +1770,7 @@ def _record_child(pid: int | None) -> None:
         child_pid=pid or 0,
         child_created=_process_started_at(pid) if pid else None,
         child_stamp=_process_start_stamp(pid) if pid else None,
+        child_stamp_pid=pid or None,  # the pid the stamp is of (_recorded_child_is_ours)
         guard_pid=os.getpid(),
     )
 
@@ -2671,7 +2677,8 @@ class DocumentBroker:
         if not pid or pid == os.getpid() or not _pid_alive(pid):
             return
         if not _recorded_child_is_ours(pid, {"child_created": rec.get("created"),
-                                             "child_stamp": rec.get("stamp")}, self.log):
+                                             "child_stamp": rec.get("stamp"),
+                                             "child_stamp_pid": rec.get("stamp_pid")}, self.log):
             return
         self.log("warn", "broker.orphan_reaping", pid=pid)
         try:
@@ -3079,6 +3086,7 @@ class DocumentBroker:
             "pid": proc.pid if proc is not None else None,
             "created": self._created if proc is not None else None,
             "stamp": self._stamp if proc is not None else None,
+            "stamp_pid": proc.pid if proc is not None else None,
             "image_requested": self.image_requested,
             "image": status.get("image_ref"),
             "image_id": status.get("image_id"),

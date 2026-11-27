@@ -31,16 +31,20 @@ that does not move with the clock where one can be had:
   from the one before it, and the boot id a previous boot. Any process of
   this host is matched by its stamp, exactly.
 * **macOS and the BSDs** (and a Linux whose ``/proc`` does not say):
-  ``run:<random id>``, made once per process. psutil
-  moves the start there with the boot time too (macOS adjusts it by the boot
-  time's change; FreeBSD and OpenBSD add the boot time) and offers no
-  reading that stays put, and the standard library reads none. The stamp
-  tells this process from an earlier one with its pid; another process is
-  matched by ``started``, read when the record is written, within
-  :data:`CLOCK_STEP_TOLERANCE_S`. A clock stepped more than that since the
-  record was written makes a live process read as a reused pid. Kazma runs
-  its server on Windows and in Linux containers; macOS and BSD hosts are
-  development machines.
+  ``run:<random id>``, made once per process. psutil moves the start there
+  with the boot time too (macOS adjusts it by the boot time's change;
+  FreeBSD and OpenBSD add the boot time) and offers no reading that stays
+  put, and the standard library reads none. The stamp tells this process
+  from an earlier one with its pid; another process is matched by
+  ``started``, read when the record is written, within
+  :data:`CLOCK_STEP_TOLERANCE_S`, and a start further off settles nothing
+  (:func:`start_verdict` says None): a clock stepped more than that since
+  the write makes a live process read as a reused pid to the records that
+  take None for "another process" (:func:`is_start_of`). A document
+  intake's owner is a fence token fixed for the process (its start is the
+  one read once), so it takes None for "not proven dead" and its lease
+  decides. Kazma runs its server on Windows and in Linux containers; macOS
+  and BSD hosts are development machines.
 * **Windows**: no stamp. The kernel keeps a process's creation time and
   psutil returns it as kept, so ``started`` is matched within
   :data:`FORMAT_SLACK_S` (2 ms, the 3-decimal text some records keep).
@@ -226,14 +230,18 @@ def identity_is_this_process(identity) -> bool:
     return is_this_process(*identity)
 
 
-def is_start_of(process: psutil.Process, started, stamp=None) -> bool:
-    """Whether the recorded ``started`` and *stamp* are the start of *process*,
-    not of an earlier process that had its pid.
+def start_verdict(process: psutil.Process, started, stamp=None) -> bool | None:
+    """Whether the recorded ``started`` and *stamp* are the start of *process*:
+    True, False (another process has its pid now), or None when nothing
+    settles it.
 
     This process: :func:`is_this_process`. Another: by its Linux stamp,
-    exactly, when the record has one and ``/proc`` answers; else by
-    ``started`` within :func:`tolerance`. Raises what ``create_time()``
-    raises (``psutil.NoSuchProcess``, ``psutil.AccessDenied``).
+    exactly, when the record has one and ``/proc`` answers; on Windows by
+    ``started`` within 2 ms. Otherwise (macOS, the BSDs, a record from before
+    the stamps) a start within :func:`tolerance` is the process, and one
+    further off is None: the clock may have moved that far since the record
+    was written. Raises what ``create_time()`` raises
+    (``psutil.NoSuchProcess``, ``psutil.AccessDenied``).
     """
     if process.pid == os.getpid():
         return is_this_process(process.pid, started, stamp)
@@ -244,4 +252,17 @@ def is_start_of(process: psutil.Process, started, stamp=None) -> bool:
     value = _seconds(started)
     if value is None:
         return False
-    return abs(value - process.create_time()) <= tolerance()
+    if abs(value - process.create_time()) <= tolerance():
+        return True
+    return False if _START_KEPT_BY_KERNEL else None
+
+
+def is_start_of(process: psutil.Process, started, stamp=None) -> bool:
+    """:func:`start_verdict` with "nothing settles it" read as another
+    process. The records that use it (crawl owners, origin leases, research
+    sessions and storage, migration folders) carry a start read when they
+    are written, so on macOS and the BSDs only clock drift since the write
+    counts against them. A document intake's owner is a fence token, fixed
+    for the process, so ``documents.admission`` reads None as "unknown" and
+    leaves the decision to the intake's lease."""
+    return start_verdict(process, started, stamp) is True

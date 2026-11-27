@@ -22,8 +22,10 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   `kazma_core.process_start`. A record carries a stamp beside its start
   time: on Linux the boot id and the start's ticks after boot, matched
   exactly for any process; on macOS and the BSDs an id of this process,
-  with another process's start matched within 10 s; on Windows none, the
-  kernel-kept start matched within 2 ms. On Linux psutil's `create_time()`
+  with another process's start matched within 10 s and further off
+  settling nothing (`start_verdict` says None: a document intake, whose
+  owner is a fixed fence token, then lets its lease decide); on Windows
+  none, the kernel-kept start matched within 2 ms. On Linux psutil's `create_time()`
   adds the boot time, read again on every call, and it steps with the wall
   clock: on Docker Desktop's WSL2 VM a whole second about every 30 s under
   load, and the Knowledge ingest took a live crawl over (prepush,

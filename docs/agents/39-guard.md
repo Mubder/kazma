@@ -48,8 +48,13 @@ code) and Kazma ran with nobody supervising it.
   `stamp`: boot id and start ticks, `_process_start_stamp`) is compared
   first, exactly: the creation time there moves with the wall clock, and a
   WSL2 VM drifting a second every 30 s turned an orphan recorded minutes
-  earlier into "pid reused", not reaped (2026-11-27). The stamp is
-  `kazma_core.process_start`'s (§35), checked by `tests/test_process_start.py`.
+  earlier into "pid reused", not reaped (2026-11-27). The stamp counts only
+  for the pid it was recorded for (`child_stamp_pid`, the broker's
+  `stamp_pid`): a guard from before the stamps merges its child's pid and
+  time and leaves the earlier stamp behind. The stamp is
+  `kazma_core.process_start`'s (§35), checked by `tests/test_process_start.py`;
+  the guard reads `/proc` only in `_process_started_at` and
+  `_process_start_stamp`.
 - **The server says when its guard is gone.** The maintenance cadence runs
   `observability/supervisor_watch.check_supervisor`: with
   `KAZMA_GUARD_STATE_FILE` set (the guard started this server) and no
