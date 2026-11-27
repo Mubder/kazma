@@ -37,7 +37,12 @@ written): a reader and a judge call a question and history (``--judge`` a
 judge model of its own, ``--judge2`` a second one). ``--blocks NAME=FILE``
 answers, as condition NAME, the blocks another checkout built
 (``scripts/longmemeval_blocks.py``): a memory change answered with and
-without itself by one reader in one run. The replies are kept in ``DIR`` (a
+without itself by one reader in one run. ``--written LABEL`` reads Kazma's
+three conditions from each question's memory as Kazma writes it -- facts,
+weekly summaries and roll-ups, the nightly merge
+(``scripts/longmemeval_written.py``) -- refuses a run whose store lacks a
+step, and answers the episodes alone beside it as ``kazma_episodes``; the
+result says what each condition was written with (``written_with``). The replies are kept in ``DIR`` (a
 run that stops goes on where it stopped); the result file holds the scores
 and the tokens each call used. ``--conditions kazma_turn`` also asks each
 question through Kazma's own chat turn (``scripts/longmemeval_turn.py``, the
@@ -714,6 +719,9 @@ CONDITIONS = ("kazma", "kazma_whole", "full", "oracle", "bge_top10", "bm25_top10
 #: (several model calls a question, one question at a time).
 TURN = "kazma_turn"
 ALL_CONDITIONS = (*CONDITIONS, TURN)
+#: The conditions that read Kazma's memory (a written run's store, else the
+#: episodes alone), beside :data:`TURN`.
+KAZMA_WRITTEN = ("kazma", "kazma_whole")
 #: The whole history, uncut (None), or cut from its oldest session to this
 #: many characters. Uncut since 22 Nov: the longest of the 500 histories
 #: (540,508 characters, 115,818 tokens) was served whole by deepseek-flash
@@ -760,11 +768,30 @@ def history_string(item: dict[str, Any], *, only: set[str] | None = None,
 NO_MEMORIES = "(no memories)"
 
 
-def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str, str, dict[str, Any]]:
+def seed_from(store: Path | None, rows: list[dict[str, Any]]) -> Any:
+    """The one seeding of Kazma's conditions: a copy of *store*, the
+    question's memory as Kazma wrote it (``longmemeval_written.py``), else
+    the history's episodes alone (*rows*, :func:`_seed_history`). Returns a
+    function of a fresh connection; it returns episode id -> where it came
+    from."""
+    def seed(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        if store is None:
+            return _seed_history(conn, rows)
+        from kazma_core.db.sqlite_snapshot import snapshot_into
+
+        snapshot_into(store, conn)  # read-only, one step (tests/test_sqlite_snapshot.py)
+        return {entry["row"]["id"]: entry for entry in rows}
+
+    return seed
+
+
+def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]],
+                  store: Path | None = None) -> tuple[str, str, dict[str, Any]]:
     """The recall block a chat turn's model would be shown for *item*'s
-    question, on a private database holding its history; and the same
-    recalled rounds read whole, dated, oldest first (the block bounds each
-    memory, and points the model at ``memory_read`` for the rest)."""
+    question, on a private database holding its history (its written
+    *store*, else its episodes alone); and the same recalled rounds read
+    whole, dated, oldest first (the block bounds each memory, and points the
+    model at ``memory_read`` for the rest)."""
     from unittest import mock
 
     from kazma_core.memory.recall import format_recall_block, recall
@@ -776,7 +803,7 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
     conn.row_factory = sqlite3.Row
     try:
         ensure_primary_schema(conn)
-        back = _seed_history(conn, rows)
+        back = seed_from(store, rows)(conn)
         with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
@@ -791,7 +818,122 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             except OSError:
                 pass
     return (block or NO_MEMORIES, whole or NO_MEMORIES,
-            {"shown": len(result.episodes), "facts": len(result.beliefs)})
+            {"shown": len(result.episodes), "facts": len(result.beliefs), "summaries": len(result.summaries)})
+
+
+#: Today's seeding, kept as a labelled row beside Kazma's written memory: the
+#: history's episodes alone (no facts, summaries, roll-ups or merge).
+EPISODES_ONLY = "kazma_episodes"
+#: What the conditions of a run with no written stores were written with.
+WRITTEN_EPISODES = "the history's episodes alone: no facts, weekly summaries, roll-ups or nightly merge"
+#: The steps a written store must hold (``longmemeval_written.py``).
+WRITTEN_STEPS = ("episodes", "facts", "summaries", "merge")
+
+
+def written_stores(data: Path, label: str, ids: list[str]) -> tuple[dict[str, Path], dict[str, Any], list[str]]:
+    """The written run *label*'s store a question, what wrote each step, and
+    the questions whose store lacks a step (a run with any is refused): its
+    done file names every step, and the store itself shows each done
+    (:func:`store_unfinished`), not only what the done file declares."""
+    folder = data / "cache" / "written" / label
+    stores: dict[str, Path] = {}
+    written: dict[str, Any] = {}
+    lacking = []
+    for qid in ids:
+        done, store = folder / "done" / f"{qid}.json", folder / "stores" / f"{qid}.db"
+        steps = (json.loads(done.read_text(encoding="utf-8")).get("written_with") or {}) if done.is_file() else {}
+        if not store.is_file() or any(not steps.get(step) for step in WRITTEN_STEPS) or store_unfinished(store, steps):
+            lacking.append(qid)
+            continue
+        stores[qid], written[qid] = store, steps
+    return stores, written, lacking
+
+
+def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
+    """What a written store shows undone, read from the store and the steps'
+    own counts (the step 5 review, M2): the nightly merge's errors, or a
+    twin it left (one fact twice, current); a week left unsummarised at the
+    question's time (the sweep's own count, and the product's
+    ``topic_summaries._due_periods`` run on the store at ``steps["at"]``: the
+    step 5 delta review's E), or a week or summary still queued or to be
+    written again. Empty when every step is done."""
+    out = []
+    merge, summaries = steps.get("merge") or {}, steps.get("summaries") or {}
+    if int(merge.get("errors") or 0):
+        out.append("the nightly merge failed")
+    if int(summaries.get("weeks_left") or 0):
+        out.append("a week left unsummarised")
+    if steps.get("at") and weeks_due(store, parse_date(str(steps["at"]))):
+        out.append("a week the store holds unsummarised at the question's time")
+    conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
+    try:
+        def one(sql: str) -> int:
+            try:
+                return int(conn.execute(sql).fetchone()[0] or 0)
+            except sqlite3.OperationalError:
+                return 0
+
+        if one("SELECT COUNT(*) FROM memory_summary_periods WHERE status != 'done'"):
+            out.append("a week still queued")
+        if one("SELECT COUNT(*) FROM memory_summaries WHERE status = 'rebuild'"):
+            out.append("a summary still to be written again")
+        # One fact twice: the same words on the same day (an event on two
+        # days is two, ``fact_days.event_day``, and the merge keeps both).
+        if one("SELECT COUNT(*) FROM (SELECT 1 FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
+               "GROUP BY tenant_id, subject, predicate, lower(object), "
+               "COALESCE(json_extract(metadata_json, '$.started'), ''), "
+               "COALESCE(json_extract(metadata_json, '$.planned'), '') HAVING COUNT(*) > 1)"):
+            out.append("a twin fact left current")
+    finally:
+        conn.close()
+    return out
+
+
+def weeks_due(store: Path, now: float) -> list[Any]:
+    """The weeks the summaries sweep would still queue on *store* at *now*,
+    read by the product's own ``topic_summaries._due_periods`` in UTC, the
+    zone the written run reads weeks in (``longmemeval_written.in_utc``)."""
+    from unittest import mock
+
+    from kazma_core.memory import topic_summaries
+
+    conn = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
+            return topic_summaries._due_periods(conn, now, topic_summaries._config()["min_turns"])
+    except sqlite3.OperationalError:
+        return []  # a store with no episodes table holds no week
+    finally:
+        conn.close()
+
+
+def deep_pass_gaps(steps: dict[str, Any]) -> dict[str, int]:
+    """Rounds whose deep pass the facts run never had answered, over the
+    written run's stores: the extraction's failed passes, which the replay
+    finds with no reply kept (``no_reply``), and passes that failed
+    (``deep_failed``). Said beside every number, never hidden."""
+    out = {"no_reply": 0, "deep_failed": 0, "deep": 0}
+    for step in steps.values():
+        facts = step.get("facts") or {}
+        for key in out:
+            out[key] += int(facts.get(key) or 0)
+    return out
+
+
+def written_with(label: str, steps: dict[str, Any]) -> str:
+    """What a written run's conditions were written with, in a line, the
+    rounds whose deep pass was never answered included."""
+    first = next(iter(steps.values()), {}) if steps else {}
+    facts = first.get("facts") or {}
+    summaries = first.get("summaries") or {}
+    gaps = deep_pass_gaps(steps)
+    missing = gaps["no_reply"] + gaps["deep_failed"]
+    return (f"written run {label}: the history's episodes, the facts of {facts.get('run', '?')} "
+            f"({facts.get('facts', 'extracted')}"
+            + (f"; {missing:,} of {missing + gaps['deep']:,} rounds' deep pass never answered" if missing else "")
+            + f"), weekly summaries and roll-ups on {summaries.get('model', '?')} "
+            "as of the question's time (written at once, as after an import), and the nightly merge")
 
 
 #: Reasoning a reader may be asked for: ``off``; ``default``, nothing sent
@@ -1051,7 +1193,8 @@ def _turn_reader(model: str, base_url: str, key: str) -> tuple[Any, str]:
 
 
 def _answer_turns(items: list[dict[str, Any]], histories: dict[str, dict[str, Any]], cache: dict[str, Any],
-                  cache_path: Path, *, model: str, base_url: str, key: str, reasoning: str) -> None:
+                  cache_path: Path, *, model: str, base_url: str, key: str, reasoning: str,
+                  stores: dict[str, Path] | None = None) -> None:
     """Every question through Kazma's own turn, one at a time, its answer
     kept in *cache* (W1c)."""
     import asyncio
@@ -1069,10 +1212,9 @@ def _answer_turns(items: list[dict[str, Any]], histories: dict[str, dict[str, An
             _fresh_entry(entry, identity)
             if "hypothesis" in entry:
                 continue
-            rows = history_rows(item)
             outcome = await run_turn(
                 str(item["question"]), now=parse_date(item["question_date"]), tenant=TENANT,
-                seed=lambda conn, rows=rows: _seed_history(conn, rows), client=client,
+                seed=seed_from((stores or {}).get(qid), history_rows(item)), client=client,
                 system_prompt=system_prompt, thread_id=f"lme-turn-{qid}", reasoning=reasoning)
             turn_entry(entry, identity, lambda outcome=outcome: outcome)
             # Whether the turn's own recall showed the block the harness
@@ -1121,7 +1263,7 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                 split: str = "sample", look: str | None = None, reasoning: str = "low",
                 judge2: str | None = None, run: str = "", conditions: tuple[str, ...] = CONDITIONS,
                 judge_model: str | None = None, key_env: str = "DEEPSEEK_API_KEY",
-                blocks: dict[str, Path] | None = None, ids: Path | None = None) -> int:
+                blocks: dict[str, Path] | None = None, ids: Path | None = None, written: str = "") -> int:
     judge_model = judge_model or model
     log_look(split, look, f"answer --model {model} --judge {judge_model} --reasoning {reasoning}"
                           + (f" --run {run}" if run else ""))
@@ -1145,11 +1287,25 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         wanted = set(json.loads(ids.read_text(encoding="utf-8"))["ids"])
         asked = [q for q in asked if q in wanted]
     items = [by_id[q] for q in asked[: limit or None]]
+    stores: dict[str, Path] = {}
+    steps: dict[str, Any] = {}
+    if written:
+        # One seeding for Kazma's three conditions; a store lacking a step
+        # refuses the run, and today's seeding stays as a labelled row.
+        stores, steps, lacking = written_stores(data, written, [str(i["question_id"]) for i in items])
+        if lacking:
+            print(f"written run {written}: {len(lacking)} stores lack a step (e.g. {lacking[0]}); "
+                  "write them with scripts/longmemeval_written.py first", file=sys.stderr)
+            return 2
+        if EPISODES_ONLY not in conditions:
+            conditions = (*conditions, EPISODES_ONLY)
     extra = {name: load_blocks(path, [str(i["question_id"]) for i in items]) for name, path in blocks.items()}
     # One cache a reader, reasoning level and run label: a second run (the
     # noise run) asks every question again.
     # Reasoning off with no label keeps the first runs' file (21 Nov).
     stem = f"answers-{model}" if reasoning == "off" else f"answers-{model}-{reasoning}"
+    if written:
+        stem += f"-written-{written}"
     cache_path = data / "cache" / f"{stem}{'-' + run if run else ''}.json"
     cache: dict[str, Any] = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
     if _untagged_in(cache):
@@ -1163,18 +1319,20 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         for item in items:
             qid = str(item["question_id"])
             rows = history_rows(item)
-            block, whole, shown = kazma_history(item, rows)
+            block, whole, shown = kazma_history(item, rows, stores[qid]) if written else kazma_history(item, rows)
+            if written:
+                histories[qid] = {EPISODES_ONLY: kazma_history(item, rows)[0]}
             full, dropped = history_string(item, max_chars=FULL_MAX_CHARS)
             oracle, _ = history_string(item, only={str(s) for s in item.get("answer_session_ids") or []})
             plain = {f"{how}_top10": read_whole(plain_top(str(item["question"]), rows, how, embedder=embedder))
                      or NO_MEMORIES for how in ("bge", "bm25")}
-            histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
-                              "dropped": dropped, **shown,
-                              **{name: held["blocks"][qid] for name, held in extra.items()}}
+            histories.setdefault(qid, {}).update(
+                {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
+                 "dropped": dropped, **shown, **{name: held["blocks"][qid] for name, held in extra.items()}})
         # Kazma's own turns, one at a time, on the same embedder (W1c).
         if TURN in conditions:
             _answer_turns(items, histories, cache, cache_path, model=model, base_url=base_url, key=key,
-                          reasoning=reasoning)
+                          reasoning=reasoning, stores=stores)
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     reader = Chat(model=model, base_url=base_url, key=key, reasoning=reasoning)
@@ -1209,7 +1367,10 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         for c in conditions:
             row.update(condition_columns(cache[qid][c], c, judge_model, judge2))
         results.append(row)
-    summary = run_summary(results, conditions, judge2=judge2, block_names=tuple(extra))
+    # A written run is answered beside today's seeding: what Kazma's own
+    # writing changed, question by question.
+    summary = run_summary(results, conditions, judge2=judge2,
+                          block_names=(*extra, *((EPISODES_ONLY,) if written else ())))
     usage = run_usage(cache, [str(i["question_id"]) for i in items], conditions, (judge_model, judge2))
     out = result_path(ANSWERS, split)
     if run:
@@ -1219,6 +1380,10 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         **({"ids_from": ids.name} if ids is not None else {}), "reader": model,
         "reader_reasoning": reasoning, "judge": judge_model, "judge2": judge2, "conditions": list(conditions),
         "blocks_from": {name: held["commit"] for name, held in extra.items()},
+        # What Kazma's memory held when each condition read it (W6 step 5).
+        "written_with": {c: (written_with(written, steps) if written and c in (*KAZMA_WRITTEN, TURN)
+                             else WRITTEN_EPISODES)
+                         for c in conditions if c in (*KAZMA_WRITTEN, TURN, EPISODES_ONLY)},
         "provider": base_url.split("//")[-1],
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
@@ -1940,6 +2105,10 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--judge", default=None, help="the judge model (the reader's model unless named)")
             s.add_argument("--ids", type=Path, default=None,
                            help="a JSON file whose ids name the questions of the split to ask")
+            s.add_argument("--written", default="",
+                           help="Kazma's memory as Kazma writes it: the written run of this name "
+                                "(scripts/longmemeval_written.py) for kazma, kazma_whole and kazma_turn, "
+                                "today's episodes alone as kazma_episodes")
             s.add_argument("--blocks", action="append", default=[], metavar="NAME=FILE",
                            help="each question's block from another checkout (scripts/longmemeval_blocks.py), "
                                 "answered as condition NAME")
@@ -1972,13 +2141,14 @@ def main(argv: list[str] | None = None) -> int:
         blocks = {}
         for spec in args.blocks:
             name, _, path = spec.partition("=")
-            if not name or not path or name in ALL_CONDITIONS:
+            if not name or not path or name in (*ALL_CONDITIONS, EPISODES_ONLY):
                 p.error(f"--blocks {spec!r}: NAME=FILE, a name of its own")
             blocks[name] = Path(path)
         return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look,
                            args.reasoning, args.judge2, args.run,
                            tuple(c for c in args.conditions.split(",") if c in ALL_CONDITIONS),
-                           judge_model=args.judge, key_env=args.key_env, blocks=blocks, ids=args.ids)
+                           judge_model=args.judge, key_env=args.key_env, blocks=blocks, ids=args.ids,
+                           written=args.written)
     if args.cmd == "translate":
         return _cmd_translate(args.data, args.model, args.base_url, args.workers, args.key_env)
     if args.cmd == "parallel":

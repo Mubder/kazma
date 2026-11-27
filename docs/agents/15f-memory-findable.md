@@ -100,7 +100,19 @@ came up short, and archiving had erased 76 memories.
   then " … " and the stretch -- a memory often names its subject first --
   unless the stretch shown alone would begin inside the opening; when the
   block's budget would leave a line out the others give way first (to
-  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). **The
+  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`): the widest
+  step that keeps as many lines of each kind as the narrowest does, so a
+  line no step can fit (a long summary, a long last conversation) takes no
+  room from the excerpts (it shrank them 822 -> 623 characters for nothing;
+  W6 step 5's review, M1). Once a line is left out, each line is counted
+  against the block it would make, so the header, the footer's count and
+  the place of a line left out cost nothing either (the frame counted at its
+  largest still cost one step at 32 of 155 English and 28 of 244 Arabic
+  budgets; the delta review's A). When every line fits at the widest, the
+  block is made as before. Gate: a block that leaves out an unfit summary or
+  last conversation equals the block without it, EN and AR, at every tenth
+  budget from 800 to 4,000, with the frame counted at its largest as the
+  negative control. **The
   budget is the whole block's** (`max_tokens`, 1,500 from the supervisor):
   rules, speakers note, fence and lines, counted as the context trim counts
   (`summarizer.estimate_text_tokens`, Arabic at about 2.5 characters a

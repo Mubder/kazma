@@ -59,7 +59,11 @@ def test_the_datasets_roll_ups_are_the_ones_the_planner_makes(replay, tmp_path, 
     refs = benchmark._seed(conn, without)
     back = {v: k for k, v in refs.items()}
     monkeypatch.setattr(topic_rollups, "_PLANNED_PER_PASS", 100)
-    monkeypatch.setattr(topic_rollups, "_month_of", _utc_month_of)
+    # The benchmark reads its days in UTC; the product reads months in the
+    # operator's zone (``recall._memory_zone``), as recall reads days.
+    from datetime import UTC
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: UTC)
     asked_on = benchmark.BASE_TIME + 116 * 86400
     topic_rollups.plan_rollups(conn, now=asked_on)
     planned = {}
@@ -71,16 +75,6 @@ def test_the_datasets_roll_ups_are_the_ones_the_planner_makes(replay, tmp_path, 
     listed = {(r["level"], r["key"] if r["level"] == "month" else r["parts"][0]): r["parts"]
               for r in data["rollups"]}
     assert planned == listed
-
-
-def _utc_month_of(ts):
-    """The month in UTC: the benchmark reads its days in UTC."""
-    from datetime import UTC, datetime
-
-    day = datetime.fromtimestamp(float(ts), UTC)
-    start = datetime(day.year, day.month, 1, tzinfo=UTC)
-    end = datetime(day.year + (day.month == 12), day.month % 12 + 1, 1, tzinfo=UTC)
-    return f"{day.year}-{day.month:02d}", start.timestamp(), end.timestamp()
 
 
 def test_v6_replays_without_roll_ups():

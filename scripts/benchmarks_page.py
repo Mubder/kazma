@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from longmemeval_bench import WRITTEN_EPISODES  # noqa: E402 - the harness's own words, one copy
+
 PAGE = ROOT / "docs" / "docs" / "reference" / "benchmarks.md"
 MEMORY = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 KNOWLEDGE = ROOT / "tests" / "fixtures" / "knowledge_bench" / "thresholds.json"
@@ -37,6 +40,7 @@ _LME_CONDITIONS = {
     "kazma": "Kazma's recall",
     "kazma_before": "Kazma's recall before the change judged (its blocks from the earlier code)",
     "kazma_turn": "Kazma's own chat turn (it reads a memory whole with memory_read)",
+    "kazma_episodes": "Kazma's recall on the conversations alone (no facts, summaries or merge)",
     "kazma_whole": "The same conversations read whole",
     "full": "The whole history",
     "oracle": "Only the answering conversations (oracle)",
@@ -622,6 +626,8 @@ def _longmemeval_dev(folder: Path) -> list[str]:
         + "). The same build answered "
         "every question twice: an answer that flips between the two runs is the noise, and no change is accepted "
         "on a difference smaller than it.",
+        "",
+        f"**What Kazma's memory held**: {(a.get('written_with') or {}).get('kazma') or WRITTEN_EPISODES}.",
         "",
         "| History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |",
         "|---|---|---|---|---|---|",

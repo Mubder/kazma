@@ -73,6 +73,19 @@
   4.1-4.4 times per four times the input here; a busy CI runner read 8.9
   and named it. Its time at each size is still read.
 
+## Memory: a summary that cannot fit no longer shortens what you see (2026-11-27)
+
+- When Kazma recalls a weekly summary, or a later conversation, too long for
+  the room left, the conversations it shows no longer give up room for it:
+  they get the widest excerpt that still fits, in English and Arabic.
+- Weekly summaries and monthly roll-ups now read days in your own time zone,
+  the one your reminders use, not the server's. Summaries written before
+  keep their week and month names wherever your zone is.
+- Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:
+  facts, weekly summaries and roll-ups, and the nightly merge. On 50
+  questions this was within the reader's noise of the facts alone; it found
+  the summary fault above.
+
 ## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
 
 - **A Word file's font table is read in linear time**: the pattern that takes
