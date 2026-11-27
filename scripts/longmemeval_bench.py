@@ -777,11 +777,9 @@ def seed_from(store: Path | None, rows: list[dict[str, Any]]) -> Any:
     def seed(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
         if store is None:
             return _seed_history(conn, rows)
-        source = sqlite3.connect(f"file:{store.as_posix()}?mode=ro", uri=True)
-        try:
-            source.backup(conn)
-        finally:
-            source.close()
+        from kazma_core.db.sqlite_snapshot import snapshot_into
+
+        snapshot_into(store, conn)  # read-only, one step (tests/test_sqlite_snapshot.py)
         return {entry["row"]["id"]: entry for entry in rows}
 
     return seed
