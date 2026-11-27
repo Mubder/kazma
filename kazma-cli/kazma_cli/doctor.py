@@ -442,34 +442,35 @@ def _cloud_profile_rows() -> list[tuple[str, str]]:
     return out
 
 
+def report_sections() -> list[tuple[str, list[tuple[str, str]]]]:
+    """The sections :func:`run` prints, in that order.
+
+    ``kazma self-check`` reads this rather than a second copy of the health
+    checks. A group ``run`` prints only when it has rows is omitted when empty;
+    the cloud profile is always present, as ``run`` always prints its heading.
+    """
+    sections: list[tuple[str, list[tuple[str, str]]]] = [
+        ("Kazma doctor — provider & model resolution", collect()),
+        ("System dependencies", _system_rows()),
+    ]
+    database = _database_service_rows()
+    if database:
+        sections.append(("The database service", database))
+    lock = _second_lock_rows()
+    if lock:
+        sections.append(("Spaces' second lock (Postgres)", lock))
+    sections.append(("The cloud profile", _cloud_profile_rows()))
+    return sections
+
+
 def run(argv: list[str] | None = None) -> int:
     """Print the report. Exit 1 if anything is broken, 0 otherwise."""
-    rows = collect()
-    print("\nKazma doctor — provider & model resolution\n")
-    for _status, rendered in rows:
-        print(rendered)
-    system_rows = _system_rows()
-    print("\nSystem dependencies\n")
-    for _status, rendered in system_rows:
-        print(rendered)
-    rows = rows + system_rows
-    db_rows = _database_service_rows()
-    if db_rows:
-        print("\nThe database service\n")
-        for _status, rendered in db_rows:
+    rows: list[tuple[str, str]] = []
+    for title, group in report_sections():
+        print(f"\n{title}\n")
+        for _status, rendered in group:
             print(rendered)
-        rows = rows + db_rows
-    lock_rows = _second_lock_rows()
-    if lock_rows:
-        print("\nSpaces' second lock (Postgres)\n")
-        for _status, rendered in lock_rows:
-            print(rendered)
-        rows = rows + lock_rows
-    cloud_rows = _cloud_profile_rows()
-    print("\nThe cloud profile\n")
-    for _status, rendered in cloud_rows:
-        print(rendered)
-    rows = rows + cloud_rows
+        rows.extend(group)
     worst = {s for s, _ in rows}
     if BAD in worst:
         print("\nOne or more checks FAILED — the next turn will likely error.")

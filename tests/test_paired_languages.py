@@ -1025,6 +1025,14 @@ DECLARED: dict[str, str] = {
     M + "memory/passages.py": "one sentence-end pattern holds both languages' marks (. ! ? and the Arabic "
                               "question mark and semicolon), so a passage is cut at sentence breaks the "
                               "same way in either; nothing is decided by which language the text is in",
+    "kazma-cli/kazma_cli/self_check.py": "kazma self-check's section titles, verdicts and closing lines "
+                                         "in both languages; the doctor's and the security report's own "
+                                         "lines stay as those checks wrote them; nothing is decided by "
+                                         "Arabic text; tests/test_self_check.py",
+    "kazma-cli/kazma_cli/known_gap_settings.py": "each setting-conditional known gap's title and detail "
+                                                 "in both languages; whether it applies is the existing "
+                                                 "setting function, not the Arabic text; "
+                                                 "tests/test_self_check.py",
 }
 
 _ARABIC = re.compile("[؀-ۿ]")

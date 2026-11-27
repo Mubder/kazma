@@ -61,6 +61,8 @@ class HardeningCheck:
     severity: str  # critical, high, medium, low, info
     message: str
     recommendation: str
+    #: False when this check did not run. Never read a failed-to-run check as a pass.
+    ran: bool = True
 
 
 @dataclass
@@ -281,6 +283,7 @@ class SecurityHardeningRunner:
                 severity="high",
                 message=f"This check could not run: {type(exc).__name__}: {exc}",
                 recommendation="Read the server log for the traceback.",
+                ran=False,
             )
 
     def generate_report(self) -> str:
@@ -515,6 +518,7 @@ class SecurityHardeningRunner:
                 message=f"The installed packages could not be checked against OSV: {exc}",
                 recommendation=behind + (update if unmet else "")
                 + "Run the report again when api.osv.dev is reachable.",
+                ran=False,
             )
         reviewed = _reviewed_note(report)
         open_vulns = report.open_vulnerabilities

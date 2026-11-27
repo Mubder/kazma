@@ -31,6 +31,7 @@ kazma
 ├── (no args)              # banner + status + help hint
 ├── status                 # probe running server, print versions
 ├── doctor                 # which model and provider will be used, and will it work
+├── self-check             # read-only report: health, security, backup, signatures, known gaps (--json)
 ├── version | --version | -V  # print Kazma's version
 ├── acquisition status     # cached crawler errors, usage and credit evidence
 ├── serve [port]           # launch Web UI (uvicorn)
@@ -223,6 +224,36 @@ connection.
 ```bash
 kazma doctor
 ```
+
+### 2.9.1 `kazma self-check` {#kazma-self-check}
+
+One read-only report, in English and Arabic. You run it. It does not run
+at startup, and it does not replace the hardening report on the security
+page. It calls the checks Kazma already has. It writes no settings and it
+does not write a backup.
+
+```bash
+kazma self-check
+kazma self-check --json
+```
+
+`--json` prints one JSON object and nothing else. Exit 0 only when every
+section is ok. Exit 1 when something needs attention, or when a check did
+not run. Exit 2 when the arguments are wrong. A check that did not run is
+reported as not run. It is never counted as a pass.
+
+| Section | What it calls |
+|---|---|
+| Health | `kazma doctor` (`kazma_cli/doctor.py`). A warning needs attention here. `kazma doctor` itself exits 0 on a warning. |
+| Security report | The same runner as `GET /api/security/hardening` (`kazma_core/security/hardening.py`). The dependency check asks OSV about the installed versions. A scan that did not run is not a pass. |
+| Latest backup | The restore drill (`kazma_core/backup/restore_drill.py`): whether the newest backup can be read back now. It does not write the live data. Unverified, including a missing `pg_restore`, is not a pass. |
+| Skill signatures | Each installed Agent Skill, including disabled ones. No skills installed is a finished check: nothing was counted as signed. |
+| Release signature | `kazma update` checks the wheel and does not keep the bundle (`kazma_cli/release_signature.py`). A source checkout, or an install with no saved bundle, is not run. |
+| Known gaps | Open entries in `docs/KNOWN_GAPS.md` that match this install's settings (`kazma_cli/known_gap_settings.py`). A closed entry is not reported as applying. |
+
+The verdict of each section is written in both languages. Lines a check
+already wrote stay in that check's words. The command is
+`kazma_cli/self_check.py`.
 
 ### 2.10 `kazma version`
 

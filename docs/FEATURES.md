@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, and those of **2026-11-21** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, those of **2026-11-21** that day, and `kazma self-check` on **2026-11-27**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -185,6 +185,7 @@ Every line below describes that setup.
 | Checked on every change: CodeQL and SonarCloud code scanning, fuzzing of the code that reads outside text, and the test suite's coverage published on Codecov | Shipped | the README's badges |
 | OpenSSF Best Practices passing badge (100%) and an OpenSSF Scorecard published weekly | Shipped | [bestpractices.dev](https://www.bestpractices.dev/projects/16743), the README's badges |
 | A defensive security review of the whole code base, every gap it found fixed with a test | Shipped — 2026-11-15; the independent outside review is still to come | [Safety design](docs/docs/security/safety-design.md) |
+| A read-only report you run: health, the security report, whether the latest backup can be restored now, the installed skills' signatures, the release signature, and which known gaps match this install's settings | Shipped — you run it; it does not run at startup. A check that cannot be made is reported as not run, never as passed. The dependency check asks OSV about installed versions when that check runs | [`kazma self-check`](docs/guide/cli-reference.md#kazma-self-check) |
 
 ## Not built
 

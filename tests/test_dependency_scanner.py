@@ -160,7 +160,7 @@ def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(ds, "audit_installed", lambda **_: down())
     check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
-    assert check.passed is False
+    assert check.passed is False and check.ran is False
     assert "could not be checked" in check.message
 
     # Negative control: the old scanner returned [] on any network error,
@@ -170,7 +170,7 @@ def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(ds, "audit_installed", lambda **_: silently_clean())
     check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
-    assert check.passed is True
+    assert check.passed is True and check.ran is True
 
 
 def test_the_report_names_the_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:

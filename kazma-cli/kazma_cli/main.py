@@ -115,6 +115,11 @@ def main() -> None:
 
         sys.exit(_run_doctor(sys.argv[2:]))
 
+    elif cmd == "self-check":
+        from kazma_cli.self_check import run as _run_self_check
+
+        sys.exit(_run_self_check(sys.argv[2:]))
+
     elif cmd == "acquisition":
         from kazma_cli.acquisition import run as _run_acquisition
 
@@ -222,6 +227,7 @@ def main() -> None:
         print("  version    Print Kazma's version (also --version, -V)")
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
+        print("  self-check Read-only report of health, security, backup, signatures and known gaps (--json)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  observer   Kazma Watch, the outside observer (setup, pair, status, unpair)")
         print("  spaces     Several people on one Kazma (spaces migrate --check: what is missing)")

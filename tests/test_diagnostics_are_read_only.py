@@ -313,6 +313,12 @@ def test_every_diagnostic_route_runs_read_only():
     doctor = ast.parse(sources["kazma-cli/kazma_cli/doctor.py"])
     collect = next(n for n in doctor.body if isinstance(n, ast.FunctionDef) and n.name == "collect")
     assert _opens_the_scope(collect), "kazma doctor must run as a read-only diagnostic"
+    report = ast.parse(sources["kazma-cli/kazma_cli/self_check.py"])
+    self_check = next(n for n in report.body if isinstance(n, ast.FunctionDef) and n.name == "collect")
+    assert _opens_the_scope(self_check), "kazma self-check must run as a read-only diagnostic"
+    # Negative control: the same function with the scope removed is not accepted.
+    planted = ast.parse("def collect():\n    return _collect()\n")
+    assert not _opens_the_scope(planted.body[0])
 
 
 def test_the_route_gate_sees_an_unscoped_probe():
