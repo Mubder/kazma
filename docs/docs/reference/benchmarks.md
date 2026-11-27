@@ -155,6 +155,8 @@ Of the 129 answerable questions whose answer is a word or a phrase, its text is 
 
 **Answering from it**: reader qwen3.7-plus with its reasoning default; judges qwen3.8-flash and qwen3.7-plus (LongMemEval's prompts; the judges swapped on 2026-11-22: each verdict is kept with the model that gave it, and no answer was asked again). The same build answered every question twice: an answer that flips between the two runs is the noise, and no change is accepted on a difference smaller than it.
 
+**What Kazma's memory held**: the history's episodes alone: no facts, weekly summaries, roll-ups or nightly merge.
+
 | History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |
 |---|---|---|---|---|---|
 | Kazma's recall | 69.0 % | 69.0 % | 2 | 97.5 % | 1,322 |

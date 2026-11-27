@@ -166,11 +166,23 @@ Reply with JSON only: {"title": "...", "summary": "...", "skip": false}
 # ── Weeks and settings ───────────────────────────────────────────────────
 
 
-def _week_of(ts: float) -> tuple[str, float, float]:
-    """The ISO week holding *ts* in the install's local time: its key
-    (``"2026-W39"``) and its start and end as epoch seconds."""
-    year, week, _ = _dt.datetime.fromtimestamp(float(ts)).date().isocalendar()
-    start = _dt.datetime.combine(_dt.date.fromisocalendar(year, week, 1), _dt.time())
+def memory_zone() -> Any:
+    """The zone memory's days are read in: the operator's
+    (``recall._memory_zone``, as recall, the Memory page and the lists read
+    them). Weeks and months were the server process's local time (the step 5
+    review, L2)."""
+    from kazma_core.memory.recall import _memory_zone
+
+    return _memory_zone()
+
+
+def _week_of(ts: float, zone: Any = None) -> tuple[str, float, float]:
+    """The ISO week holding *ts* in the operator's zone (:func:`memory_zone`,
+    read once by a caller that loops): its key (``"2026-W39"``) and its start
+    and end as epoch seconds."""
+    zone = memory_zone() if zone is None else zone
+    year, week, _ = _dt.datetime.fromtimestamp(float(ts), zone).date().isocalendar()
+    start = _dt.datetime.combine(_dt.date.fromisocalendar(year, week, 1), _dt.time(), tzinfo=zone)
     return f"{year}-W{week:02d}", start.timestamp(), (start + _dt.timedelta(days=7)).timestamp()
 
 
@@ -465,8 +477,8 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _render(turn: _Turn) -> str:
-    when = _dt.datetime.fromtimestamp(turn.at).strftime("%a %b %d %H:%M")
+def _render(turn: _Turn, zone: Any = None) -> str:
+    when = _dt.datetime.fromtimestamp(turn.at, memory_zone() if zone is None else zone).strftime("%a %b %d %H:%M")
     lines = [f"[{when}] {turn.author or 'User'}: {_clip(turn.question, _QUESTION_CHARS)}"]
     if turn.answer:
         lines.append(f"Assistant: {_clip(turn.answer, _ANSWER_CHARS)}")
@@ -492,9 +504,10 @@ def _words(turns: list[_Turn]) -> int:
 
 
 def _messages(turns: list[_Turn], period_key: str, start: float) -> list[dict[str, str]]:
-    rendered = [_render(t) for t in turns]
+    zone = memory_zone()
+    rendered = [_render(t, zone) for t in turns]
     shown = _sample(rendered, _PROMPT_CHARS)
-    monday = _dt.datetime.fromtimestamp(start).strftime("%Y-%m-%d")
+    monday = _dt.datetime.fromtimestamp(start, zone).strftime("%Y-%m-%d")
     chats = len({t.chat for t in turns if not t.note})
     notes = sum(1 for t in turns if t.note)
     head = (
@@ -829,7 +842,10 @@ async def summarize_period(
                 counts["covered"] += 1
                 continue
             try:
-                parsed = _parse(await chat(_messages(group, period_key, start)), words=_words(group))
+                # The prompt's days are in the operator's zone, a settings
+                # read: built off the loop.
+                messages = await asyncio.to_thread(_messages, group, period_key, start)
+                parsed = _parse(await chat(messages), words=_words(group))
             except LLMError as exc:
                 logger.warning("[summaries] the model call for %s failed: %s -- retried later", period_key, exc)
                 return False
@@ -903,8 +919,8 @@ async def rebuild_summary(summary_id: str, *, chat: ChatFn | None = None, model:
                 return False
         turns.sort(key=lambda t: t.at)
         try:
-            parsed = _parse(await chat(_messages(turns, row["period_key"], row["period_start"])),
-                            words=_words(turns))
+            messages = await asyncio.to_thread(_messages, turns, row["period_key"], row["period_start"])
+            parsed = _parse(await chat(messages), words=_words(turns))
         except LLMError as exc:
             logger.warning("[summaries] the model call for %s failed: %s -- retried later", summary_id, exc)
             return False
@@ -982,11 +998,12 @@ def _due_periods(conn: sqlite3.Connection, now: float, min_turns: int) -> list[t
     from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
     weeks: dict[tuple[str, str], list[Any]] = {}
+    zone = memory_zone()
     for tenant, at in conn.execute(
         f"SELECT tenant_id, created_at FROM episodes WHERE tier IN ({','.join('?' for _ in RECALLABLE_TIERS)})",
         RECALLABLE_TIERS,
     ):
-        key, start, end = _week_of(float(at or 0))
+        key, start, end = _week_of(float(at or 0), zone)
         if end + _WEEK_GRACE_S <= now:
             weeks.setdefault((space_of_record(tenant), key), [start, end, 0])[2] += 1
     state = {
