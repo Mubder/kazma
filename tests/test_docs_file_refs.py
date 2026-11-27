@@ -93,6 +93,7 @@ REMOVED_AND_SAID_SO = {
     ("docs/docs/guide/skills-mcp-and-tools.md", "kazma_core/hub/api.py"): "says the hub API was removed",
     ("docs/docs/contributing/testing.md", "crawl.py"): "the deletion incident behind the import gate",
     ("docs/KNOWN_GAPS.md", "tool_builtins.py"): "the pre-split module an old catalog generator read",
+    ("docs/docs/guide/configuration.md", "kazma-security.yaml"): "says the declaration no code read was removed (2026-11-27)",
 }
 
 

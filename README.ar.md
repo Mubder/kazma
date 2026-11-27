@@ -475,7 +475,7 @@ pytest tests/test_static_gates.py  # بوابات الفئات وحدها
 ## المساهمة والأمان والتواصل
 
 - **المساهمة:** [CONTRIBUTING.md](CONTRIBUTING.md) · [سجل التغييرات](CHANGELOG.md) (بالإنجليزية)
-- **بلاغات الأمان:** [SECURITY.md](SECURITY.md)، أو
+- **بلاغات الأمان:** [SECURITY.ar.md](SECURITY.ar.md)، أو
   [بلاغ خاص](https://github.com/Mubder/kazma/security/advisories/new)، أو
   [admin@kazma.ai](mailto:admin@kazma.ai)
 - **الموقع:** [kazma.ai](https://kazma.ai/ar/)

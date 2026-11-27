@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## The security policy, rewritten in English and Arabic (2026-11-27)
+
+- **One policy, in both languages**: `SECURITY.md` is rewritten in eleven
+  sections, from how to report to what happens after, and `SECURITY.ar.md`
+  says the same in Arabic; each opens with a link to the other. Every
+  protection is named with what it does not stop, and every number comes
+  from the threat model, the injection page or the README.
+- **The owner's decisions**: GitHub's private form first, `admin@kazma.ai`
+  as the backup; fixes for the latest release and `main` (the old `v1.0.0`
+  tag is not a release); acknowledgement within 3 days, a first assessment
+  within 7, a fix within 30 for a High or Critical issue, public disclosure
+  at most 90 days after the report, agreed with the reporter; advisories
+  only once the fix is released; reporters credited unless they ask not to
+  be; safe harbour for good-faith research on your own install, with
+  my.kazma.ai and kazma.ai's infrastructure out of scope; no bounty. A
+  forgotten turn, fact or chat coming back is a security report.
+  Cross-space reports count once Spaces is in a release, which it is not
+  yet. Third-party skills, MCP servers and packages are out of scope;
+  Kazma's own install, update and release path is in.
+- **What the old page said that was not so**: tenant isolation listed as in
+  scope (the threat model says the older multi-user tenancy is not a
+  boundary to rely on); private reporting "when enabled" (it is on); 0.20.x
+  as supported (never a GitHub Release), and 0.6.x on the website's copy;
+  "every release artifact is signed" (v0.12.0 to v0.21.1 were uploaded by
+  hand, unsigned); live-model injection numbers without the note that the
+  `compound-mini` row predates the 2026-09-12b hardening. The website pages
+  (Security policy, Vulnerability reporting) and CONTRIBUTING's section
+  change with it.
+- **`kazma-security.yaml` is removed**: no code read it, and its `scanning`
+  and `hardening` keys read like a schedule that never ran. The guides that
+  described it now point at the policy. A gate keeps product code from
+  naming it and makes a page that names it say it was removed; another
+  checks that every copy of the policy names the same channels and
+  targets, no release series and no "when enabled", each shown failing on
+  the old text.
+- **The New issue page** sends a security problem to the private form, in
+  English and Arabic (`.github/ISSUE_TEMPLATE/config.yml`); blank issues
+  stay allowed.
+
 ## One heading everywhere, and the README says what Kazma does today (2026-11-27)
 
 - **One heading, in English and Arabic**: `docs/brand/heading.json` holds the
