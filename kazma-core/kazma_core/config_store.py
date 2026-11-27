@@ -1356,10 +1356,14 @@ class ConfigStore(_ChangeNotices):
                 # mode=ro on a WAL database still creates those sidecars.
                 if not self._db_path.is_file():
                     raise FileNotFoundError(self._db_path.name)
+                # Same kept holder as _get_conn. Autocommit here too: the
+                # write-lock gate judges every open of self._conn, and a
+                # default-mode reopen makes every ordinary write look unguarded.
                 self._conn = sqlite3.connect(
                     self._db_path.resolve().as_uri() + "?immutable=1",
                     uri=True,
                     check_same_thread=False,
+                    isolation_level=None,
                 )
                 self._conn.row_factory = sqlite3.Row
                 return

@@ -120,7 +120,10 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   open group fails); a
   `sqlite3` connection every write on which runs inside `with conn:` (commit,
   or rollback when the block raises); or LangGraph's saver connection, on
-  which Kazma writes nothing of its own. An aiosqlite connection kept in the
+  which Kazma writes nothing of its own. A second open of the same holder
+  is that connection too: the immutable read during self-check is autocommit
+  as well, or the gate treats every write on the holder as unguarded
+  (2026-11-27). An aiosqlite connection kept in the
   default mode is refused: `async with` closes it, it is no transaction.
   Every explicit `BEGIN` in product code rolls back on its error path (same
   file). Behaviour: `tests/test_kept_connection_error_paths.py` makes each

@@ -513,6 +513,7 @@ REVIEWED: dict[str, frozenset[str]] = {
         "scripts/restore_kazma.py::main",
     }),
     "the data folder's own names, one level, and no folder of it is entered here": frozenset({
+        "kazma-cli/kazma_cli/self_check.py::_data_folder_problem",
         "kazma-core/kazma_core/backup/universal.py::_copy_assets",
         "kazma-core/kazma_core/migration/exporter.py::_export_data_dir_files",
         "kazma-core/kazma_core/migration/exporter.py::export_bundle",
