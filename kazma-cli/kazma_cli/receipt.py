@@ -47,10 +47,16 @@ _PUB_EN = "The public half of this install's receipt key. The private half stays
 _PUB_AR = "النصف العلني لمفتاح إيصالات هذا التثبيت. النصف الخاص يبقى في الخزنة."
 _NO_VAULT_EN = "not recorded. This install has no vault key, so a receipt cannot be signed."
 _NO_VAULT_AR = "غير مسجّل. لا مفتاح خزنة لهذا التثبيت، لذا لا يمكن توقيع إيصال."
+_NO_VAULT_FILE_EN = "not recorded. This install has no vault file, so a receipt cannot be signed."
+_NO_VAULT_FILE_AR = "غير مسجّل. لا ملف خزنة لهذا التثبيت، لذا لا يمكن توقيع إيصال."
 _NO_VAULT_CHECK_EN = (
     "not recorded. This check was not given a public key, and this install's vault key is not set."
 )
 _NO_VAULT_CHECK_AR = "غير مسجّل. لم يُعطَ هذا الفحص مفتاحاً علنياً، ولا مفتاح خزنة لهذا التثبيت."
+_NO_VAULT_FILE_CHECK_EN = (
+    "not recorded. This check was not given a public key, and this install has no vault file."
+)
+_NO_VAULT_FILE_CHECK_AR = "غير مسجّل. لم يُعطَ هذا الفحص مفتاحاً علنياً، ولا ملف خزنة لهذا التثبيت."
 _NO_SIGN_EN = "not recorded. This install has no signing key."
 _NO_SIGN_AR = "غير مسجّل. لا مفتاح توقيع لهذا التثبيت."
 _NO_PUB_EN = (
@@ -1000,11 +1006,33 @@ def _vault_file_absent() -> bool:
     return not (data_dir(create=False) / "vault.db").is_file()
 
 
+def _real_vault_file_missing() -> bool:
+    """The real opener would create ``vault.db``. A replaced opener is not this case.
+
+    ``KAZMA_VAULT_KEY`` can be set while the file is still absent. That is a
+    missing file, not a missing key.
+    """
+    from kazma_core.security import vault as vault_mod
+
+    return vault_mod.get_vault is _REAL_GET_VAULT and _vault_file_absent()
+
+
+def _vault_absent_lines(*, check: bool) -> list[str]:
+    """Why the vault cannot sign or verify: the file, or the key."""
+    if _real_vault_file_missing():
+        if check:
+            return [_NO_VAULT_FILE_CHECK_EN, _NO_VAULT_FILE_CHECK_AR]
+        return [_NO_VAULT_FILE_EN, _NO_VAULT_FILE_AR]
+    if check:
+        return [_NO_VAULT_CHECK_EN, _NO_VAULT_CHECK_AR]
+    return [_NO_VAULT_EN, _NO_VAULT_AR]
+
+
 def _vault() -> Any:
     from kazma_core.security import vault as vault_mod
 
     getter = vault_mod.get_vault
-    if getter is _REAL_GET_VAULT and _vault_file_absent():
+    if _real_vault_file_missing():
         return None
     return getter()
 
@@ -1147,7 +1175,7 @@ def _verify_bytes(data: bytes, public: Ed25519PublicKey | None = None) -> tuple[
     if public is None:
         vault = _vault()
         if vault is None:
-            return 1, [_NO_VAULT_CHECK_EN, _NO_VAULT_CHECK_AR]
+            return 1, _vault_absent_lines(check=True)
         try:
             private = _installed_private(vault)
         except _NoKeyError:
@@ -1242,23 +1270,19 @@ def _caller_scope() -> Any:
 def _work_refusal(message: str) -> str | None:
     """``runs_refusal``, without creating ``settings.db`` on a fresh install.
 
-    No settings file means no platform users. ``KAZMA_MULTI_USER`` and a
-    Spaces switch already in this process are still honoured. The env words
-    are the ones :func:`kazma_core.security.platform_rbac.multi_user_enabled`
-    reads before it opens the store.
+    No settings file means no platform users. The env word is
+    :func:`kazma_core.security.platform_rbac.multi_user_enabled` with
+    ``store=False``, so this command does not open the store. A Spaces
+    switch already in this process is still honoured.
     """
     if _settings_file_absent():
-        import os
-
         from kazma_core.runs.spaces import NO_SPACE_REFUSAL
+        from kazma_core.security.platform_rbac import multi_user_enabled
         from kazma_core.spaces.scope import current_scope, spaces_enforced
 
         if spaces_enforced():
             return None if current_scope() is not None else NO_SPACE_REFUSAL
-        forced = (os.environ.get("KAZMA_MULTI_USER") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
-        return message if forced else None
+        return message if multi_user_enabled(store=False) else None
     from kazma_core.runs.spaces import runs_refusal
 
     return runs_refusal(message)
@@ -1275,7 +1299,7 @@ def _emit(args: argparse.Namespace) -> int:
         return 1
     vault = _vault()
     if vault is None:
-        _say([_NO_VAULT_EN, _NO_VAULT_AR])
+        _say(_vault_absent_lines(check=False))
         return 1
     try:
         private = _signing_key(vault)
@@ -1316,7 +1340,7 @@ def _emit(args: argparse.Namespace) -> int:
 def _print_public_key() -> int:
     vault = _vault()
     if vault is None:
-        _say([_NO_VAULT_EN, _NO_VAULT_AR])
+        _say(_vault_absent_lines(check=False))
         return 1
     try:
         private = _signing_key(vault)

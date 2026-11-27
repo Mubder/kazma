@@ -963,7 +963,7 @@ def thread_decisions(
         return None
     from pathlib import Path
 
-    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
     from kazma_core.diagnostic_scope import DiagnosticWriteRefused
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
@@ -976,7 +976,7 @@ def thread_decisions(
     if not path.is_file():
         return None
     try:
-        conn = connect_immutable(path)
+        conn = connect_read_only(path)
         try:
             conn.row_factory = sqlite3.Row
             columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(hitl_gates)")}

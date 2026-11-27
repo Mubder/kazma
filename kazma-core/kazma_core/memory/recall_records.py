@@ -104,17 +104,22 @@ def _shown_from_row(row: Any) -> dict[str, Any] | None:
 
 
 def _shown_immutable(key: str, tenant_id: str | None) -> dict[str, Any] | None:
-    """:func:`shown_record` with no schema step and no sidecar files."""
+    """:func:`shown_record` with no schema step.
+
+    The database file itself does not change. A crashed writer's leftover
+    ``-wal`` can leave a new ``-shm``, and a race that removes ``-wal``
+    before the open can leave both.
+    """
     from pathlib import Path
 
-    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
     from kazma_core.paths import memory_ops_db
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     path = Path(memory_ops_db(create=False))
     if not path.is_file():
         return None
-    conn = connect_immutable(path)
+    conn = connect_read_only(path)
     try:
         conn.row_factory = sqlite3.Row
         columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(memory_recall_records)")}
@@ -155,7 +160,7 @@ def shown_record(
     the database cannot be read. ``used`` is ``None`` when that column is
     NULL: not recorded, not unused. Does not create the database and does
     not write (``judge_used`` is the writer of ``used``). The asker and the
-    tenant stay in the row. *read_only* opens the file immutable and raises
+    tenant stay in the row. *read_only* opens the file read-only and raises
     ``NotReadableError`` instead of migrating it. *tenant_id* keeps another
     space's row out; the owner's id also matches an empty tenant (N19).
     """

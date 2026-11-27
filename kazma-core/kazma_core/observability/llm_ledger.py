@@ -500,14 +500,14 @@ def recorded_usage(
     """
     from pathlib import Path
 
-    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
     from kazma_core.paths import llm_calls_db
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     path = Path(llm_calls_db(create=False))
     if not path.is_file():
         return None
-    conn = connect_immutable(path)
+    conn = connect_read_only(path)
     try:
         columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_calls)")}
         needed = {"thread_id", "turn_id", "total_tokens", "cost_usd", "priced", "prompt_tokens", "cached_tokens"}

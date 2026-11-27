@@ -168,18 +168,21 @@ class _EffectJournal:
     ) -> list[dict[str, Any]]:
         """Read receipt metadata without exposing results or changing state.
 
-        No schema step and no new ``-wal`` or ``-shm``. A log already beside
-        the file is read, so a committed row still in it counts. *turn_ids*
+        No schema step. The database file itself does not change. A crashed
+        writer's leftover ``-wal`` (no ``-shm``) leaves a new ``-shm``. If
+        ``-wal`` disappears between the check and the open, both ``-wal``
+        and ``-shm`` can be left. A log already beside the file is read, so
+        a committed row still in it counts. *turn_ids*
         or *space* on a file that has no such column raises
         :class:`~kazma_core.db.sqlite_session.NotReadableError`. With neither, an
         older file is read as it stands.
         """
         if not self.path.exists():
             return []
-        from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+        from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
         from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-        conn = connect_immutable(self.path)
+        conn = connect_read_only(self.path)
         try:
             conn.row_factory = sqlite3.Row
             columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(tool_effects)")}

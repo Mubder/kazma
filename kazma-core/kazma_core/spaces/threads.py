@@ -137,9 +137,9 @@ def thread_scopes_db(*, create: bool = True) -> str:
 
     ``create=False`` does not make the data folder.
     """
-    from kazma_core.paths import data_dir
+    from kazma_core.paths import _data_folder
 
-    return str(Path(data_dir(create=create)) / "thread_scopes.db")
+    return str(Path(_data_folder(create=create)) / "thread_scopes.db")
 
 
 _schema_lock = threading.Lock()
@@ -192,12 +192,12 @@ def stored_record(thread_id: str) -> ThreadRecord | None:
     """
     if not thread_id:
         return None
-    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
 
     path = Path(thread_scopes_db(create=False))
     if not path.is_file():
         return None
-    conn = connect_immutable(path)
+    conn = connect_read_only(path)
     try:
         found = conn.execute(
             "SELECT thread_id, space_id, opener, created_at, copied_at FROM thread_scopes "

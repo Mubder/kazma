@@ -156,6 +156,18 @@ def data_dir(*, create: bool = True) -> Path:
     return d
 
 
+def _data_folder(*, create: bool) -> Path:
+    """The data folder a store path is built from.
+
+    The common path calls :func:`data_dir` with no arguments, so a test that
+    stubs it as a zero-argument function still answers. ``create=False`` is
+    only a reader that must not make the folder.
+    """
+    if create:
+        return data_dir()
+    return data_dir(create=False)
+
+
 def vector_memory_path() -> str:
     """ChromaDB vector memory path."""
     env = os.environ.get("KAZMA_VECTOR_PATH")
@@ -197,22 +209,22 @@ def memory_ops_db(*, create: bool = True) -> str:
     env = os.environ.get("KAZMA_MEMORY_OPS_DB")
     if env:
         return str(Path(env).expanduser().resolve())
-    return str(data_dir(create=create) / "memory_ops.db")
+    return str(_data_folder(create=create) / "memory_ops.db")
 
 
 def tool_effects_db(*, create: bool = True) -> str:
     """The effect-receipt journal (``tool_effects.db``)."""
-    return str(data_dir(create=create) / "tool_effects.db")
+    return str(_data_folder(create=create) / "tool_effects.db")
 
 
 def llm_calls_db(*, create: bool = True) -> str:
     """The model-call ledger (``llm_calls.db``)."""
-    return str(data_dir(create=create) / "llm_calls.db")
+    return str(_data_folder(create=create) / "llm_calls.db")
 
 
 def hitl_gates_db(*, create: bool = True) -> str:
     """The approval registry (``hitl_gates.db``)."""
-    return str(data_dir(create=create) / "hitl_gates.db")
+    return str(_data_folder(create=create) / "hitl_gates.db")
 
 
 def memory_forget_journal_db() -> str:

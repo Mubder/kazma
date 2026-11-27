@@ -662,13 +662,18 @@ def set_local_password(username: str, password: str) -> bool:
     return False
 
 
-def multi_user_enabled() -> bool:
-    """True when platform users exist or KAZMA_MULTI_USER=1."""
+def multi_user_enabled(*, store: bool = True) -> bool:
+    """True when ``KAZMA_MULTI_USER`` forces it, or platform users exist.
+
+    ``store=False`` answers from the environment only and does not open the
+    settings store, so a reader of a fresh install does not create
+    ``settings.db``. An unreadable store still raises when ``store`` is
+    true: "no users" is single-operator mode (audit 2026-10-26 AUD-123).
+    """
     if (os.environ.get("KAZMA_MULTI_USER") or "").strip().lower() in (
         "1", "true", "on", "yes",
     ):
         return True
-    # Raises PlatformUsersUnavailable when the store cannot answer: "no users"
-    # is single-operator mode, so an unreadable list must not read as empty
-    # (audit 2026-10-26 AUD-123). Every caller fails closed on the error.
+    if not store:
+        return False
     return bool(_load_users_from_store())

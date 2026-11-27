@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["NotReadableError", "committed_and_closed", "connect_immutable", "write_transaction"]
+__all__ = ["NotReadableError", "committed_and_closed", "connect_read_only", "write_transaction"]
 
 #: One lock per connection: two groups on one connection wait for each other
 #: instead of the second failing with "cannot start a transaction within a
@@ -47,13 +47,20 @@ class NotReadableError(Exception):
     """
 
 
-def connect_immutable(path: Path | str) -> sqlite3.Connection:
-    """Open *path* without creating a sidecar and without a schema step.
+def connect_read_only(path: Path | str) -> sqlite3.Connection:
+    """Open *path* for reading. The database file itself never changes.
 
-    A ``-wal`` file that is already there is read with ``mode=ro``: rows
-    committed into that log are visible, and the read creates no new sidecar.
-    ``mode=ro`` when no ``-wal`` exists would create ``-wal`` and ``-shm``,
-    so that case stays ``immutable=1``, which creates neither. The caller
+    A ``-wal`` file that is already there is read with ``mode=ro``, so rows
+    committed into that log are visible. ``mode=ro`` with no ``-wal`` would
+    create ``-wal`` and ``-shm``, so that case stays ``immutable=1``.
+
+    The read can still leave a sidecar. A crashed writer leaves ``-wal`` and
+    no ``-shm``: this open creates ``-shm`` and leaves it. If ``-wal``
+    disappears between the check and the open, ``mode=ro`` creates both
+    ``-wal`` and ``-shm`` and leaves them. Neither case changes the database
+    file. There is no schema step, and the connection cannot insert, create
+    a table or checkpoint. On a read-only folder the crashed-writer case
+    fails to open; the caller reports that as not readable. The caller
     closes the connection.
     """
     resolved = Path(path).resolve()

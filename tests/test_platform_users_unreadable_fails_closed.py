@@ -74,6 +74,13 @@ def test_the_swallowing_reader_said_no_users(broken) -> None:
         platform_rbac._load_users_from_store()
 
 
+def test_an_env_only_answer_does_not_open_the_store(broken, monkeypatch) -> None:
+    """``store=False`` is the fresh-install answer: the store stays closed."""
+    assert platform_rbac.multi_user_enabled(store=False) is False
+    monkeypatch.setenv("KAZMA_MULTI_USER", "yes")
+    assert platform_rbac.multi_user_enabled(store=False) is True
+
+
 def test_a_readable_empty_list_is_still_single_operator(monkeypatch) -> None:
     monkeypatch.delenv("KAZMA_MULTI_USER", raising=False)
 

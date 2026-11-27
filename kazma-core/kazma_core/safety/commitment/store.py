@@ -406,8 +406,8 @@ def list_by_thread(
 ) -> list[Commitment]:
     """The thread's commitments.
 
-    *read_only* opens the file immutable: no database is created and no
-    schema step runs. *tenant_id* None then does not filter by space. The
+    *read_only* opens the file read-only: the database file is not created
+    and no schema step runs. *tenant_id* None then does not filter by space. The
     writing form still resolves an empty tenant to the space bound now.
     """
     if read_only:
@@ -442,14 +442,14 @@ def _list_recorded(
     """
     from pathlib import Path
 
-    from kazma_core.db.sqlite_session import NotReadableError, connect_immutable
+    from kazma_core.db.sqlite_session import NotReadableError, connect_read_only
     from kazma_core.paths import memory_ops_db
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     path = Path(memory_ops_db(create=False))
     if not path.is_file():
         return []
-    conn = connect_immutable(path)
+    conn = connect_read_only(path)
     try:
         conn.row_factory = sqlite3.Row
         columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(commitments)")}

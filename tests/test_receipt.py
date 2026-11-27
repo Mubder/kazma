@@ -1140,7 +1140,8 @@ def test_a_fresh_install_creates_no_store(tmp_path, monkeypatch, capsys):
         code = run(["chat_turn:thr"])
         shown = "".join(capsys.readouterr())
         assert code == 1
-        assert "no vault key" in shown
+        assert "This install has no vault file, so a receipt cannot be signed." in shown
+        assert "لا ملف خزنة لهذا التثبيت، لذا لا يمكن توقيع إيصال." in shown
         assert not (data / "vault.db").exists()
         assert not (data / "settings.db").exists()
 
@@ -1156,7 +1157,8 @@ def test_a_fresh_install_creates_no_store(tmp_path, monkeypatch, capsys):
         code = run_verify([str(note)])
         shown = "".join(capsys.readouterr())
         assert code == 1
-        assert "vault key is not set" in shown
+        assert "this install has no vault file." in shown
+        assert "ولا ملف خزنة لهذا التثبيت." in shown
         assert not (data / "vault.db").exists()
         assert not (data / "settings.db").exists()
         assert store_path.is_file() == store_existed
@@ -1164,3 +1166,29 @@ def test_a_fresh_install_creates_no_store(tmp_path, monkeypatch, capsys):
         reset_vault()
         reset_config_store()
         set_enforced(False)
+
+
+def test_a_missing_settings_file_asks_multi_user_without_opening_it(monkeypatch, capsys):
+    """The env word is platform_rbac's, and the store is not opened."""
+    import kazma_cli.receipt as receipt
+    from kazma_core.spaces.scope import set_enforced
+
+    seen: list[bool] = []
+
+    def answer(*, store: bool = True) -> bool:
+        seen.append(store)
+        return True
+
+    set_enforced(False)
+    monkeypatch.setattr(receipt, "_settings_file_absent", lambda: True)
+    monkeypatch.setattr("kazma_core.security.platform_rbac.multi_user_enabled", answer)
+    try:
+        code = run(["chat_turn:thr"])
+    finally:
+        set_enforced(False)
+    captured = capsys.readouterr()
+    shown = captured.out + captured.err
+    assert code == 1
+    assert seen == [False]
+    assert "A receipt is shown for one install." in shown
+    assert "يُعرض الإيصال لتثبيت واحد." in shown
