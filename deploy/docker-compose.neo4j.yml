@@ -17,7 +17,7 @@ services:
   kazma-neo4j:
     # Pinned by version and digest (2026-11-13): `neo4j:5` ran whatever the
     # registry served at each start. 5.26 is Neo4j's long-term-support line.
-    image: neo4j:5.26.32@sha256:42ef3ebfd671ebd01fdebb6dcbe80cf7b45eef2aa3d346ef4132f7ef31e67d2f
+    image: neo4j:5.26.34@sha256:2c48628bc28c68d7e2787f76262dfc9d7c21a8f7f290e30da901c489aa7fe50d
     container_name: kazma-neo4j
     ports:
       - "127.0.0.1:7474:7474"
