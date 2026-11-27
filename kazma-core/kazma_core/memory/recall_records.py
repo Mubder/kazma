@@ -48,6 +48,7 @@ __all__ = [
     "RETENTION_DAYS",
     "judge_used",
     "record_recall",
+    "shown_record",
     "signals",
     "turn_key",
 ]
@@ -76,6 +77,59 @@ def turn_key(thread_id: Any, messages: list[Any]) -> str | None:
 
     turn = current_turn_id() or f"{user_turn_index(messages)}\x00{extract_latest_user_text(messages)}"
     return hashlib.sha256(f"{thread}\x00{turn}".encode("utf-8", "replace")).hexdigest()
+
+
+def shown_record(key: str | None) -> dict[str, Any] | None:
+    """Ids and flags of one turn's recall record. Never the memory text.
+
+    ``None`` when *key* is empty, no row is stored, or the database cannot be
+    read. ``used`` is ``None`` when that column is NULL: not recorded, not
+    unused. Does not create the database and does not write (``judge_used``
+    is the writer of ``used``). The asker and the tenant stay in the row.
+    """
+    if not key:
+        return None
+    from kazma_core.diagnostic_scope import DiagnosticWriteRefused
+    from kazma_core.memory.quality_watch import ops_conn
+
+    try:
+        conn = ops_conn(create=False)
+        if conn is None:
+            return None
+        with closing(conn):
+            row = conn.execute(
+                "SELECT shown_json, shown_count, empty, degraded, failed, latency_ms, used "
+                "FROM memory_recall_records WHERE turn_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        shown = json.loads(row["shown_json"] or "{}")
+        if not isinstance(shown, dict):
+            return None
+        ids: dict[str, list[str]] = {}
+        for kind in ("episodes", "beliefs", "summaries"):
+            raw = shown.get(kind)
+            if isinstance(raw, list):
+                ids[kind] = [str(item) for item in raw if isinstance(item, (str, int))]
+            else:
+                ids[kind] = []
+        used_raw = row["used"]
+        used = None if used_raw is None else bool(int(used_raw))
+        return {
+            "shown": ids,
+            "shown_count": int(row["shown_count"] or 0),
+            "empty": bool(int(row["empty"] or 0)),
+            "degraded": str(row["degraded"] or ""),
+            "failed": bool(int(row["failed"] or 0)),
+            "latency_ms": int(row["latency_ms"] or 0),
+            "used": used,
+        }
+    except DiagnosticWriteRefused:
+        raise
+    except (sqlite3.Error, OSError, ValueError, TypeError, LookupError, UnicodeError):
+        logger.warning("[recall_records] a turn's recall record could not be read", exc_info=True)
+        return None
 
 
 def record_recall(

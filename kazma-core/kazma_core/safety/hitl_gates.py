@@ -945,6 +945,62 @@ def display_gates(thread_id: str) -> list[GateRow]:
         conn.close()
 
 
+def thread_decisions(thread_id: str) -> list[dict[str, Any]] | None:
+    """Every approval row for one thread, oldest first, including settled ones.
+
+    ``live_gates`` and ``display_gates`` leave settled decisions out. The
+    decision and the actor are who decided (§30). ``None`` when the registry
+    file is not there or cannot be read: a missing file is not an empty
+    history. Does not create the database. Arguments, payloads and who asked
+    are not returned; the message is the row's own text, already redacted
+    when it was stored.
+    """
+    if not str(thread_id or "").strip():
+        return None
+    from pathlib import Path
+
+    from kazma_core.diagnostic_scope import DiagnosticWriteRefused
+
+    if _db_path_override:
+        path = Path(_db_path_override)
+    else:
+        from kazma_core.paths import data_dir
+
+        path = data_dir(create=False) / "hitl_gates.db"
+    if not path.is_file():
+        return None
+    from contextlib import closing
+
+    uri = path.resolve().as_uri() + "?mode=ro"
+    try:
+        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM hitl_gates WHERE thread_id = ? ORDER BY created_at ASC",
+                (thread_id,),
+            ).fetchall()
+            gates = [_row_to_gate(row) for row in rows]
+    except DiagnosticWriteRefused:
+        raise
+    except (sqlite3.Error, OSError, ValueError, TypeError, LookupError, UnicodeError):
+        logger.warning("[HitlGates] a thread's decisions could not be read", exc_info=True)
+        return None
+    return [
+        {
+            "gate_id": gate.gate_id,
+            "tool": gate.tool,
+            "state": gate.state,
+            "decision": gate.decision,
+            "actor": gate.actor,
+            "created_at": gate.created_at,
+            "claimed_at": gate.claimed_at,
+            "settled_at": gate.settled_at,
+            "message": gate.message,
+        }
+        for gate in gates
+    ]
+
+
 def recorded_decision_count() -> int:
     """How many approval questions the registry holds a decision for.
 

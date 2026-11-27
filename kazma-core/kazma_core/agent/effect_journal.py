@@ -276,21 +276,29 @@ def forget_thread_receipts(thread_id: str) -> int:
     return _EffectJournal(data_dir() / "tool_effects.db").forget_thread(thread_id)
 
 
+def inspect_effects(thread_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    """Receipt metadata for one thread: no tool results, and no change of state.
+
+    The same read :meth:`_EffectJournal.inspect` does. An absent journal file
+    is an empty list (the file is created by the first effect, not by a read).
+    """
+    from kazma_core.paths import data_dir
+
+    return _EffectJournal(data_dir() / "tool_effects.db").inspect(thread_id, limit=limit)
+
+
 def main() -> int:
     """Operator inspection only; unknown effects are never reset or replayed."""
     import argparse
 
     from kazma_core.env_files import load_env_files
-    from kazma_core.paths import data_dir
 
     parser = argparse.ArgumentParser(description="Inspect graph tool receipt metadata without replaying effects.")
     parser.add_argument("--thread", required=True)
     parser.add_argument("--limit", type=int, default=200)
     args = parser.parse_args()
     load_env_files()
-    print(json.dumps(_EffectJournal(data_dir() / "tool_effects.db").inspect(
-        args.thread, limit=args.limit,
-    ), ensure_ascii=False, indent=2))
+    print(json.dumps(inspect_effects(args.thread, limit=args.limit), ensure_ascii=False, indent=2))
     return 0
 
 

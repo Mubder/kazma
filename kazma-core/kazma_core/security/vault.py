@@ -136,6 +136,11 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # The pairing token of the Kazma Watch `kazma observer setup` deployed
     # (2026-11-14): read by the CLI, with no tenant bound.
     ("observer.", "global"),
+    # The receipt signing key (`kazma receipt`, 2026-11-27): made on first
+    # use and read by `kazma verify-receipt`, with no tenant bound. A later
+    # save must not replace it (`store_install_once`): files already signed
+    # would stop verifying. The private half never leaves the vault.
+    ("receipt.", "global"),
     # Password hashes inside the identity store's registry (Spaces S1-01):
     # written in an admin's request, read by sign-in before any tenant is
     # bound.
@@ -1123,6 +1128,56 @@ class SecretVault:
         """
         refuse_write("vault", name)
         return self._write_install_scoped(name, value, category, None)[0]
+
+    def store_install_once(
+        self, name: str, value: str, category: str = "general",
+    ) -> str | None:
+        """Store *name* for the install only when no global row exists.
+
+        A receipt key written twice would make every file the first key
+        signed fail to verify. Returns the value now stored: the one already
+        there, or *value* when this call wrote it. ``None`` when a global row
+        exists but does not open with this vault key — it is left as it is,
+        not replaced. *name* must be install-scoped (``ValueError`` otherwise).
+        """
+        if not is_install_scoped_secret(name):
+            raise ValueError(f"{name} is not an install-scoped secret")
+        refuse_write("vault", name)
+        from cryptography.exceptions import InvalidTag
+
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
+                   WHERE name = ? AND tenant_id IS NULL
+                   ORDER BY rowid DESC LIMIT 1""",
+                (name,),
+            ).fetchone()
+            if row is not None:
+                try:
+                    return self._open_row(row)
+                except (InvalidTag, ValueError, UnicodeError):
+                    logger.warning(
+                        "[Vault] '%s' is stored but does not open with this key; left as it is",
+                        name,
+                    )
+                    return None
+            self._write_install_scoped(name, value, category, None)
+            row = self._conn.execute(
+                """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
+                   WHERE name = ? AND tenant_id IS NULL
+                   ORDER BY rowid DESC LIMIT 1""",
+                (name,),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                return self._open_row(row)
+            except (InvalidTag, ValueError, UnicodeError):
+                logger.warning(
+                    "[Vault] '%s' was stored but does not open with this key",
+                    name,
+                )
+                return None
 
     def _write_install_scoped(
         self, name: str, value: str, category: str, metadata: dict[str, Any] | None,

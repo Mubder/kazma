@@ -214,6 +214,16 @@ def main() -> None:
     elif cmd == "mcp":
         _run_mcp(sys.argv[2:])
 
+    elif cmd == "receipt":
+        from kazma_cli.receipt import run as _run_receipt
+
+        sys.exit(_run_receipt(sys.argv[2:]))
+
+    elif cmd == "verify-receipt":
+        from kazma_cli.receipt import run_verify
+
+        sys.exit(run_verify(sys.argv[2:]))
+
     elif cmd in ("--help", "-h", "help"):
         from kazma_cli.banner import _get_version
 
@@ -247,6 +257,8 @@ def main() -> None:
         print("  ask        Run the agent on a prompt (no web server)")
         print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")
         print("  mcp        Serve Kazma's tools over MCP (stdio), HITL-gated")
+        print("  receipt    A signed receipt of one run (receipt <run-id>; --json or --html; --public-key)")
+        print("  verify-receipt  Check that receipt with this install's key")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: KAZMA_PORT, see kazma setup port)")
