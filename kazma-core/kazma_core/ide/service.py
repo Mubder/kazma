@@ -97,17 +97,24 @@ def _kazma_file_refusal(target: Path, *, write: bool) -> str | None:
     return store_refusal(target, door="the IDE")
 
 
-class _ReadRefused(Exception):
-    """A read-only git content read refused before it ran; the text is the
-    sentence for the page (``safety.git_kazma_files.read_refusal``)."""
+def _said(key: str) -> str:
+    """*key*'s sentence in the reader's language; the key itself where the
+    UI's catalog is not loaded (a code a page can word)."""
+    try:
+        from kazma_ui.i18n import current_language, t
+    except ImportError:
+        return key
+    return t(key, current_language())
 
 
 def _is_readonly_git(subcommand: str) -> bool:
-    """True for git verbs that do not mutate the repo or remotes."""
-    from kazma_core.ide.git_policy import read_operands, split_git_command
+    """True when *subcommand* is one of the card-less git forms by its words
+    (``git_policy.card_less_shape``): ``kazma_ui.ide_effects`` admits it as a
+    read. The repository's own check comes after, in :meth:`IdeService.git`,
+    and a read it sends to the card is answered ``needs_approval`` there."""
+    from kazma_core.ide.git_policy import card_less_shape, split_git_command
     try:
-        read_operands(split_git_command(subcommand))
-        return True
+        return card_less_shape(split_git_command(subcommand)) is not None
     except ValueError:
         return False
 
@@ -619,64 +626,83 @@ class IdeService:
             "changed": bool(text),
         }
 
-    async def git(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
+    async def git(self, subcommand: str, timeout: int = 60, *, admitted_as_read: bool = False) -> dict[str, Any]:
         """Run a git subcommand inside the workspace.
 
-        Read-only commands (``status``, ``log``, ``diff``, …) run via
-        ``subprocess`` in the workspace cwd — they must **not** go through
-        ``shell_exec`` / HITL (Hands 0.11: ``git status -sb`` on IDE init
-        spammed Telegram REJECTED cards on every restart).
+        A card-less form (``git_policy.CARD_LESS``: status, listings, names,
+        and the contents reads ``safety.git_kazma_files`` judges in the
+        repository) runs here via ``subprocess``, with no approval card: the
+        IDE asks ``status -s`` on every start (Hands 0.11: through
+        ``shell_exec`` it spammed Telegram REJECTED cards). Everything else
+        goes to ``run()`` -> ``shell_exec``, whose approval card shows the
+        exact command: an unknown verb or option, a tree, a blob, a note, a
+        stash entry, a commit no ref holds, push, commit, clean.
 
-        Mutating commands still use ``run()`` → ``shell_exec`` so HITL
-        fires for push/commit/clean.
+        *admitted_as_read*: the caller let the request in as a read
+        (``kazma_ui.ide_effects``), so it starts no effect here; a read the
+        repository's check sends to the card is answered ``needs_approval``,
+        with the command, for the caller to send through its effect route.
         """
         if not subcommand or not subcommand.strip():
             return {"ok": False, "error": "Empty git subcommand", "output": ""}
         sub = subcommand.strip()
-        from kazma_core.ide.git_policy import is_read_request, split_git_command
+        from kazma_core.ide.git_policy import card_less_shape, kazma_operand_refusal, split_git_command
         try:
             parts = split_git_command(sub)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
-        if is_read_request(parts):
-            return await self._git_read(sub, timeout=timeout)
+        root = await asyncio.to_thread(lambda: self.root)
+        refusal = await asyncio.to_thread(kazma_operand_refusal, parts, root)
+        if refusal:
+            return {"ok": False, "error": refusal, "output": ""}
+        if card_less_shape(parts) is not None:
+            answer = await self._git_read(parts, timeout=timeout)
+            if answer is not None:
+                return answer
+            if admitted_as_read:
+                return {"ok": False, "needs_approval": True, "command": f"git {sub}",
+                        "error": _said("ide.git_needs_approval"), "output": ""}
         return await self.run(f"git {sub}", timeout=timeout)
 
-    async def _git_read(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
+    async def _git_read(self, parts: list[str], timeout: int = 60) -> dict[str, Any] | None:
+        """A card-less git read, with no approval card; None when it goes to
+        the card instead.
+
+        The form is checked in the workspace (``git_policy.card_less_form``)
+        and judged, run and filtered by ``safety.git_kazma_files.
+        run_card_less``, every question to git with this read's own argv
+        (``READ_GLOBALS``, no lazy fetch, no pager, hooks, fsmonitor,
+        signature program or filter driver) and environment."""
         import asyncio
         import os
         import subprocess
-
         from collections.abc import Sequence
 
-        from kazma_core.ide.git_policy import split_git_command, validate_read_paths
-        from kazma_core.safety.git_kazma_files import CONTENT_VERBS, read_refusal
+        from kazma_core.ide.git_policy import card_less_form
+        from kazma_core.safety.git_kazma_files import CardLessRead, run_card_less
+        from kazma_core.safety.git_read import READ_CONFIG, READ_GLOBALS, no_hooks_dir
         from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
         root = await asyncio.to_thread(lambda: self.root)
         cwd = str(root)
-        try:
-            parts = split_git_command(subcommand)
-            await asyncio.to_thread(validate_read_paths, parts, root)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc), "output": ""}
-
+        form = await asyncio.to_thread(card_less_form, parts, root)
+        if form is None:
+            return None
         binary = await asyncio.to_thread(
             resolve_shell_binary, "git",
             restricted_path=os.pathsep.join(system_path_dirs()),
         )
         if not binary:
             return {"ok": False, "error": "Git could not be resolved on the trusted tool PATH", "output": ""}
-        parts = list(parts)
-        if parts[0] in ("diff", "log", "show", "blame") or parts[:2] == ["stash", "show"]:
-            index = 2 if parts[:2] == ["stash", "show"] else 1
-            parts[index:index] = ["--no-ext-diff", "--no-textconv"] if parts[0] != "blame" else ["--no-textconv"]
         # The flag is also a capability requirement: older Git must refuse
         # before a read, rather than silently ignoring a new environment key.
-        base_argv = [binary, "--no-pager", "--no-lazy-fetch", "-c", "core.fsmonitor=false", f"--work-tree={cwd}"]
+        base_argv = [binary, "--no-pager", "--no-lazy-fetch", *READ_GLOBALS]
+        for setting in (*READ_CONFIG, f"core.hooksPath={no_hooks_dir()}"):
+            base_argv += ["-c", setting]
+        base_argv.append(f"--work-tree={cwd}")
 
-        def _run() -> subprocess.CompletedProcess[str]:
+        def _run() -> CardLessRead:
             import time
 
             deadline = time.monotonic() + max(1, int(timeout))
@@ -692,65 +718,46 @@ class IdeService:
                 "GIT_CEILING_DIRECTORIES": str(root.parent),
                 "GIT_NO_LAZY_FETCH": "1",
             })
+
+            def _ask(args: Sequence[str]) -> tuple[int, str, str]:
+                asked = subprocess.run(
+                    [*base_argv, *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=max(0.001, deadline - time.monotonic()), check=False,
+                )
+                return asked.returncode, asked.stdout or "", asked.stderr or ""
+
             # Clean/process filters also execute programs during work-tree
             # comparisons. Query names only, then disable each configured
             # driver while preserving unrelated operator Git configuration.
-            filters = subprocess.run(
-                [*base_argv, "config", "--null", "--name-only", "--get-regexp",
-                 r"^filter\..*\.(clean|smudge|process|required)$"],
-                cwd=cwd, env=env, capture_output=True, text=True,
-                timeout=max(0.001, deadline - time.monotonic()),
-            )
-            if filters.returncode not in (0, 1):
-                return filters
-            overrides: list[str] = []
-            for key in filters.stdout.split("\0"):
+            code, listed, err = _ask(["config", "--null", "--name-only", "--get-regexp",
+                                      r"^filter\..*\.(clean|smudge|process|required)$"])
+            if code not in (0, 1):
+                return CardLessRead(code, listed, err)
+            for key in listed.split("\0"):
                 if key:
                     value = "false" if key.endswith(".required") else ""
-                    overrides.extend(["-c", f"{key}={value}"])
-            if parts[0] in CONTENT_VERBS:
-                # A content read runs only in a work tree git itself accepts
-                # and in a repository that holds none of Kazma's files, both
-                # asked with this read's own argv and environment.
-                def _ask(args: Sequence[str]) -> tuple[int, str]:
-                    asked = subprocess.run(
-                        [*base_argv, *overrides, *args], cwd=cwd, env=env,
-                        capture_output=True, text=True, encoding="utf-8", errors="replace",
-                        timeout=max(0.001, deadline - time.monotonic()),
-                    )
-                    return asked.returncode, asked.stdout or ""
-
-                refusal = read_refusal(root, _ask)
-                if refusal:
-                    raise _ReadRefused(refusal)
-            return subprocess.run(
-                [*base_argv, *overrides, *parts],
-                cwd=cwd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=max(0.001, deadline - time.monotonic()),
-                check=False,
-            )
+                    base_argv.extend(["-c", f"{key}={value}"])
+            return run_card_less(root, _ask, form)
 
         try:
-            proc = await asyncio.to_thread(_run)
-        except _ReadRefused as refused:
-            return {"ok": False, "error": str(refused), "output": ""}
+            read = await asyncio.to_thread(_run)
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "git timed out", "output": ""}
         except OSError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
-        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
-        if proc.returncode and "unknown option" in out.lower() and "no-lazy-fetch" in out:
+        if read.card is not None:
+            return None
+        out = (read.out + read.err).strip()
+        if read.code and "unknown option" in out.lower() and "no-lazy-fetch" in out:
             return {
                 "ok": False,
                 "error": "Read-only Git requires --no-lazy-fetch support; upgrade Git or use approved terminal execution",
                 "output": out,
             }
         return {
-            "ok": proc.returncode == 0,
-            "error": None if proc.returncode == 0 else (out or f"exit {proc.returncode}"),
+            "ok": read.code == 0,
+            "error": None if read.code == 0 else (out or f"exit {read.code}"),
             "output": out,
         }
 

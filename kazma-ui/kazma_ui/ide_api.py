@@ -346,8 +346,14 @@ def create_ide_router() -> APIRouter:
         timeout = _coerce_timeout(payload.get("timeout"))
         if not subcommand:
             return {"ok": False, "error": "Missing 'subcommand'", "output": ""}
+        from kazma_core.ide.service import _is_readonly_git
+
         try:
-            return await (await _service()).git(subcommand, timeout=timeout)
+            # A card-less form came in as a read (ide_effects): one the
+            # repository's check sends to the card comes back needs_approval,
+            # and the page sends it through /api/ide/run.
+            return await (await _service()).git(
+                subcommand, timeout=timeout, admitted_as_read=_is_readonly_git(subcommand))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] git failed: %s", exc)
             return {"ok": False, "error": safe_error(exc), "output": ""}
