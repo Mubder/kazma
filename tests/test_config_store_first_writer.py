@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests._as_request import tests_own
+
 
 @pytest.mark.postgres
 def test_postgres_absent_key_has_exactly_one_first_writer(monkeypatch):
@@ -76,11 +78,12 @@ def test_postgres_absent_key_has_exactly_one_first_writer(monkeypatch):
                        for store, owner in zip((first, second), owners)]
             acquired = [future.result(timeout=25) for future in futures]
         assert acquired.count(True) == 1, "both processes acquired the same missing owner key"
-        with pool.connection() as connection:
+        # The settings table is the install's (S4-01 decision 4): the test reads and cleans it raw.
+        with tests_own(), pool.connection() as connection:
             row = connection.execute("SELECT value FROM kazma_settings WHERE key = %s", (key,)).fetchone()
         assert json.loads(row["value"]) == owners[acquired.index(True)]
     finally:
-        with pool.connection() as connection:
+        with tests_own(), pool.connection() as connection:
             connection.execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
             connection.commit()
         first.close()

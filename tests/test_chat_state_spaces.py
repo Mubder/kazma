@@ -30,6 +30,7 @@ from kazma_core.spaces import identity, scope, threads
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
 
 from tests import _tt_graph as tt
+from tests._as_request import not_armed
 from tests._chat_space_cases import ITEM, World, recorded_space, world
 from tests._space_matrix import Matrix, load_cases
 
@@ -58,9 +59,12 @@ TOOLS = (
 
 
 @pytest.fixture
-def matrix(monkeypatch) -> Matrix:
+def matrix(monkeypatch, request) -> Matrix:
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
     with Matrix() as made:
+        # A test marked postgres keeps its checkpoints on the real Postgres;
+        # every other one in its world's SQLite file (``world``).
+        made.database = "postgres" if request.node.get_closest_marker("postgres") else "sqlite"
         yield made
 
 
@@ -438,6 +442,9 @@ def test_real_postgres_the_threads_record_keeps_spaces_apart(target, matrix) -> 
 def test_real_postgres_control_the_shared_table_reads_across(matrix, monkeypatch) -> None:
     if tt.postgres_dsn() is None:
         pytest.skip("needs a real Postgres (KAZMA_DATABASE_URL + KAZMA_TEST_ALLOW_REAL_DB=1)")
+    # The first lock's control: with the guard gone and the second lock not
+    # armed, the shared table reads across. Armed, the second lock alone holds.
+    not_armed(monkeypatch)
     _no_thread_guard(monkeypatch)
     _fails("GET /api/sessions", matrix)
 

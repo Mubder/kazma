@@ -87,6 +87,10 @@ def _reported_pool_class() -> type:
     class ReportedCheckpointPool(AsyncConnectionPool):  # type: ignore[misc,type-arg,valid-type]
         _kazma_space_half: Any = None
         _kazma_space_lock: Any = None
+        #: Set first by ``close()``: ``closed`` turns True only once the old
+        #: half is closed, and a half asked for meanwhile is refused (second
+        #: delta review L1).
+        _kazma_closing: bool = False
 
         @asynccontextmanager
         async def connection(self, timeout: float | None = None) -> AsyncIterator[Any]:
@@ -112,18 +116,20 @@ def _reported_pool_class() -> type:
         async def _space_half(self) -> Any:
             """The pool that signs in as the space role (the address's own
             options kept, the role last), as large as this one, opened on the
-            loop where the saver runs. Closed, it makes no half of its own
-            (step 4 review L3): asked again under the lock and once the half
-            is open, as a ``close()`` may come between (delta review N2)."""
+            loop where the saver runs. Closed or closing, it makes no half of
+            its own (step 4 review L3): ``close()`` says it is closing before
+            it awaits the old half's close, and ``closed`` turns True only after
+            that (second delta review L1); asked again under the lock (delta
+            review N2)."""
             from psycopg_pool import PoolClosed  # type: ignore
 
-            if self.closed:
+            if self.closed or self._kazma_closing:
                 raise PoolClosed("the checkpointer's pool is closed")
             if self._kazma_space_half is None:
                 if self._kazma_space_lock is None:
                     self._kazma_space_lock = asyncio.Lock()
                 async with self._kazma_space_lock:
-                    if self.closed:  # closed while this task waited for the lock
+                    if self.closed or self._kazma_closing:  # closed while this task waited for the lock
                         raise PoolClosed("the checkpointer's pool is closed")
                     if self._kazma_space_half is None:
                         from psycopg.rows import dict_row  # type: ignore
@@ -144,13 +150,11 @@ def _reported_pool_class() -> type:
                             open=False,
                         )
                         await half.open()
-                        if self.closed:  # closed while the half opened: nothing would close it
-                            await half.close()
-                            raise PoolClosed("the checkpointer's pool is closed")
                         self._kazma_space_half = half
             return self._kazma_space_half
 
         async def close(self, timeout: float = 5.0) -> None:
+            self._kazma_closing = True  # first: no half is made from here on
             half, self._kazma_space_half = self._kazma_space_half, None
             if half is not None:
                 await half.close(timeout=timeout)

@@ -214,8 +214,18 @@ class PostgresPool:
     def _space_half(self) -> Any:
         """The pool that signs in as the space role (the address's own
         options kept, the role last: ``row_security.space_conninfo``), as
-        large as the install's (review M2)."""
+        large as the install's (review M2). Closed, it makes no half of its
+        own: a space's write to a closed pool fails as the install's does
+        (S4-01 step 5; the checkpointer's pool, step 4 review L3) -- asked
+        again under the lock ``close()`` takes too, as a close may come
+        between the first look and the lock (step 4 delta review N2)."""
+        from psycopg_pool import PoolClosed  # type: ignore
+
+        if self._pool.closed:
+            raise PoolClosed("the shared pool is closed")
         with self._space_lock:
+            if self._pool.closed:
+                raise PoolClosed("the shared pool is closed")
             if self._space_pool is None:
                 from psycopg_pool import ConnectionPool  # type: ignore
 
@@ -236,9 +246,12 @@ class PostgresPool:
 
     @contextmanager
     def _space_checkout(self, space: str, timeout: float | None) -> Generator[Any, None, None]:
+        # Before the try: a closed pool raises PoolClosed as the install's
+        # checkout does, and is no failure of the space half's to say.
+        half = self._space_half()
         start = _availability.now()
         try:
-            with self._space_half().connection(timeout=timeout) as conn:
+            with half.connection(timeout=timeout) as conn:
                 row_security.begin_space(conn, space)
                 with row_security.holding(space):
                     yield conn
@@ -297,13 +310,16 @@ class PostgresPool:
         return rows[0] if rows else None
 
     def close(self) -> None:
-        for pool in (self._pool, self._space_pool):
-            if pool is None:
-                continue
-            try:
-                pool.close()
-            except (*self._driver_errors, OSError, RuntimeError) as exc:
-                logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
+        # Under the half's lock: no half is made while the pool closes, and
+        # one made just before is closed with it (step 4 delta review N2).
+        with self._space_lock:
+            for pool in (self._pool, self._space_pool):
+                if pool is None:
+                    continue
+                try:
+                    pool.close()
+                except (*self._driver_errors, OSError, RuntimeError) as exc:
+                    logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
 
 
 class _HeldConnection:

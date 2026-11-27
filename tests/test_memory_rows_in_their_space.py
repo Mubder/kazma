@@ -24,6 +24,8 @@ from kazma_core.spaces import scope
 from kazma_core.spaces.row_work import Door, install_statements, row_statements, statements_of
 from kazma_core.spaces.scope import bind_scope, install_work
 
+from tests._as_request import not_armed
+
 # ── the rule: a row Kazma keeps for itself ───────────────────────────────
 
 
@@ -703,8 +705,15 @@ def real_mirror(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.mark.postgres
-def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror: Any, enforced: None) -> None:
+def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror: Any, enforced: None,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_core.db import space_doors
+
+    # Unarmed, the delete sees a copy kept under another space and says so.
+    # Armed, that copy is out of the door's sight and the delete reads gone:
+    # that no copy is held under another space is step 6's arming proof (0b
+    # delta review L-b).
+    not_armed(monkeypatch)
 
     fact = f"s401-{uuid.uuid4().hex[:12]}"
     assert real_mirror.mirror_belief(_fact(fact, "default")) is True
@@ -720,9 +729,11 @@ def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror
 
 
 @pytest.mark.postgres
-def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: Any) -> None:
+def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: Any,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
     """0b review L1, on Postgres: with Spaces off the delete is by id, as
     before 0b, whatever tenant string the copy was written under."""
+    not_armed(monkeypatch)  # Spaces off: a tenant of no space's shape ("telegram:42") reads as before
     fact = f"s401-{uuid.uuid4().hex[:12]}"
     assert real_mirror.mirror_belief(_fact(fact, "telegram:42")) is True
     assert real_mirror.delete_belief(fact, tenant_id="default") is True

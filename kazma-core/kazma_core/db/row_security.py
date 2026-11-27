@@ -244,8 +244,17 @@ def _one(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
 
 
 def _rows(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """*sql*'s rows as tuples, whatever rows the caller's cursor gives: a
+    store's dict-row cursor reaches here through ``apply_made_tables``. A
+    dict row keeps one column of two of one name, so a read whose row came
+    back short is refused, never read with a column missing (S4-01 step 5:
+    the two ``pg_get_expr`` of ``_policies``); every query here names each
+    column once."""
     cur.execute(sql, params or None)
-    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in cur.fetchall()]
+    rows = cur.fetchall()
+    if rows and isinstance(rows[0], dict) and len(rows[0]) != len(cur.description or ()):
+        raise ValueError(f"a catalog read names two columns alike, and a dict row keeps one: {sql[:80]}")
+    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in rows]
 
 
 def _quoted(table: str) -> str:
@@ -398,8 +407,8 @@ def _direct_rights(cur: Any, table: str) -> set[str]:
 
 
 def _policies(cur: Any, table: str) -> list[tuple[Any, ...]]:
-    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[], "
-                      "pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) "
+    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[] AS to_public, "
+                      "pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS checked "
                       "FROM pg_policy WHERE polrelid = to_regclass(%s) ORDER BY polname", (_quoted(table),))
 
 
@@ -817,13 +826,13 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
     finished is in ``left``."""
     import sqlite3
 
-    from kazma_core.db.availability import is_kazma_database
     from kazma_core.spaces import threads
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-    if not is_kazma_database(url):
-        result.not_backfilled = ("checkpoints: not this install's own database, so their spaces are not "
-                                 "backfilled from this install's thread records (Spaces on replicas is not covered)")
+    if not _this_installs_own(url, conn):
+        result.not_backfilled = ("checkpoints: not the database this install's own address names (compared by "
+                                 "server and database), so their spaces are not backfilled from this install's "
+                                 "thread records (Spaces on replicas is not covered)")
         result.notes.append(result.not_backfilled)
         return
     try:
@@ -861,6 +870,49 @@ def _backfill(url: str, conn: Any, tables: list[str], result: Applied, lock_time
             cur.execute(f"DROP TABLE IF EXISTS {_HOMES}")
     if result.backfilled:
         result.changed.append(f"checkpoints: {result.backfilled} row(s) given their thread's space")
+
+
+def _server_identity(cur: Any) -> tuple[str, str]:
+    """Which server and database *cur*'s connection reached: the cluster's
+    system identifier (its start time where a login may not read it) and the
+    database's name -- the same for two addresses of one database, whatever
+    host name or alias each names (second delta review L2)."""
+    import psycopg
+
+    try:
+        with cur.connection.transaction():
+            server = _one(cur, "SELECT system_identifier::text FROM pg_control_system()")
+    except psycopg.errors.InsufficientPrivilege:
+        server = None
+    if not server:
+        server = _one(cur, "SELECT pg_postmaster_start_time()::text")
+    return str(server), str(_one(cur, "SELECT current_database()"))
+
+
+def _this_installs_own(url: str, conn: Any) -> bool:
+    """Whether *url* (with *conn* on it) is the database this install's own
+    address names: the same address (``availability.is_kazma_database``), or
+    another way to the same server and database -- another host name, a
+    ``hostaddr`` alias -- told by its server identity, read on both
+    (second delta review L2: such a database counted as "elsewhere" and was
+    not backfilled)."""
+    import psycopg
+
+    from kazma_core.db.availability import is_kazma_database
+    from kazma_core.db.backend import get_database_url
+
+    if is_kazma_database(url):
+        return True
+    ours = get_database_url() or ""
+    if not ours.startswith(("postgres://", "postgresql://")):
+        return False
+    try:
+        with _owner_connect(ours, autocommit=True) as own, own.cursor() as theirs, conn.cursor() as cur:
+            return _server_identity(theirs) == _server_identity(cur)
+    except psycopg.Error as exc:
+        logger.warning("[row_security] this install's own database could not be compared with the one named "
+                       "(%s): it counts as another", type(exc).__name__)
+        return False
 
 
 def _any_stamped(conn: Any, tables: list[str]) -> bool:

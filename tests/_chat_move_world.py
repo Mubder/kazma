@@ -104,7 +104,8 @@ class World:
         deletes."""
         threads._ended.clear()
         old = session_manager.get_session_manager()
-        session_manager.set_session_manager(session_manager.SessionManager(db_path=old.db_path))
+        session_manager.set_session_manager(session_manager.SessionManager(
+            db_path=old.db_path, backend=None if old._pg else "sqlite"))  # the same store, as it was named
 
     def settle(self) -> list[dict[str, str]]:
         from kazma_ui.chat_move import settle_chat_moves
@@ -127,7 +128,7 @@ class World:
 
 
 @pytest.fixture
-def world(monkeypatch, tmp_path):
+def world(monkeypatch, tmp_path, request):
     from kazma_gateway.stores.checkpoint import create_checkpoint_manager
     from kazma_ui import dashboard
     from kazma_ui.chat_move import create_chat_move_router
@@ -149,13 +150,19 @@ def world(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "get_request_principal",
                         lambda request: principals.get(request.headers.get("x-person", "")))
     before = session_manager.peek_session_manager()
-    session_manager.set_session_manager(session_manager.SessionManager(db_path=str(tmp_path / "chats.db")))
+    # The test's own choice: a test marked postgres keeps its chats and
+    # checkpoints on the real Postgres, every other one in this folder's
+    # files, whatever the run's address (the Postgres job sets it for every
+    # test, and a SQLite case read its own file).
+    backend = None if request.node.get_closest_marker("postgres") else "sqlite"
+    session_manager.set_session_manager(session_manager.SessionManager(db_path=str(tmp_path / "chats.db"),
+                                                                       backend=backend))
     held: dict[str, Any] = {}
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         @asynccontextmanager
         async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-            held["manager"] = await create_checkpoint_manager(str(Path(tmp) / "checkpoints.db"))
+            held["manager"] = await create_checkpoint_manager(str(Path(tmp) / "checkpoints.db"), backend=backend)
             held["graph"] = tt.build_graph(None, [], held["manager"])
             monkeypatch.setattr(dashboard, "_checkpoint_manager", held["manager"])
             try:

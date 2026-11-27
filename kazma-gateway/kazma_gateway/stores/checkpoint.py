@@ -695,6 +695,8 @@ class CheckpointManager(BaseCheckpointSaver):
 
 async def create_checkpoint_manager(
     path: str | None = None,
+    *,
+    backend: str | None = None,
 ) -> CheckpointManager:
     """Create and initialize a CheckpointManager with per-thread locking.
 
@@ -702,6 +704,9 @@ async def create_checkpoint_manager(
       * Postgres when ``KAZMA_DATABASE_URL`` is set (requires
         ``langgraph-checkpoint-postgres`` + ``psycopg``).
       * SQLite otherwise (``path``).
+      * ``backend="sqlite"``: the file at *path* whatever the address says --
+        a caller that names its own store (a test's world, which the
+        Postgres job runs with ``KAZMA_DATABASE_URL`` set).
 
     A refusal (Spaces enforced) raises: the start fails with the reason, never
     on an empty SQLite state.
@@ -712,7 +717,9 @@ async def create_checkpoint_manager(
     # ── Postgres checkpointer (multi-replica) ──────────────────────
     from kazma_core.db.pg_helpers import no_other_store_on_refusal, use_postgres
 
-    if use_postgres():
+    if backend not in (None, "sqlite"):
+        raise ValueError(f"a checkpoint store is Postgres (as set up) or sqlite, not {backend!r}")
+    if backend is None and use_postgres():
         try:
             from kazma_core.checkpoints_pg import open_postgres_checkpointer
             from kazma_core.db.backend import get_database_url

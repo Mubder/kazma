@@ -41,6 +41,8 @@ from kazma_core.swarm.reliability import CircuitBreaker, CircuitState
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus, WorkerResult
 from kazma_core.swarm.task_store import TaskStore
 
+from tests._as_request import tests_own
+
 REPO = Path(__file__).resolve().parents[1]
 SWARM = REPO / "kazma-core" / "kazma_core" / "swarm"
 BUS_ADAPTERS = [REPO / "kazma-gateway" / "kazma_gateway" / "adapters" / f"{n}_bus.py"
@@ -788,12 +790,13 @@ def test_a_nul_in_a_prompt_reaches_postgres() -> None:
         pytest.skip("needs the Postgres task store (CI Postgres job)")
     task = SwarmTask(prompt="read file\x00tail", context="ctx\x00", workers=["w"])
     task.result = TaskResult(task_id=task.id, status="success", aggregated_output="out\x00put")
-    try:
-        assert store.persist_task(task) is True
-        back = store.get_task(task.id)
-        assert back is not None and back.prompt == "read file\ufffdtail" and back.context == "ctx\ufffd"
-    finally:
-        store.delete_task(task.id)
+    with tests_own():  # a store test: its row is its own, of no space
+        try:
+            assert store.persist_task(task) is True
+            back = store.get_task(task.id)
+            assert back is not None and back.prompt == "read file\ufffdtail" and back.context == "ctx\ufffd"
+        finally:
+            store.delete_task(task.id)
 
 
 # ── SW-S13: bus posts cannot ping the channel ───────────────────────────────

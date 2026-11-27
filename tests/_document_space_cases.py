@@ -39,6 +39,8 @@ from kazma_core.documents.ingestion import set_ingestion_service
 from kazma_core.documents.sniff import SniffResult
 from kazma_core.spaces import scope
 
+from tests._as_request import in_space
+from tests._as_request import own as tests_own_of
 from tests._documents_seed import Seeded, seed_document, seeded_service
 from tests._space_matrix import Matrix, case
 
@@ -92,7 +94,9 @@ class _Engine:
 
 @dataclass
 class World:
-    """Two spaces with a ready document each, on a private store."""
+    """Two spaces with a ready document each, on a private store -- or, with
+    Postgres metadata, the shared tables, where the matrix's two spaces keep
+    the documents of the cases before (``earlier``)."""
 
     matrix: Matrix
     service: Any
@@ -103,6 +107,11 @@ class World:
     mark_b: str
     patch: pytest.MonkeyPatch
     root: Path
+    earlier: frozenset[str] = frozenset()
+
+    def listed_now(self, rows: list[dict[str, Any]]) -> list[str]:
+        """The ids of a listing, less the documents of the cases before."""
+        return [row["document_id"] for row in rows if row["document_id"] not in self.earlier]
 
     def seed_a(self, word: str) -> Seeded:
         """Another ready document of person A's, for a case that changes one."""
@@ -138,16 +147,16 @@ class World:
 
     def b_is_untouched(self) -> None:
         """B's document, version, content and job are as seeded."""
-        record = self.service.repository.get_document(tenant_id=Matrix.SPACE_B, document_id=self.b.document_id)
+        record = tests_own_of(self.service.repository).get_document(tenant_id=Matrix.SPACE_B, document_id=self.b.document_id)
         assert record is not None and record.deleted_at is None, "B's document was changed"
         assert record.owner_id == self.matrix.account_b
-        content = self.service.get_content(tenant_id=Matrix.SPACE_B, actor_id=self.matrix.account_b,
+        content = tests_own_of(self.service).get_content(tenant_id=Matrix.SPACE_B, actor_id=self.matrix.account_b,
                                            document_id=self.b.document_id)
         assert self.mark_b in content["text"]
-        job = self.service.job_status(tenant_id=Matrix.SPACE_B, job_id=self.b.job_id,
+        job = tests_own_of(self.service).job_status(tenant_id=Matrix.SPACE_B, job_id=self.b.job_id,
                                       actor_id=self.matrix.account_b)
         assert job is not None and job["state"] == "received", job
-        assert not self.service.list_document_artifacts(
+        assert not tests_own_of(self.service).list_document_artifacts(
             tenant_id=Matrix.SPACE_B, actor_id=self.matrix.account_b, document_id=self.b.document_id,
         ), "an artifact was made of B's document"
 
@@ -193,10 +202,12 @@ def world(matrix: Matrix) -> Iterator[World]:
         set_ingestion_service(service)
         try:
             marks = matrix.plant("doc")
+            earlier = frozenset(str(record.id) for space in (Matrix.SPACE_A, Matrix.SPACE_B)
+                                for record in tests_own_of(service.repository).list_documents(tenant_id=space))
             a = seed_document(service, tenant_id=Matrix.SPACE_A, owner=matrix.account_a, marker=marks.a)
             b = seed_document(service, tenant_id=Matrix.SPACE_B, owner=matrix.account_b, marker=marks.b)
             yield World(matrix=matrix, service=service, engine=engine, a=a, b=b,
-                        mark_a=marks.a, mark_b=marks.b, patch=patch, root=root)
+                        mark_a=marks.a, mark_b=marks.b, patch=patch, root=root, earlier=earlier)
         finally:
             set_ingestion_service(None)
             service.close()
@@ -207,14 +218,16 @@ def _seed_artifact(w: World, seeded: Seeded, owner: str, body: bytes) -> str:
     import hashlib
 
     sha = hashlib.sha256(body).hexdigest()
-    w.service.storage.for_space(seeded.tenant_id).put_stream(io.BytesIO(body), kind="artifacts", max_bytes=1 << 20)
-    blob = w.service.repository.register_blob(tenant_id=seeded.tenant_id, sha256=sha,
-                                              byte_size=len(body), storage_kind="artifacts")
-    record = w.service.repository.create_artifact(
-        tenant_id=seeded.tenant_id, document_id=seeded.document_id, version_id=seeded.version_id,
-        actor_id=owner, blob_id=blob.id, artifact_type="convert:markdown",
-        metadata={"output": {"extension": "md", "mime_type": "text/markdown"}},
-    )
+    with in_space(seeded.tenant_id, owner):  # made as the worker makes one: in the document's space
+        w.service.storage.for_space(seeded.tenant_id).put_stream(io.BytesIO(body), kind="artifacts",
+                                                                 max_bytes=1 << 20)
+        blob = w.service.repository.register_blob(tenant_id=seeded.tenant_id, sha256=sha,
+                                                  byte_size=len(body), storage_kind="artifacts")
+        record = w.service.repository.create_artifact(
+            tenant_id=seeded.tenant_id, document_id=seeded.document_id, version_id=seeded.version_id,
+            actor_id=owner, blob_id=blob.id, artifact_type="convert:markdown",
+            metadata={"output": {"extension": "md", "mime_type": "text/markdown"}},
+        )
     return str(record.id)
 
 
@@ -250,7 +263,7 @@ def documents_list(matrix: Matrix) -> None:
     with world(matrix) as w, w.as_a() as client:
         listed = client.get("/api/documents")
         assert listed.status_code == 200
-        assert [row["document_id"] for row in listed.json()["documents"]] == [w.a.document_id]
+        assert w.listed_now(listed.json()["documents"]) == [w.a.document_id]
         assert w.b.document_id not in listed.text
         # Naming B's space is refused at the request boundary.
         named = client.get("/api/documents", headers=matrix.headers_b)
@@ -332,9 +345,9 @@ def documents_generate(matrix: Matrix) -> None:
 
 
 def _made_in_a(w: World, document_id: str) -> None:
-    record = w.service.repository.get_document(tenant_id=Matrix.SPACE_A, document_id=document_id)
+    record = tests_own_of(w.service.repository).get_document(tenant_id=Matrix.SPACE_A, document_id=document_id)
     assert record is not None and record.owner_id == w.matrix.account_a, "made outside A, or not as A"
-    assert w.service.repository.get_document(tenant_id=Matrix.SPACE_B, document_id=document_id) is None
+    assert tests_own_of(w.service.repository).get_document(tenant_id=Matrix.SPACE_B, document_id=document_id) is None
 
 
 @case("POST /api/documents", ITEM)
@@ -404,7 +417,7 @@ def _delete(method: str, path: str):
             mine = w.seed_a("deleted")
             own = call(path.format(document_id=mine.document_id))
             assert own.status_code == 200, own.text[:300]
-            gone = w.service.repository.get_document(tenant_id=Matrix.SPACE_A, document_id=mine.document_id)
+            gone = tests_own_of(w.service.repository).get_document(tenant_id=Matrix.SPACE_A, document_id=mine.document_id)
             assert gone is None or gone.deleted_at is not None
 
     return run
@@ -428,7 +441,7 @@ def documents_artifact_download(matrix: Matrix) -> None:
             w.refused(client.get(f"/api/documents/artifacts/{b_artifact}/download"))
             own = client.get(f"/api/documents/artifacts/{a_artifact}/download")
             assert own.status_code == 200 and w.mark_a in own.text, own.status_code
-        record = w.service.repository.get_artifact(tenant_id=Matrix.SPACE_B, artifact_id=b_artifact)
+        record = tests_own_of(w.service.repository).get_artifact(tenant_id=Matrix.SPACE_B, artifact_id=b_artifact)
         assert record is not None
 
 
@@ -459,13 +472,17 @@ def documents_audit(matrix: Matrix) -> None:
     too (the admin is a member of neither matrix space)."""
     with world(matrix) as w:
         for seeded, who in ((w.a, matrix.account_a), (w.b, matrix.account_b)):
-            w.service.audit.record(tenant_id=seeded.tenant_id, event_type="access", action="read",
-                                   outcome="success", actor_id=who, document_id=seeded.document_id)
+            with in_space(seeded.tenant_id, who):  # each person's read records its trail in their space
+                w.service.audit.record(tenant_id=seeded.tenant_id, event_type="access", action="read",
+                                       outcome="success", actor_id=who, document_id=seeded.document_id)
         with w.as_a() as client:
             own = client.get("/api/documents/ops/audit")
             assert own.status_code in (200, 403), own.text[:300]  # admin only where sign-in is on
             if own.status_code == 200:
-                assert w.a.document_id in own.text, "A's own trail was not shown"
+                # The newest page of A's space's trail: on a shared database it
+                # holds the cases before (``World.earlier``), so A's own is asked by name.
+                mine = client.get("/api/documents/ops/audit", params={"document_id": w.a.document_id})
+                assert w.a.document_id in mine.text, "A's own trail was not shown"
             w.nothing_of_b(own)
             assert w.b.document_id not in own.text and matrix.account_b not in own.text
             named = client.get("/api/documents/ops/audit", headers=matrix.headers_b)
@@ -749,4 +766,4 @@ def documents_move(matrix: Matrix) -> None:
             w.nothing_of_b(answer)
         w.b_is_untouched()
         listed = client.get("/api/documents").json()["documents"]
-        assert [row["document_id"] for row in listed] == [w.a.document_id], "A's own stayed where it was"
+        assert w.listed_now(listed) == [w.a.document_id], "A's own stayed where it was"

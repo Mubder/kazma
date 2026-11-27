@@ -43,9 +43,18 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
 
     from tests.test_pg_app_role import _every_store_set_up
 
+    # As a start: the stores' schema, then the rules, then arming. In an armed
+    # run (tests/_second_lock_armed.py) the setup's writes would otherwise go
+    # through a space door before this test's rules are back in place (the
+    # last test's teardown took the space role's rights).
+    monkeypatch.setattr(row_security, "_armed", False)
     _every_store_set_up(dsn)
     monkeypatch.setattr(row_security, "_in_place", row_security.in_place())  # given back after the test
-    done = row_security.apply(dsn, vector_table="")
+    # Every table's rule, but not the checkpoints' backfill: the session's
+    # thread records are its own data folder's, not the shared test database's,
+    # and a whole pass reads a missing or empty store as unresolved there
+    # (step 4 review M1; tests/_second_lock_armed.py does the same).
+    done = row_security.apply(dsn, tables=list(row_security.rules("")), vector_table="")
     if done.refused:
         pytest.skip(f"the rules cannot be put in place here: {done.refused}")
     assert done.complete, done.left

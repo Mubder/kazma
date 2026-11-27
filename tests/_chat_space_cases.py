@@ -174,7 +174,12 @@ def world(matrix: Matrix) -> Iterator[World]:
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-            held["manager"] = await create_checkpoint_manager(str(Path(tmp) / "checkpoints.db"))
+            # The test's own choice (``matrix.database``): a case marked
+            # postgres runs on the real Postgres, every other one on this
+            # folder's file, whatever the run's address.
+            held["manager"] = await create_checkpoint_manager(
+                str(Path(tmp) / "checkpoints.db"),
+                backend=None if getattr(matrix, "database", "sqlite") == "postgres" else "sqlite")
             held["graph"] = tt.build_graph(recorder, [], held["manager"])
             dashboard.set_dashboard_context(checkpoint_manager=held["manager"])
             try:

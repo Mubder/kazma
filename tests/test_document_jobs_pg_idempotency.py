@@ -16,15 +16,27 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Barrier
 
 import pytest
 
+from tests._as_request import tests_own
+
 # Verified against a real Postgres; the CI Postgres job runs every test
 # carrying this marker (scripts/postgres_suite.py).
 pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _the_tests_own_rows() -> Iterator[None]:
+    """A store test: what it seeds, reads and deletes is its own, of no space
+    -- the install's (S4-01 step 5). The doors of the store's callers are the
+    flow tests' and the door gates' (tests/test_row_work_gates.py)."""
+    with tests_own():
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -167,9 +179,10 @@ def test_concurrent_postgres_intake_reservations(pg_pool, tmp_path, limits, code
         def reserve(store):
             barrier.wait(timeout=10)
             try:
-                return store.reserve(tenant_id="t", request_key=str(new_job_id()),
-                    request_digest="digest", job_id=str(new_job_id()), byte_size=16,
-                    config=config)
+                with tests_own():  # a thread of its own starts with nothing said
+                    return store.reserve(tenant_id="t", request_key=str(new_job_id()),
+                        request_digest="digest", job_id=str(new_job_id()), byte_size=16,
+                        config=config)
             except CapacityError as exc:
                 return exc.code
         with ThreadPoolExecutor(max_workers=2) as pool:

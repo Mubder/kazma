@@ -19,6 +19,8 @@ import pytest
 from kazma_core.config_store import ConfigStore, _store_config_secret, is_vault_ref
 from kazma_core.security import vault as vault_mod
 
+from tests._as_request import own
+
 KEY = "connectors.github.app_private_key"
 PEM = "-----BEGIN RSA PRIVATE KEY-----\nMIIEdemo-not-a-real-key\n-----END RSA PRIVATE KEY-----"
 
@@ -106,15 +108,16 @@ def test_boot_moves_a_plaintext_row_on_postgres(vault, monkeypatch):
     store = get_config_store()
     pool = get_postgres_pool()
     key = KEY  # a throwaway database: the real name, removed after
-    pool.execute("INSERT INTO kazma_settings (key, value, category) VALUES (%s, %s, 'connectors') "
-                 "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, json.dumps(PEM)))
+    # The settings table is the install's (S4-01 decision 4): the test writes, reads and cleans it raw.
+    own(pool).execute("INSERT INTO kazma_settings (key, value, category) VALUES (%s, %s, 'connectors') "
+                      "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, json.dumps(PEM)))
     try:
         store._invalidate_key(key)
         moved, _left = store.move_plaintext_secrets()
         assert key in moved
-        raw = pool.execute_one("SELECT value FROM kazma_settings WHERE key = %s", (key,))["value"]
+        raw = own(pool).execute_one("SELECT value FROM kazma_settings WHERE key = %s", (key,))["value"]
         assert is_vault_ref(json.loads(raw))
         assert store.get(key) == PEM
     finally:
-        pool.execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
+        own(pool).execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
         reset_config_store()

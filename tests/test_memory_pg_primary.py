@@ -33,6 +33,8 @@ import pytest
 
 from kazma_core.memory import state_backend as sb
 
+from tests._as_request import in_space, tests_own
+
 pytestmark = pytest.mark.postgres
 
 WORDS = "zanzibar quokka festival"
@@ -47,16 +49,18 @@ def pg():
     if not backend.available:
         pytest.skip("Postgres not reachable")
     tenant = f"m06_{uuid.uuid4().hex[:10]}"
-    yield backend, tenant
-    conn = backend._connect()
-    try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
-        cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (tenant,))
-        conn.commit()
-    finally:
-        conn.close()
-        backend.close()  # its connection pool (Memory audit M31)
+    with in_space(tenant):  # each test is a turn of that tenant's, its memory read and written there
+        yield backend, tenant
+    with tests_own():
+        conn = backend._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (tenant,))
+            cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (tenant,))
+            conn.commit()
+        finally:
+            conn.close()
+            backend.close()  # its connection pool (Memory audit M31)
 
 
 @pytest.fixture()
@@ -101,28 +105,30 @@ def _local_episode(conn, eid: str, tenant: str, question: str, *, turn: int = 1,
 
 def _remote_episode(backend, tenant: str, eid: str, question: str, *, tier: str = "episodic",
                     created: float) -> None:
-    conn = backend._connect()
-    try:
-        backend._ensure()
-        conn.cursor().execute(
-            "INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
-            "summary_text, tier, structural_importance, created_at, metadata_json) "
-            "VALUES (%s, %s, 'other-chat', 1, %s, 'Noted.', NULL, %s, 1, %s, '{}')",
-            (eid, tenant, question, tier, created),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        conn = backend._connect()
+        try:
+            backend._ensure()
+            conn.cursor().execute(
+                "INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
+                "summary_text, tier, structural_importance, created_at, metadata_json) "
+                "VALUES (%s, %s, 'other-chat', 1, %s, 'Noted.', NULL, %s, 1, %s, '{}')",
+                (eid, tenant, question, tier, created),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def _remote_tier(backend, eid: str) -> tuple[str, str]:
-    conn = backend._connect()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT tier, COALESCE(user_text, '') FROM kazma_episodes WHERE id = %s", (eid,))
-        return tuple(cur.fetchone())
-    finally:
-        conn.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        conn = backend._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT tier, COALESCE(user_text, '') FROM kazma_episodes WHERE id = %s", (eid,))
+            return tuple(cur.fetchone())
+        finally:
+            conn.close()
 
 
 def _recalled(query: str, tenant: str) -> set[str]:
@@ -176,17 +182,18 @@ def test_a_turn_the_ledger_refuses_is_left_out_whoever_wrote_it(local, monkeypat
     _local_episode(conn, mine, tenant, question)
     assert forget.forget_episode(mine, tenant_id=tenant, conn=conn)["ok"]
     theirs = f"e_m06_r_{uuid.uuid4().hex[:8]}"
-    rc = backend._connect()
-    try:
-        rc.cursor().execute(
-            "INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
-            "summary_text, tier, structural_importance, created_at, metadata_json) "
-            "VALUES (%s, %s, 'chat-m06', 1, %s, 'Noted.', NULL, 'episodic', 1, %s, %s)",
-            (theirs, tenant, question, time.time(), json.dumps({"install": "d" * 32})),
-        )
-        rc.commit()
-    finally:
-        rc.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        rc = backend._connect()
+        try:
+            rc.cursor().execute(
+                "INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
+                "summary_text, tier, structural_importance, created_at, metadata_json) "
+                "VALUES (%s, %s, 'chat-m06', 1, %s, 'Noted.', NULL, 'episodic', 1, %s, %s)",
+                (theirs, tenant, question, time.time(), json.dumps({"install": "d" * 32})),
+            )
+            rc.commit()
+        finally:
+            rc.close()
     assert theirs in {r["id"] for r in backend.search_episodes(WORDS, tenant_id=tenant)}
     assert theirs not in _recalled(WORDS, tenant)
     with monkeypatch.context() as m:  # negative control: the ledger is what keeps it out
@@ -207,14 +214,15 @@ def test_a_forgotten_or_unrecallable_tier_is_never_read(pg):
     _remote_episode(backend, tenant, kept, f"the {WORDS}", created=now - 60)
     assert [r["id"] for r in backend.search_episodes(WORDS, tenant_id=tenant)] == [kept]
     # Negative control: the same rows without the tier filter.
-    conn = backend._connect()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM kazma_episodes WHERE tenant_id = %s AND LOWER(user_text) LIKE %s",
-                    (tenant, "%quokka%"))
-        assert cur.fetchone()[0] == 4
-    finally:
-        conn.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        conn = backend._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM kazma_episodes WHERE tenant_id = %s AND LOWER(user_text) LIKE %s",
+                        (tenant, "%quokka%"))
+            assert cur.fetchone()[0] == 4
+        finally:
+            conn.close()
 
 
 # ── the keyword channel ranks by the question's words ─────────────────────
@@ -231,46 +239,49 @@ def test_an_older_memory_holding_every_word_beats_newer_ones_holding_one(pg):
     got = [r["id"] for r in backend.search_episodes(WORDS, tenant_id=tenant, limit=2)]
     assert got[0] == old
     # Negative control: the old query took the 10 newest rows holding any word.
-    conn = backend._connect()
-    try:
-        cur = conn.cursor()
-        pats = [f"%{w}%" for w in WORDS.split()]
-        cur.execute(
-            "SELECT id FROM kazma_episodes WHERE tenant_id = %s AND (LOWER(user_text) LIKE %s "
-            "OR LOWER(user_text) LIKE %s OR LOWER(user_text) LIKE %s) ORDER BY created_at DESC LIMIT %s",
-            (tenant, *pats, 10),
-        )
-        assert old not in {r[0] for r in cur.fetchall()}
-    finally:
-        conn.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        conn = backend._connect()
+        try:
+            cur = conn.cursor()
+            pats = [f"%{w}%" for w in WORDS.split()]
+            cur.execute(
+                "SELECT id FROM kazma_episodes WHERE tenant_id = %s AND (LOWER(user_text) LIKE %s "
+                "OR LOWER(user_text) LIKE %s OR LOWER(user_text) LIKE %s) ORDER BY created_at DESC LIMIT %s",
+                (tenant, *pats, 10),
+            )
+            assert old not in {r[0] for r in cur.fetchall()}
+        finally:
+            conn.close()
 
 
 def test_a_fact_holding_every_word_beats_more_important_ones_holding_one(pg):
     backend, tenant = pg
-    conn = backend._connect()
-    try:
-        backend._ensure()
-        cur = conn.cursor()
-        sql = ("INSERT INTO kazma_beliefs (id, tenant_id, subject, predicate, object, predicate_type, confidence, "
-               "structural_importance, source_trust_weight, valid_from, metadata_json) "
-               "VALUES (%s, %s, %s, %s, %s, 'set', %s, %s, 1, %s, '{}')")
-        target = f"b_m06_{uuid.uuid4().hex[:6]}"
-        cur.execute(sql, (target, tenant, "user", "plans", f"the {WORDS}", 0.5, 1, time.time()))
-        for i in range(60):
-            cur.execute(sql, (f"b_m06_{i}_{uuid.uuid4().hex[:6]}", tenant, "user", "likes",
-                              f"festival {i}", 0.99, 10, time.time()))
-        conn.commit()
-        assert [r["id"] for r in backend.search_beliefs(WORDS, tenant_id=tenant, limit=2)][0] == target
-        # Negative control: the old order (importance x confidence) never reached it.
-        pats = [f"%{w}%" for w in WORDS.split()]
-        cur.execute(
-            "SELECT id FROM kazma_beliefs WHERE tenant_id = %s AND (LOWER(object) LIKE %s OR LOWER(object) "
-            "LIKE %s OR LOWER(object) LIKE %s) ORDER BY (structural_importance * confidence) DESC LIMIT %s",
-            (tenant, *pats, 10),
-        )
-        assert target not in {r[0] for r in cur.fetchall()}
-    finally:
-        conn.close()
+    with tests_own():  # the test's own rows and reads, as another writer's
+        conn = backend._connect()
+        try:
+            backend._ensure()
+            cur = conn.cursor()
+            sql = ("INSERT INTO kazma_beliefs (id, tenant_id, subject, predicate, object, predicate_type, confidence, "
+                   "structural_importance, source_trust_weight, valid_from, metadata_json) "
+                   "VALUES (%s, %s, %s, %s, %s, 'set', %s, %s, 1, %s, '{}')")
+            target = f"b_m06_{uuid.uuid4().hex[:6]}"
+            cur.execute(sql, (target, tenant, "user", "plans", f"the {WORDS}", 0.5, 1, time.time()))
+            for i in range(60):
+                cur.execute(sql, (f"b_m06_{i}_{uuid.uuid4().hex[:6]}", tenant, "user", "likes",
+                                  f"festival {i}", 0.99, 10, time.time()))
+            conn.commit()
+            with in_space(tenant):  # the read under test is the turn's own
+                assert [r["id"] for r in backend.search_beliefs(WORDS, tenant_id=tenant, limit=2)][0] == target
+            # Negative control: the old order (importance x confidence) never reached it.
+            pats = [f"%{w}%" for w in WORDS.split()]
+            cur.execute(
+                "SELECT id FROM kazma_beliefs WHERE tenant_id = %s AND (LOWER(object) LIKE %s OR LOWER(object) "
+                "LIKE %s OR LOWER(object) LIKE %s) ORDER BY (structural_importance * confidence) DESC LIMIT %s",
+                (tenant, *pats, 10),
+            )
+            assert target not in {r[0] for r in cur.fetchall()}
+        finally:
+            conn.close()
 
 
 # ── the benchmark, with Postgres as the primary store ─────────────────────
@@ -342,51 +353,52 @@ def test_the_benchmark_with_postgres_primary_is_within_the_stated_delta(tmp_path
     db = tmp_path / "bench.db"
     monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(db))
     monkeypatch.setattr(sb, "_this_install_id", lambda: "c" * 32)
-    conn = sqlite3.connect(str(db), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        ensure_primary_schema(conn)
-        data = benchmark.load_dataset()
-        refs = benchmark._seed(conn, data)
-        covers = benchmark._covers(data, refs)
-        monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: False)
-        local = _bench(conn, refs, covers, data)
-
-        monkeypatch.setattr(sb, "get_state_backend", lambda: backend)
-        pushed = sb.sync_state_mirror(conn, limit=100_000)
-        assert pushed["failed"] == 0 and pushed["episodes_behind"] == 0, pushed
-        monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: True)
-        monkeypatch.setattr("kazma_core.memory.backends.get_vector_backend",
-                            lambda conn_=None, **_k: LocalSqliteVectorBackend(conn))
-        primary = _bench(conn, refs, covers, data)
-        print("\nlocal  ", local["overall"], "\nprimary", primary["overall"])
-        for key, delta in PRIMARY_DELTA.items():
-            assert primary["overall"][key] >= local["overall"][key] - delta, (key, local, primary)
-
-        # Negative control: the delta sees a degraded primary path -- the
-        # vector index down, keywords alone. (The old recency-sliced keyword
-        # channel scores the same as the new one on this dataset: the index
-        # finds what the slice dropped. The slice is held by
-        # test_an_older_memory_holding_every_word_beats_newer_ones_holding_one.)
-        # Negative control: the primary path without the local path's part F
-        # steps (what CI's Postgres job measured from part F to the fix).
-        with monkeypatch.context() as mp:
-            _without_the_local_steps(mp)
-            unlike = _bench(conn, refs, covers, data)
-        print("no part F steps", unlike["overall"])
-        assert any(unlike["overall"][k] < local["overall"][k] - d for k, d in PRIMARY_DELTA.items()), unlike
-
-        monkeypatch.setattr("kazma_core.memory.backends.get_vector_backend", lambda conn_=None, **_k: None)
-        degraded = _bench(conn, refs, covers, data)
-        print("no index", degraded["overall"])
-        assert any(degraded["overall"][k] < local["overall"][k] - d for k, d in PRIMARY_DELTA.items()), degraded
-    finally:
-        conn.close()
-        pc = backend._connect()
+    with in_space(benchmark.BENCH_TENANT):  # every question is that tenant's turn
+        conn = sqlite3.connect(str(db), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         try:
-            cur = pc.cursor()
-            cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (benchmark.BENCH_TENANT,))
-            cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (benchmark.BENCH_TENANT,))
-            pc.commit()
+            ensure_primary_schema(conn)
+            data = benchmark.load_dataset()
+            refs = benchmark._seed(conn, data)
+            covers = benchmark._covers(data, refs)
+            monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: False)
+            local = _bench(conn, refs, covers, data)
+
+            monkeypatch.setattr(sb, "get_state_backend", lambda: backend)
+            pushed = sb.sync_state_mirror(conn, limit=100_000)
+            assert pushed["failed"] == 0 and pushed["episodes_behind"] == 0, pushed
+            monkeypatch.setattr(sb, "is_state_primary", lambda cfg=None: True)
+            monkeypatch.setattr("kazma_core.memory.backends.get_vector_backend",
+                                lambda conn_=None, **_k: LocalSqliteVectorBackend(conn))
+            primary = _bench(conn, refs, covers, data)
+            print("\nlocal  ", local["overall"], "\nprimary", primary["overall"])
+            for key, delta in PRIMARY_DELTA.items():
+                assert primary["overall"][key] >= local["overall"][key] - delta, (key, local, primary)
+
+            # Negative control: the delta sees a degraded primary path -- the
+            # vector index down, keywords alone. (The old recency-sliced keyword
+            # channel scores the same as the new one on this dataset: the index
+            # finds what the slice dropped. The slice is held by
+            # test_an_older_memory_holding_every_word_beats_newer_ones_holding_one.)
+            # Negative control: the primary path without the local path's part F
+            # steps (what CI's Postgres job measured from part F to the fix).
+            with monkeypatch.context() as mp:
+                _without_the_local_steps(mp)
+                unlike = _bench(conn, refs, covers, data)
+            print("no part F steps", unlike["overall"])
+            assert any(unlike["overall"][k] < local["overall"][k] - d for k, d in PRIMARY_DELTA.items()), unlike
+
+            monkeypatch.setattr("kazma_core.memory.backends.get_vector_backend", lambda conn_=None, **_k: None)
+            degraded = _bench(conn, refs, covers, data)
+            print("no index", degraded["overall"])
+            assert any(degraded["overall"][k] < local["overall"][k] - d for k, d in PRIMARY_DELTA.items()), degraded
         finally:
-            pc.close()
+            conn.close()
+            pc = backend._connect()
+            try:
+                cur = pc.cursor()
+                cur.execute("DELETE FROM kazma_episodes WHERE tenant_id = %s", (benchmark.BENCH_TENANT,))
+                cur.execute("DELETE FROM kazma_beliefs WHERE tenant_id = %s", (benchmark.BENCH_TENANT,))
+                pc.commit()
+            finally:
+                pc.close()

@@ -246,7 +246,15 @@ class SessionManager:
         max_sessions: int = MAX_SESSIONS,
         db_path: str = ":memory:",
         spool_path: str | None = None,
+        *,
+        backend: str | None = None,
     ) -> None:
+        """*backend*: ``"sqlite"`` keeps the chats in the file at *db_path*
+        whatever the address says (a caller that names its own store: a
+        test's world, which the Postgres job runs with ``KAZMA_DATABASE_URL``
+        set); None is as set up: Postgres when the address names one."""
+        if backend not in (None, "sqlite"):
+            raise ValueError(f"a chat store is Postgres (as set up) or sqlite, not {backend!r}")
         self._max_sessions = max_sessions
         self._sessions: OrderedDict[str, ChatSession] = OrderedDict()
         self.db_path = db_path
@@ -294,7 +302,7 @@ class SessionManager:
         try:
             from kazma_core.db.pg_helpers import use_postgres
 
-            self._pg = use_postgres() and db_path != ":memory:"
+            self._pg = backend is None and use_postgres() and db_path != ":memory:"
         except Exception:
             self._pg = False
 

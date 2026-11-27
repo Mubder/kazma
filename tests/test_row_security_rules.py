@@ -371,12 +371,17 @@ def test_a_backfill_that_did_not_run_is_said_loudly(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("KAZMA_SCRATCH_URL", "postgresql://kazma@elsewhere.example/kazma")
     done = row_security.Applied()
     if skipped:
-        done.not_backfilled = "checkpoints: not this install's own database"
+        done.not_backfilled = "checkpoints: not the database this install's own address names"
         done.notes.append(done.not_backfilled)
     monkeypatch.setattr(row_security, "apply", lambda url, **_kw: done)
-    assert script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"]) == 0
+    code = script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"])
     out = capsys.readouterr().out
-    assert ("NOT BACKFILLED" in out and "do not arm" in out and "[NOTE]" not in out) == skipped, out
+    if skipped:  # second delta review L2: not a success, one message, its remedy named
+        assert code == 1 and out.count("NOT BACKFILLED") == 1 and "[NOTE]" not in out, out
+        assert "run apply with this install's own address" in out
+        assert "The rules are in place." not in out.splitlines(), "no success line of its own"
+    else:
+        assert code == 0 and "NOT BACKFILLED" not in out and "The rules are in place." in out, out
 
 
 @pytest.mark.parametrize("argv", [
@@ -525,3 +530,79 @@ def test_the_gate_sees_a_planted_declaration() -> None:
         "        with row_security.install_inside_a_space('mine'):\n"
         "            return 1\n")}
     assert _declarers(planted)["install_inside_a_space"] == {"kazma-core/kazma_core/planted.py::Store.read"}
+
+
+# ── a catalog read names each column once (S4-01 step 5) ─────────────────
+
+_CAST = re.compile(r"::\w+(?:\[\])?")
+
+
+def _output_names(sql: str) -> list[str]:
+    """The output column names of *sql*'s first SELECT list, as Postgres
+    names them: the alias, else a column's own name, else a function's."""
+    start = re.match(r"(?is)\s*SELECT\s+(?:DISTINCT\s+)?", sql)
+    if not start:
+        return []
+    items, depth, begin, i = [], 0, start.end(), start.end()
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and ch == ",":
+            items.append(sql[begin:i])
+            begin = i + 1
+        elif depth == 0 and re.match(r"(?i)\s+FROM\b", sql[i:]):
+            break
+        i += 1
+    items.append(sql[begin:i])
+    names = []
+    for item in (_CAST.sub("", part).strip() for part in items):
+        alias = re.search(r"(?i)\bAS\s+(\w+)\s*$", item)
+        call = re.match(r"([\w.]+)\s*\(", item)
+        if alias:
+            names.append(alias.group(1).lower())
+        elif call:
+            names.append(call.group(1).split(".")[-1].lower())
+        elif re.fullmatch(r"[\w.]+", item):
+            names.append(item.split(".")[-1].lower())
+        else:
+            names.append("?column?")
+    return names
+
+
+def _reads_naming_two_alike(source: str) -> tuple[int, list[str]]:
+    """How many literal queries ``_rows`` reads, and each that names two
+    output columns alike: a store's dict-row cursor keeps one of them."""
+    read, found = 0, []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_rows"
+                and len(node.args) >= 2):
+            continue
+        try:
+            sql = ast.literal_eval(node.args[1])
+        except ValueError:
+            continue  # built when it runs: _rows itself refuses a row that came back short
+        read += 1
+        names = _output_names(sql)
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:
+            found.append(f"{node.lineno}: {', '.join(twice)}")
+    return read, found
+
+
+def test_every_catalog_read_names_each_column_once() -> None:
+    source = Path(row_security.__file__).read_text(encoding="utf-8")
+    read, found = _reads_naming_two_alike(source)
+    assert read >= 10, "the gate reads the module's catalog queries"
+    assert found == []
+
+
+def test_the_gate_sees_two_columns_alike() -> None:
+    old = ('def _policies(cur, table):\n'
+           '    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = \'{0}\'::oid[], "\n'
+           '                      "pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) "\n'
+           '                      "FROM pg_policy WHERE polrelid = to_regclass(%s)", (table,))\n')
+    assert _reads_naming_two_alike(old) == (1, ["2: pg_get_expr"])
+    assert _output_names("SELECT p.oid::regprocedure::text, count(*), a.b AS c FROM x") == ["oid", "count", "c"]

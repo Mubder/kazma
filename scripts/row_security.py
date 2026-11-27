@@ -175,11 +175,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [NOTE] {note}")
     for table in done.left:
         print(f"  [LEFT] {table}: its lock was not had in time; run this again when Kazma is idle")
-    print("The rules are in place." if done.complete else "The rules are not all in place.")
+    if not done.complete:
+        print("The rules are not all in place.")
+    elif not done.not_backfilled:
+        print("The rules are in place.")
     if done.not_backfilled:
-        print(f"NOT BACKFILLED: {done.not_backfilled}. No checkpoint row was given its thread's space here: "
-              "do not arm on this database before the install it belongs to has run apply on it.")
-    return 0 if done.complete else 1
+        # One message, and not a success (second delta review L2).
+        print("NOT BACKFILLED. The rules are in place, but this is not the database this install's own address "
+              "names (compared by server and database), so no checkpoint row was given its thread's space. "
+              "Before arming, run apply with this install's own address.")
+    return 0 if done.complete and not done.not_backfilled else 1
 
 
 if __name__ == "__main__":

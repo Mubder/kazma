@@ -19,11 +19,22 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.ingestion import DocumentIngestionService
+
+from tests._as_request import tests_own
+
+
+@pytest.fixture(autouse=True)
+def _the_tests_own_rows() -> Iterator[None]:
+    """What a test plants, reads and deletes here is its own, of no space --
+    the install's -- as the collection it runs is (S4-01 step 5)."""
+    with tests_own():
+        yield
 
 
 @pytest.fixture

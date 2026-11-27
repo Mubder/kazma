@@ -28,6 +28,7 @@ from kazma_core.spaces import scope, threads
 from kazma_ui import reply_sink, session_manager, turn_runtime
 from kazma_ui.session_manager import ChatDeleted, ChatSession, SessionManager
 
+from tests._as_request import as_owner
 from tests._chat_move_space_cases import NoCardGraph
 
 
@@ -51,10 +52,11 @@ def forgets(monkeypatch):
 def _chat(store: SessionManager, *, title: str = "a chat", thread: str = "") -> tuple[str, str]:
     session_id = f"s-{uuid4().hex[:8]}"
     thread_id = thread or f"t-{uuid4().hex[:8]}"
-    held = store.get_or_create(session_id, thread_id=thread_id)
-    held.messages = [{"role": "user", "content": "question"}, {"role": "assistant", "content": "answer"}]
-    held.title = title
-    store.put(held)
+    with as_owner():  # the chat page's request
+        held = store.get_or_create(session_id, thread_id=thread_id)
+        held.messages = [{"role": "user", "content": "question"}, {"role": "assistant", "content": "answer"}]
+        held.title = title
+        store.put(held)
     return session_id, thread_id
 
 
@@ -606,13 +608,15 @@ def test_a_twin_is_found_on_real_postgres(store) -> None:
     if tt.postgres_dsn() is None:
         pytest.skip("needs a real Postgres (KAZMA_DATABASE_URL + KAZMA_TEST_ALLOW_REAL_DB=1)")
     assert store._pg
-    named, twin, thread = _twins(store)
-    store._sessions.clear()  # as the table says
-    assert store.another_chat_on(thread, twin) and store.another_chat_on(thread, named)
-    assert store.another_chat_on(thread, twin, showing=True) and not store.another_chat_on(thread, named, showing=True)
-    store.delete(twin)
-    assert not threads.thread_ended(thread) and not store.another_chat_on(thread, named)
-    store.delete(named)
+    with as_owner():  # the chat page's requests
+        named, twin, thread = _twins(store)
+        store._sessions.clear()  # as the table says
+        assert store.another_chat_on(thread, twin) and store.another_chat_on(thread, named)
+        assert (store.another_chat_on(thread, twin, showing=True)
+                and not store.another_chat_on(thread, named, showing=True))
+        store.delete(twin)
+        assert not threads.thread_ended(thread) and not store.another_chat_on(thread, named)
+        store.delete(named)
     assert threads.thread_ended(thread)
 
 
