@@ -258,7 +258,7 @@ async def test_strict_profile_requires_docker_in_readiness(monkeypatch):
     for name in ("config_store", "database", "swarm_engine", "model_registry", "agent_runner", "mcp", "cron", "schedulers", "llm_provider"):
         monkeypatch.setattr(health, "check_" + name, lambda: {"status": "ok"})
     monkeypatch.setattr(e2b, "e2b_available", lambda: True)
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: None)
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: None)  # no way to reach an engine
     assert health._check_code_execution()["status"] == "failed"
     response = await health._readiness()
     assert response.status_code == 503
