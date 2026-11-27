@@ -31,7 +31,10 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   `docker_cli.py` (loaded by path) never reads settings: it takes the choice
   from the server's record (`guard_dependencies`, field `engine`) and hands
   the context to the document broker (`_BROKER_ENV_KEEP`), which restarts
-  when the choice changes.
+  when the choice changes: after the jobs it is running finish, at most
+  `BROKER_ENGINE_CHANGE_WAIT_S` (660 s), said in the guard's log
+  (`broker.engine_change_waits`, then `broker.engine_changed` or
+  `broker.engine_change_wait_ended`; §71).
 - **Mount paths follow the context** (`docker_cli.engine_host_path`): Kazma's
   engine mounts fixed drive `G:` at `/g` (its distro's `[automount] root=/`);
   a share, mapped, `subst` or removable drive is refused with the reason;

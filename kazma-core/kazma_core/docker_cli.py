@@ -797,15 +797,9 @@ _NO_VALUE_FLAGS = frozenset({
 })
 
 
-def _program_start(args: Sequence[str]) -> int | None:
-    """Where the container program's own arguments begin in a ``run``,
-    ``create`` or ``exec`` call: at the image or the container, past
-    docker's options. None for any other call, and for an option docker's
-    grammar above does not name: the whole call is then translated as
-    before, so a guess never stops before a mount (review L-c,
-    2026-11-27)."""
-    # ... and those that take one (``--name x``; ``--name=x`` is one word).
-    value_options = frozenset({
+def _run_value_options() -> frozenset[str]:
+    """... and those that take one (``--name x``; ``--name=x`` is one word)."""
+    return frozenset({
         "-a", "-c", "-e", "-h", "-l", "-m", "-p", "-u", "-v", "-w",
         "--add-host", "--annotation", "--attach", "--blkio-weight", "--blkio-weight-device", "--cap-add",
         "--cap-drop", "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-count", "--cpu-percent",
@@ -823,12 +817,50 @@ def _program_start(args: Sequence[str]) -> int | None:
         "--storage-opt", "--sysctl", "--tmpfs", "--ulimit", "--user", "--userns", "--uts", "--volume",
         "--volume-driver", "--volumes-from", "--workdir",
     })
-    i = 0
-    if args[:1] == ["container"]:
-        i = 1
+
+
+def _run_call(args: Sequence[str]) -> int | None:
+    """Where docker's options begin in a ``run``, ``create`` or ``exec``
+    call (after ``[container] run``), or None for any other call."""
+    i = 1 if args[:1] == ["container"] else 0
     if i >= len(args) or args[i] not in ("run", "create", "exec"):
         return None
-    i += 1
+    return i + 1
+
+
+def _short_word(arg: str, value_options: frozenset[str]) -> tuple[str | None, str | None] | None:
+    """A short word (``-it``, ``-itp``, ``-eX=1``, ``-v=G:\\w:/w``) read as
+    docker's flag parser (pflag) reads it: one character at a time (review
+    L-c2 and L-g, 2026-11-27). A no-value flag goes on; a value option ends
+    the word: ``(option, its value)`` when the value is attached (the rest of
+    the word, a leading ``=`` taken off as pflag does), ``(option, None)``
+    when the next word is its value. ``(None, None)``: no-value flags only.
+    None: a character the grammar does not name (the caller then reads the
+    whole call as before: never a guess)."""
+    for at, char in enumerate(arg[1:], start=1):
+        flag = f"-{char}"
+        if flag in _NO_VALUE_FLAGS:
+            continue
+        if flag not in value_options:
+            return None
+        rest = arg[at + 1:]
+        if not rest:
+            return flag, None
+        return flag, rest[1:] if len(rest) > 1 and rest.startswith("=") else rest
+    return None, None
+
+
+def _program_start(args: Sequence[str]) -> int | None:
+    """Where the container program's own arguments begin in a ``run``,
+    ``create`` or ``exec`` call: at the image or the container, past
+    docker's options. None for any other call, and for an option docker's
+    grammar above does not name: the whole call is then translated as
+    before, so a guess never stops before a mount (review L-c,
+    2026-11-27)."""
+    i = _run_call(args)
+    if i is None:
+        return None
+    value_options = _run_value_options()
     while i < len(args):
         arg = args[i]
         if arg == "--":
@@ -844,22 +876,13 @@ def _program_start(args: Sequence[str]) -> int | None:
             else:
                 return None
         else:
-            # A short word, read as docker's flag parser reads it: one
-            # character at a time (review L-c2, 2026-11-27). A no-value flag
-            # goes on (-it); a value option takes the rest of the word as its
-            # value (-eX=1) or, at the word's end, the next word (-itp 80:80,
-            # -dp 8080:80); a character the grammar does not name translates
-            # the whole call as before.
-            step = None
-            for at, char in enumerate(arg[1:], start=1):
-                flag = f"-{char}"
-                if flag in _NO_VALUE_FLAGS:
-                    continue
-                if flag in value_options:
-                    step = 1 if at < len(arg) - 1 else 2
-                    break
+            # -it goes on; -eX=1 carries its value; -itp 80:80 takes the next
+            # word (review L-c2).
+            read = _short_word(arg, value_options)
+            if read is None:
                 return None
-            i += step or 1
+            option, value = read
+            i += 2 if option is not None and value is None else 1
     return None
 
 
@@ -877,6 +900,10 @@ def _cross_args(args: Sequence[str]) -> list[str] | None:
     command = words[0] if words else ""
     positional_paths = command in ("build", "cp") or (command in ("buildx", "image") and "build" in words[:2])
     program = _program_start(list(args))
+    # A run's short words are read as docker reads them, so -itv G:\w:/w,
+    # -vG:\w:/w, -v=G:\w:/w and -itvG:\w:/w are the -v they are (review L-g,
+    # 2026-11-27); a word the grammar does not name is read whole, as before.
+    value_options = _run_value_options() if _run_call(args) is not None else None
     out: list[str] = []
     before: str | None = None
     for index, arg in enumerate(args):
@@ -884,7 +911,15 @@ def _cross_args(args: Sequence[str]) -> list[str] | None:
             out.extend(args[index:])
             break
         name = arg.split("=", 1)[0] if arg.startswith("--") else ""
-        if (before in path_options or name in path_options
+        read = (_short_word(arg, value_options)
+                if value_options is not None and arg[:1] == "-" and arg[:2] != "--" else None)
+        if read is not None and read[0] in path_options and read[1] is not None:
+            option, value = read
+            crossed = _cross(value, option)
+            if crossed is None:
+                return None
+            out.append(arg[:len(arg) - len(value)] + crossed)
+        elif (before in path_options or name in path_options
                 or (positional_paths and not arg.startswith("-") and before not in ("-t", "--tag"))):
             value = _cross(arg, before)
             if value is None:
@@ -892,7 +927,8 @@ def _cross_args(args: Sequence[str]) -> list[str] | None:
             out.append(value)
         else:
             out.append(arg)
-        before = arg
+        # The option whose value the next word is: -itv's is -v's.
+        before = read[0] if read is not None and read[0] is not None and read[1] is None else arg
     return out
 
 

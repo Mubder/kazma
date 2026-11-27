@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Kazma's engine reads every way of writing a folder given to a container (2026-11-27)
+
+- A folder given to a container inside a group of docker options
+  (`-itv G:\w:/w`, `-vG:\w:/w`, `-v=G:\w:/w`) now reaches Kazma's engine in
+  the form it reads, as `-v G:\w:/w` already did.
+- While a new container engine waits for running document jobs, a broker
+  that misses one status answer no longer ends the wait early; Kazma's log
+  says the number of jobs stopped is unknown when the broker did not answer,
+  and says so when a wait ends with nothing to restart.
+
 ## A new container engine lets running document jobs finish first (2026-11-27)
 
 - When the container engine changes, the document broker now waits for the

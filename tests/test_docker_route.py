@@ -377,31 +377,96 @@ _DECIDE_ONLY = {
     ("kazma-core/kazma_core/documents/worker_broker.py", "_find_docker_cli"):
         "asks only whether Kazma's route reaches an engine; runs nothing",
 }
-#: What carries the route's entries into a call's environment.
+#: What carries the route's entries into a call's environment (and the
+#: ``.env`` of a ``docker_command(...)`` result, which holds them).
 _CARRIES = {"route_entries", "WSL_ROUTE_ENV", "_docker_route_entries"}
+_BUILDERS = ("docker_command", "docker_argv")
+
+
+def _units(tree: ast.Module) -> list[tuple[str, list[ast.AST]]]:
+    """Each function's own nodes (not those of a function inside it), and
+    the module body outside every function as one more unit (a top-level
+    call, an ``if __name__ == "__main__":`` block: review delta 4)."""
+    def own(root: ast.AST) -> list[ast.AST]:
+        out, stack = [], list(ast.iter_child_nodes(root))
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            out.append(node)
+            stack.extend(ast.iter_child_nodes(node))
+        return out
+    functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    return [("<module>", own(tree)), *((fn.name, own(fn)) for fn in functions)]
+
+
+def _aliases(tree: ast.Module) -> dict[str, str]:
+    """Names bound anywhere in the file to a builder itself (``build =
+    m.docker_argv``, ``getattr(m, "docker_command")``, an import), by the
+    builder each one is."""
+    def builder(value: ast.AST, known: dict[str, str]) -> str | None:
+        if isinstance(value, ast.Attribute) and value.attr in _BUILDERS:
+            return value.attr
+        if isinstance(value, ast.Name):
+            return known.get(value.id) or (value.id if value.id in _BUILDERS else None)
+        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "getattr"
+                and len(value.args) > 1 and isinstance(value.args[1], ast.Constant)
+                and value.args[1].value in _BUILDERS):
+            return value.args[1].value
+        return None
+    known: dict[str, str] = {}
+    for _ in range(3):  # an alias of an alias
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                known.update({a.asname or a.name: a.name for a in node.names if a.name in _BUILDERS})
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target] if isinstance(node, (ast.AnnAssign, ast.NamedExpr)) else [])
+            kind = builder(node.value, known) if targets and getattr(node, "value", None) is not None else None
+            if kind:
+                known.update({t.id: kind for t in targets if isinstance(t, ast.Name)})
+    return known
+
+
+def _built_by(call: ast.AST, aliases: dict[str, str]) -> str | None:
+    """The builder *call* calls, or None."""
+    if not isinstance(call, ast.Call):
+        return None
+    if isinstance(call.func, ast.Attribute) and call.func.attr in _BUILDERS:
+        return call.func.attr
+    if isinstance(call.func, ast.Name):
+        return aliases.get(call.func.id) or (call.func.id if call.func.id in _BUILDERS else None)
+    return None
 
 
 def _drops_the_route_env(sources: dict[str, str]) -> list[str]:
-    """``file::function`` for each function of a file that loads
-    docker_cli.py by path, builds a docker call (``docker_command`` /
-    ``docker_argv``) and carries none of what the route adds: per call, not
-    per file (review delta 3)."""
+    """``file::unit`` for each unit (a function, or the module body outside
+    functions) of a file that loads docker_cli.py by path, builds a docker
+    call (``docker_command`` / ``docker_argv``, by name or alias) and
+    carries none of what the route adds: per call, not per file (review
+    delta 3). ``.env`` carries only on a ``docker_command(...)`` result
+    (review delta 4: ``env=args.env`` is not the route's)."""
     found = []
     for name, text in sources.items():
         if not _loads_docker_cli_by_path(text):
             continue
-        for fn in ast.walk(ast.parse(text)):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or (name, fn.name) in _DECIDE_ONLY:
+        tree = ast.parse(text)
+        aliases = _aliases(tree)
+        for unit, nodes in _units(tree):
+            if (name, unit) in _DECIDE_ONLY:
                 continue
-            own = [n for n in ast.walk(fn) if n is not fn and isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-            inner = {id(x) for f in own for x in ast.walk(f)}
-            nodes = [n for n in ast.walk(fn) if id(n) not in inner]
-            builds = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                         and n.func.attr in ("docker_command", "docker_argv") for n in nodes)
-            carries = any((isinstance(n, ast.Attribute) and (n.attr in _CARRIES or n.attr == "env"))
-                          or (isinstance(n, ast.Name) and n.id in _CARRIES) for n in nodes)
+            builds = any(_built_by(n, aliases) for n in nodes)
+            commands = {t.id for n in nodes if isinstance(n, ast.Assign)
+                        and _built_by(n.value, aliases) == "docker_command"
+                        for t in n.targets if isinstance(t, ast.Name)}
+            carries = any(
+                (isinstance(n, ast.Attribute) and n.attr in _CARRIES)
+                or (isinstance(n, ast.Name) and n.id in _CARRIES)
+                or (isinstance(n, ast.Attribute) and n.attr == "env"
+                    and ((isinstance(n.value, ast.Name) and n.value.id in commands)
+                         or _built_by(n.value, aliases) == "docker_command"))
+                for n in nodes)
             if builds and not carries:
-                found.append(f"{name}::{fn.name}")
+                found.append(f"{name}::{unit}")
     return sorted(found)
 
 
@@ -432,6 +497,37 @@ def test_control_a_by_path_caller_that_drops_the_entries_is_found():
         "    subprocess.run(m.docker_argv(['ps']))\n"
         "ROUTE = m.WSL_ROUTE_ENV\n")}
     assert _drops_the_route_env(planted) == ["scripts/x.py::dropped"]
+
+
+_GOOD_CALL = (
+    "import importlib.util, os, subprocess\n"
+    "spec = importlib.util.spec_from_file_location('m', root / \"docker_cli.py\")\n"
+    "def good():\n"
+    "    cmd = m.docker_command(['ps'])\n"
+    "    subprocess.run(cmd.argv, env={**os.environ, **cmd.route_entries()})\n")
+
+
+@pytest.mark.parametrize("dropped, unit", [
+    # Review delta 4: the forms the per-function gate of delta 3 missed.
+    ("subprocess.run(m.docker_argv(['ps']))\n", "<module>"),
+    ("if __name__ == '__main__':\n    subprocess.run(m.docker_argv(['ps']))\n", "<module>"),
+    ("def dropped(args):\n    cmd = m.docker_command(['ps'])\n    subprocess.run(cmd.argv, env=args.env)\n",
+     "dropped"),
+    ("def dropped():\n    build = m.docker_argv\n    subprocess.run(build(['ps']))\n", "dropped"),
+    ("build = getattr(m, 'docker_argv')\ndef dropped():\n    subprocess.run(build(['ps']))\n", "dropped"),
+])
+def test_control_each_form_of_a_dropped_call_is_found(dropped, unit):
+    """One good call and one dropped call in one file: only the dropped one."""
+    assert _drops_the_route_env({"scripts/x.py": _GOOD_CALL + dropped}) == [f"scripts/x.py::{unit}"]
+
+
+@pytest.mark.parametrize("carried", [
+    "cmd = m.docker_command(['ps'])\nsubprocess.run(cmd.argv, env={**os.environ, **cmd.route_entries()})\n",
+    "if __name__ == '__main__':\n    cmd = m.docker_command(['ps'])\n    subprocess.run(cmd.argv, env=cmd.env)\n",
+    "def fine():\n    run = m.docker_command\n    cmd = run(['ps'])\n    subprocess.run(cmd.argv, env=cmd.env)\n",
+])
+def test_control_a_call_that_carries_the_entries_is_not_found(carried):
+    assert _drops_the_route_env({"scripts/x.py": _GOOD_CALL + carried}) == []
 
 
 def _by_path_copy(name: str):
@@ -544,6 +640,40 @@ def test_no_option_before_a_mount_stops_its_translation(kazma_engine, before):
     assert "/g/w:/w" in argv and r"G:\w:/w" not in argv, argv
     mount = docker_cli.docker_command(["run", *before, "--mount", r"type=bind,src=G:\w,dst=/w", "img"]).argv
     assert "type=bind,src=/g/w,dst=/w" in mount, mount
+
+
+@pytest.mark.parametrize("words, crossed", [
+    (["-itv", r"G:\w:/w"], ["-itv", "/g/w:/w"]),
+    ([r"-vG:\w:/w"], ["-v/g/w:/w"]),
+    ([r"-v=G:\w:/w"], ["-v=/g/w:/w"]),
+    ([r"-itvG:\w:/w"], ["-itv/g/w:/w"]),
+    # The control: -it, then a -v of its own.
+    (["-it", "-v", r"G:\w:/w"], ["-it", "-v", "/g/w:/w"]),
+])
+def test_a_mount_given_in_a_short_word_is_translated(kazma_engine, words, crossed):
+    """Review L-g (2026-11-27): docker reads all four as -v G:\\w:/w; the
+    translation compared the whole previous word and kept the Windows
+    path. The program's own -v is still the caller's."""
+    argv = docker_cli.docker_command(["run", *words, "img", "tool", "-v", r"C:\x"]).argv
+    assert argv[argv.index("run"):] == ["run", *crossed, "img", "tool", "-v", r"C:\x"], argv
+
+
+@pytest.mark.parametrize("word", [r"-v\\srv\s:/w", r"-itv=\\srv\s:/w"])
+def test_a_share_given_in_a_short_word_goes_to_the_windows_cli(kazma_engine, word):
+    assert docker_cli.docker_command(["run", word, "img"]).route == "cli"
+
+
+@pytest.mark.parametrize("word, read", [
+    ("-it", (None, None)),
+    ("-itv", ("-v", None)),
+    (r"-vG:\w", ("-v", r"G:\w")),
+    (r"-v=G:\w", ("-v", r"G:\w")),
+    ("-e=FOO", ("-e", "FOO")),
+    ("-v=", ("-v", "=")),                         # pflag: a lone = is the value
+    ("-iZ", None),
+])
+def test_a_short_word_reads_as_pflag_reads_it(word, read):
+    assert docker_cli._short_word(word, docker_cli._run_value_options()) == read
 
 
 @pytest.mark.parametrize("args, start", [

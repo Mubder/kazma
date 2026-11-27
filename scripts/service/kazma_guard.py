@@ -2936,23 +2936,27 @@ class DocumentBroker:
         its job containers on the old one, so it is started again. Called
         from Dependencies' tick, whose wrapper catches and logs a failure."""
         if self.proc is None or self.proc.poll() is not None:
-            self._engine_wait_since = None
+            self._engine_wait_ended("the broker is not running; it starts on the engine chosen")
             return
         # The pair, not the context alone: with no Windows docker context the
         # choice reaches the broker only in the export (review M-a2,
         # 2026-11-27: a choice that arrived or changed never restarted it).
         if _broker_engine(os.environ) == getattr(self, "docker_engine", None):
-            self._engine_wait_since = None
+            self._engine_wait_ended("the broker already runs on the engine chosen")
             return
         # Jobs running on the old engine finish first: asked again at each
         # apply (Dependencies' tick), at most BROKER_ENGINE_CHANGE_WAIT_S
-        # (review delta 3, 2026-11-27). A broker that does not answer is
-        # restarted at once.
+        # (review delta 3, 2026-11-27). A broker that does not answer before
+        # a wait is restarted at once; once a wait has begun, a status that
+        # does not answer keeps it waiting, within the same bound (review
+        # delta 4: one missed status ended it).
         now = time.monotonic()
         status = broker_status(self.port, self.token) if self.port and self.token else None
-        active = int(status.get("active") or 0) if isinstance(status, dict) else 0
+        answered = isinstance(status, dict)
+        active = int(status.get("active") or 0) if answered else 0
         since = self._engine_wait_since
-        if active and (since is None or now - since < BROKER_ENGINE_CHANGE_WAIT_S):
+        within = since is None or now - since < BROKER_ENGINE_CHANGE_WAIT_S
+        if within and (active or (since is not None and not answered)):
             if since is None:
                 self._engine_wait_since = now
                 self.log("info", "broker.engine_change_waits", active=active,
@@ -2961,12 +2965,22 @@ class DocumentBroker:
             return
         waited = 0 if since is None else int(now - since)
         self._engine_wait_since = None
+        # A count only the broker's answer knows (review delta 4).
+        jobs: dict = {"stopped_jobs": active} if answered else {"stopped_jobs": "unknown", "answered": False}
         self.log("info", "broker.engine_changed",
                  context=os.environ.get("DOCKER_CONTEXT") or "current",
-                 by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "", waited_s=waited,
-                 stopped_jobs=active)
+                 by_choice=os.environ.get(_ENGINE_BY_CHOICE_ENV) or "", waited_s=waited, **jobs)
         self.stop("engine changed")
         self._start()
+
+    def _engine_wait_ended(self, reason: str) -> None:
+        """A wait for running jobs ends with no restart (the choice went back
+        to the broker's engine, or the broker stopped meanwhile): said once
+        (review delta 4)."""
+        since, self._engine_wait_since = self._engine_wait_since, None
+        if since is not None:
+            self.log("info", "broker.engine_change_wait_ended", restarted=False,
+                     waited_s=int(time.monotonic() - since), reason=reason)
 
     def on_pause(self) -> None:
         """Maintenance: nothing of Kazma runs while the guard holds."""

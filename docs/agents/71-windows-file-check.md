@@ -236,6 +236,20 @@ exceptions; a user cannot be asked to turn a protection off.
   a start written another way (a `Start-Process` with other switches first,
   `if errorlevel`, a launcher named inside a `powershell -Command` string)
   is not found; review new ways to start a program against it.
+- **The fourth delta review (2026-11-27)**: one reader of a short word
+  (`docker_cli._short_word`, pflag's rules: the value option a word ends in
+  and its attached value, a leading `=` taken off) serves `_program_start`
+  and `_cross_args`, so `-itv G:\w:/w`, `-vG:\w:/w`, `-v=G:\w:/w` and
+  `-itvG:\w:/w` are translated as the `-v` they are (L-g). The route-entries
+  gate reads the module body outside functions as one more unit (a top-level
+  call, an `if __name__ == "__main__":` block), follows a builder's alias
+  (`build = m.docker_argv`, `getattr`), and takes `.env` only on a
+  `docker_command(...)` result. Once a wait for running jobs has begun, a
+  status that does not answer keeps it waiting (within the same bound); a
+  restart after one logs `stopped_jobs: "unknown"`, `answered: false`; a
+  wait that ends with no restart is said (`broker.engine_change_wait_ended`).
+  The wait does not drain: the broker keeps taking jobs on the old engine
+  (each runs `--network none`), so under steady load it runs the full 660 s.
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

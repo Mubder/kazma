@@ -430,12 +430,61 @@ def test_the_wait_is_bounded_and_says_what_it_stopped(monkeypatch, tmp_path, eng
     assert changed["stopped_jobs"] == 1 and changed["waited_s"] >= guard.BROKER_ENGINE_CHANGE_WAIT_S
 
 
+def test_a_missed_status_keeps_the_wait_and_its_count_is_unknown(monkeypatch, tmp_path, engine_pc):
+    """Review delta 4 (2026-11-27): one status that did not answer ended the
+    wait at once, and the log said 0 jobs were stopped, a count it did not
+    know."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    status = {"answer": {"ready": True, "active": 2}}
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: status["answer"])
+    _record("kazma")
+    h.g.deps.apply_engine()
+    status["answer"] = None
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 1, "one missed status ended the wait"
+    h.clock.now += guard.BROKER_ENGINE_CHANGE_WAIT_S + 1
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2, "still bounded: past the wait the new engine is taken"
+    changed = _log_records("broker.engine_changed")[-1]
+    assert changed["stopped_jobs"] == "unknown" and changed["answered"] is False
+
+
+def test_control_a_broker_that_never_answered_is_restarted_at_once(monkeypatch, tmp_path, engine_pc):
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: None)
+    _record("kazma")
+    h.g.deps.apply_engine()
+    assert len(h.procs) == 2
+    assert _log_records("broker.engine_changed")[-1]["stopped_jobs"] == "unknown"
+    assert not _log_records("broker.engine_change_waits")
+
+
+def test_a_wait_that_ends_without_a_restart_is_said(monkeypatch, tmp_path, engine_pc):
+    """Review delta 4: the record went back to the broker's engine mid-wait;
+    one line said the wait began, then nothing."""
+    h = _Harness(monkeypatch, tmp_path)
+    _broker_on(h, None)
+    monkeypatch.setattr(guard, "broker_status", lambda port, token, timeout=3.0: {"ready": True, "active": 1})
+    _record("kazma")
+    h.g.deps.apply_engine()
+    _record(None)
+    for _ in range(5):
+        h.g.deps.apply_engine()
+    assert len(h.procs) == 1, "nothing to restart: the broker runs on the engine chosen"
+    ended = _log_records("broker.engine_change_wait_ended")
+    assert len(ended) == 1 and ended[0]["restarted"] is False, ended
+    assert not _log_records("broker.engine_changed")
+
+
 def test_control_fifty_applies_of_the_same_record_restart_nothing(monkeypatch, tmp_path, engine_pc):
     h = _Harness(monkeypatch, tmp_path)
     _broker_on(h, "kazma")
     for _ in range(50):
         h.g.deps.apply_engine()
     assert len(h.procs) == 1
+    assert not _log_records("broker.engine_change_wait_ended"), "no wait, nothing to say"
 
 
 def _env_names_read(source: str) -> set[str]:
