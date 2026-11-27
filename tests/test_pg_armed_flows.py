@@ -50,7 +50,11 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     monkeypatch.setattr(row_security, "_armed", False)
     _every_store_set_up(dsn)
     monkeypatch.setattr(row_security, "_in_place", row_security.in_place())  # given back after the test
-    done = row_security.apply(dsn, vector_table="")
+    # Every table's rule, but not the checkpoints' backfill: the session's
+    # thread records are its own data folder's, not the shared test database's,
+    # and a whole pass reads a missing or empty store as unresolved there
+    # (step 4 review M1; tests/_second_lock_armed.py does the same).
+    done = row_security.apply(dsn, tables=list(row_security.rules("")), vector_table="")
     if done.refused:
         pytest.skip(f"the rules cannot be put in place here: {done.refused}")
     assert done.complete, done.left
