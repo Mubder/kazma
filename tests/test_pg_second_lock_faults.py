@@ -34,9 +34,12 @@ from kazma_core.spaces.scope import bind_scope
 
 from tests.test_pg_armed_flows import _install, armed, documents  # noqa: F401  (fixtures)
 
-pytestmark = pytest.mark.postgres
+try:
+    import psycopg
+except ImportError:  # CI's light job has no psycopg: collected and skipped, so the counts agree
+    psycopg = None
 
-psycopg = pytest.importorskip("psycopg")
+pytestmark = [pytest.mark.postgres, pytest.mark.skipif(psycopg is None, reason="psycopg is not installed")]
 
 
 def _superuser(statement: str) -> None:
