@@ -78,4 +78,34 @@ code it names.
   through), and the `*_KEY` env-name rule is two plain checks instead of an
   overlapping pattern (`tests/test_codeql_followups_2026_11_16.py`, the old
   check and pattern as controls).
+- **Third pass (2026-11-26, 135 open; every one judged in
+  `docs/audits/CODEQL_TRIAGE_2026-11-26.md`).** No log line printed a
+  secret. CodeQL calls a value a secret by the name it is bound to:
+  - **Every key's read path names nothing a secret.**
+    `ConfigStore._resolve_vault_value`'s vault fallback bound its answer to
+    `secret`, so every setting any module read was a secret to CodeQL: 88
+    log lines of ids and counts. The fallback returns it unnamed; a secret
+    is named where it is read, by its key. Gate:
+    `tests/test_codeql_triage_2026_11_26.py` reads `ConfigStore.get`'s value
+    path with CodeQL's own name heuristics, the old line as the control.
+  - **A route answers a Kazma refusal by its field.**
+    `errors.refusal_message` reads the `message` the refusal keeps (the
+    sentence Kazma wrote), redacted and cut, never `str(exc)`: `PeopleRefused`,
+    `LinkRefused`, `OwnKeyRefused`, `SpaceDataRefused`, `SpaceMoveRefused`,
+    `ImportRefused`. `people_api` answered `str(exc)` raw, unseen by section
+    26 F's gate, which knew an exception parameter only by a name ending in
+    Error; it knows every exception class the packages define now (the
+    suffix rule as the control). The same file gates that every class handed
+    to `refusal_message` keeps the field.
+  - **Smaller ones.** A memory backup a request names is rebuilt from its
+    timestamp (`memory.backup.memory_backup_path`; Unicode digits passed
+    `isdigit()`). X's sign-in refusal goes back to the page as one of
+    Kazma's words (`x_api._sign_in_error_word`), and its token check returns
+    a sentence instead of raising. A sealed zip's entries never share a
+    keystream: its ECB makes WinZip's counter blocks, each entry under its
+    own salt (`tests/test_sealed_zip.py`).
+  - **Judged false positives** (the owner dismisses them, with the triage's
+    reason): admin-only folder choices, the path policy's own resolution,
+    secret *names* and token roles read as secrets, the log-line control
+    class (section 69).
 

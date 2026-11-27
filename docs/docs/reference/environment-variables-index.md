@@ -58,7 +58,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_cli.setup`, `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
-| `KAZMA_DATA_DIR` | (none) | `kazma_core.backup.restore`, `kazma_core.config_store`, `kazma_core.memory.backfill_v2` +1 | yes |
+| `KAZMA_DATA_DIR` | `""` | `kazma_core.backup.restore`, `kazma_core.config_store`, `kazma_core.memory.backfill_v2` +2 | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.engine_move`, `kazma_core.guard_dependencies`, `kazma_core.migration.pg_bridge` +1 | yes |
@@ -91,7 +91,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_EMBED_MODEL` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_EMBED_PROVIDER` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_EMBED_REVISION` | `""` | `kazma_core.memory.embedder` | yes |
-| `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files`, `kazma_core.store_registry` | yes |
+| `KAZMA_ENV_FILE` | `""` | `kazma_core.env_files`, `kazma_core.safety.git_kazma_files`, `kazma_core.store_registry` | yes |
 | `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_FETCH_DEADLINE_SECONDS` | `"90"` | `kazma_core.tools.read_url` | yes |

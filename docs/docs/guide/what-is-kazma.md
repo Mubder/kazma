@@ -11,8 +11,8 @@ description: Kazma on one page — what it is, what it can do, what sets it apar
 
 **Kazma is the self-hosted AI agent that asks before it acts.** You run it on
 your own machine and connect the AI models you choose. Then you reach one
-assistant from the browser, the terminal, your code editor, Telegram, Discord
-or Slack. It works in your code, your documents, your mail and calendar, and
+assistant from the browser, the terminal, your code editor, WhatsApp,
+Telegram, Discord or Slack. It works in your code, your documents, your mail and calendar, and
 on the web. It remembers what you tell it, and it asks for your approval
 before anything risky. When something goes wrong, it tells you instead of
 inventing an answer.

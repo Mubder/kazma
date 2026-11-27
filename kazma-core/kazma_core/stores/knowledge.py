@@ -94,6 +94,11 @@ MAX_URL = 2048
 class KnowledgeUrlRefused(ValueError):
     """A seed or page URL that is not an absolute http(s) URL (KB-S09)."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        #: Kazma's sentence, which the page shows (errors.refusal_message).
+        self.message = message
+
 
 class KnowledgeLibraryGone(LookupError):
     """The library a write names does not exist (deleted while a crawl ran)."""

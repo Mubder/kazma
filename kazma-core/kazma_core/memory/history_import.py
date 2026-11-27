@@ -71,6 +71,11 @@ _TITLE_MAX = 200
 class ImportRefused(ValueError):
     """The file is not an export Kazma can read (the message says why)."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        #: Kazma's sentence, which the page shows (``errors.refusal_message``).
+        self.message = message
+
 
 @dataclass(frozen=True)
 class _Turn:

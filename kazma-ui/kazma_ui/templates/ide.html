@@ -373,6 +373,7 @@
       <button class="btn btn-sm btn-success" @click="acceptReview()" :disabled="busy">{{ t('ide.review_accept') }}</button>
       <button class="btn btn-sm btn-danger" @click="rejectReview()" :disabled="busy">{{ t('ide.review_reject') }}</button>
     </div>
+    <p class="ide-review-note" x-show="review.notShown" x-cloak>{{ t('ide.review_not_shown') }}</p>
     <template x-for="file in review.files" :key="file.path">
       <div class="ide-review-file" x-show="file.changed" x-cloak>
         <div class="ide-review-path">

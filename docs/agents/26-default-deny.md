@@ -213,7 +213,17 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   plus a correlation id, with the real exception logged under that id.
 - 4xx **validation** paths use `validation_error(exc)` instead: the message
   is the caller's answer, and replacing it with a code makes the API
-  unusable. Redaction applies either way.
+  unusable. Redaction applies either way. A typed refusal of Kazma's own
+  (`PeopleRefused`, `SpaceMoveRefused`...) keeps its sentence in a `message`
+  field, and a route answers it with `refusal_message(exc)` (or the codes it
+  carries): the field, redacted, never the exception's text (2026-11-26,
+  section 66). One with no field answers the catalog's
+  `common.request_refused`, in the reader's language. Gates
+  (`tests/test_codeql_triage_2026_11_26.py`): a route handler that catches
+  a class named `...Refused` and hands it to `validation_error`, `str` or an
+  f-string fails; every class `refusal_message` is handed keeps the field,
+  and nothing else is handed to it (a built-in caught beside a refusal, an
+  expression).
 - **No answer carries an exception's own text** (2026-11-14). A page that
   shows the error gets `described_error(sentence, exc)`: Kazma's sentence
   with the code and the reference ("Could not resolve the clone URL from

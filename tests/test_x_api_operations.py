@@ -578,9 +578,11 @@ def test_a_sign_in_x_declines_is_said(x_store):
     client = TestClient(_app(), follow_redirects=False)
     r = client.get("/api/x/oauth2/callback?error=access_denied&state=s")
     assert r.status_code == 302 and "msg=access_denied" in r.headers["location"]
-    # X's error text is reduced to a code: nothing else reaches the page.
+    # X's error text never reaches the page: a word the page has, else
+    # "refused" (2026-11-26: the letters of any text went through before).
     r = client.get("/api/x/oauth2/callback?error=<script>alert(1)</script>")
-    assert "<" not in r.headers["location"] and "script" in r.headers["location"]
+    assert "<" not in r.headers["location"] and "script" not in r.headers["location"]
+    assert r.headers["location"].endswith("&x_oauth=error&msg=refused")
 
 
 def test_the_exchange_sends_the_verifier_and_the_client(monkeypatch, x_store):

@@ -19,6 +19,13 @@ const ROOT = path.join(__dirname, "../../kazma-ui/kazma_ui");
 const source = fs.readFileSync(path.join(ROOT, "static/js/memory.js"), "utf8").replace(/\r\n/g, "\n");
 const template = fs.readFileSync(path.join(ROOT, "templates/memory.html"), "utf8").replace(/\r\n/g, "\n");
 
+// A catalog key as literal text inside a pattern: every character that means
+// something to a RegExp, the backslash first, is escaped (escaping only the
+// dots was CodeQL's js/incomplete-sanitization, 2026-11-26).
+function escapeRegExp(text) {
+  return text.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
+}
+
 const TABLES = [
   ["beliefs", "loadBeliefs", "memory.console.load_failed"],
   ["entities", "loadEntities", "memory.console.load_failed"],
@@ -67,7 +74,7 @@ for (const [name, loader] of TABLES) {
 test("memory.html shows each table's failure line, worded from the catalog", () => {
   for (const [name, , key] of TABLES) {
     const row = new RegExp(
-      `<template x-if="${name}Failed">\\s*<tr><td colspan="\\d+"[^>]*><span role="alert">\\{\\{ t\\('${key.replace(/\./g, "\\.")}'\\) \\}\\}</span></td></tr>`,
+      `<template x-if="${name}Failed">\\s*<tr><td colspan="\\d+"[^>]*><span role="alert">\\{\\{ t\\('${escapeRegExp(key)}'\\) \\}\\}</span></td></tr>`,
     );
     assert.match(template, row, `${name}: no failure row`);
     // The empty row still waits for a successful read.

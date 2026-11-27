@@ -153,46 +153,14 @@ def create_ide_router() -> APIRouter:
 
     @router.get("/checkpoints/{checkpoint_id}/review")
     def checkpoint_review(checkpoint_id: str) -> dict[str, Any]:
-        from pathlib import Path as _Path
-
+        """Each held file then and now (``FileCheckpointStore.review``: a
+        held path is asked the path policy again before it is read)."""
         from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
-        from kazma_core.ide.hunks import file_diff, split_hunks
-        from kazma_core.tools.text_newlines import read_exact
 
-        rec = get_file_checkpoint_store().get(checkpoint_id)
-        if rec is None:
+        review = get_file_checkpoint_store().review(checkpoint_id)
+        if review is None:
             return {"ok": False, "error": "unknown checkpoint"}
-        files: list[dict[str, Any]] = []
-        for item in rec.get("files") or []:
-            path = str(item.get("path") or "")
-            before = str(item.get("content") or "")
-            after = ""
-            # A file the checkpoint saw as missing and that exists now was
-            # created after it: it is a change too (it used to be skipped).
-            try:
-                p = _Path(path)
-                if p.is_file():
-                    after = read_exact(p)
-            except (OSError, UnicodeDecodeError):
-                after = ""
-            # Exact text on both sides: a text-mode read turned CRLF into LF
-            # and an unchanged CRLF file was listed as changed.
-            lines = file_diff(before, after, _Path(path).name).splitlines()
-            diff_text = "\n".join(lines[:400])
-            files.append({
-                "path": path,
-                "before": before,
-                "after": after,
-                "diff": diff_text,
-                "hunks": split_hunks(diff_text),
-                "changed": before != after,
-            })
-        return {
-            "ok": True,
-            "id": rec["id"],
-            "reason": rec.get("reason") or "",
-            "files": files,
-        }
+        return {"ok": True, **review}
 
     @router.post("/checkpoints/{checkpoint_id}/restore-hunk")
     def restore_hunk(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:

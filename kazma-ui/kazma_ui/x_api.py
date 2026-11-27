@@ -635,6 +635,32 @@ def x_disconnect() -> JSONResponse:
 #: characters only, never a space or a control character.
 _X_TOKEN_TEXT = re.compile(r"[A-Za-z0-9%._~+/=:-]{8,2048}")
 
+#: X's OAuth 2.0 refusal codes (RFC 6749 4.1.2.1) and the word Settings -> X
+#: shows for each (``settings.xapi.err.<word>``, EN and AR). X's outage codes
+#: say X could not answer, not that the client is wrong: they are
+#: ``unreachable``. The callback sends one of these words back to the page,
+#: or "refused" for any other code: Kazma's own word, never the text the
+#: request carried.
+_X_SIGN_IN_ERRORS: dict[str, str] = {
+    "access_denied": "access_denied",
+    "invalid_scope": "invalid_scope",
+    "invalid_request": "invalid_request",
+    "server_error": "unreachable",
+    "temporarily_unavailable": "unreachable",
+}
+
+#: Every word the callback can send the page (each worded in the catalog).
+_X_SIGN_IN_WORDS = (*dict.fromkeys(_X_SIGN_IN_ERRORS.values()), "refused", "missing_code")
+
+
+def _sign_in_error_word(error: str | None) -> str:
+    """The word the page is sent for X's refusal *error*: ``missing_code``
+    when X named none, the word :data:`_X_SIGN_IN_ERRORS` gives X's code,
+    else ``refused``. The word returned is always one of Kazma's constants."""
+    if not error:
+        return "missing_code"
+    return _X_SIGN_IN_ERRORS.get(error.strip().lower(), "refused")
+
 
 class _XApiAccessBody(BaseModel):
     bearer_token: str = Field(default="", max_length=2048)
@@ -694,11 +720,13 @@ def x_api_access(request: Request) -> JSONResponse:
     return JSONResponse(_api_access_payload(_own_base(request)))
 
 
-def _token_text(value: str, what: str) -> str:
-    text = value.strip()
-    if not _X_TOKEN_TEXT.fullmatch(text):
-        raise ValueError(f"That does not look like an X {what}: paste it as X shows it.")
-    return text
+def _token_problem(value: str, what: str) -> str | None:
+    """Why *value* is not an X token as X issues it (Kazma's sentence), or
+    None. A sentence, never an exception: the answer carries no exception's
+    text (AGENTS.md section 26 F)."""
+    if _X_TOKEN_TEXT.fullmatch(value.strip()):
+        return None
+    return f"That does not look like an X {what}: paste it as X shows it."
 
 
 @protected_router.post("/api-access", dependencies=[Depends(_verify_same_origin)])
@@ -710,26 +738,26 @@ def x_api_access_save(request: Request, body: _XApiAccessBody) -> JSONResponse:
     from kazma_core.x_api import auth_tokens
     from kazma_core.x_api.ownership import x_config_key
 
-    items: list[tuple[str, Any, str]] = []
     # A secret is cleared by deleting it: the store refuses to write one
     # empty (that is what an unreadable vault pointer looks like).
     removed: list[str] = []
-    try:
-        if body.remove_bearer:
-            removed.append(auth_tokens.BEARER_KEY)
-        elif not _placeholder(body.bearer_token):
-            items.append((auth_tokens.BEARER_KEY, _token_text(body.bearer_token, "Bearer token"), "connectors"))
-        if body.remove_client:
-            removed += [auth_tokens.CLIENT_ID_KEY, auth_tokens.CLIENT_SECRET_KEY]
-        else:
-            if not _placeholder(body.client_id):
-                items.append((auth_tokens.CLIENT_ID_KEY, _token_text(body.client_id, "client ID"), "connectors"))
-            if not _placeholder(body.client_secret):
-                items.append((auth_tokens.CLIENT_SECRET_KEY,
-                              _token_text(body.client_secret, "client secret"), "connectors"))
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": "invalid_value", "detail": validation_error(exc)},
-                            status_code=400)
+    given: list[tuple[str, str, str]] = []
+    if body.remove_bearer:
+        removed.append(auth_tokens.BEARER_KEY)
+    elif not _placeholder(body.bearer_token):
+        given.append((auth_tokens.BEARER_KEY, body.bearer_token, "Bearer token"))
+    if body.remove_client:
+        removed += [auth_tokens.CLIENT_ID_KEY, auth_tokens.CLIENT_SECRET_KEY]
+    else:
+        if not _placeholder(body.client_id):
+            given.append((auth_tokens.CLIENT_ID_KEY, body.client_id, "client ID"))
+        if not _placeholder(body.client_secret):
+            given.append((auth_tokens.CLIENT_SECRET_KEY, body.client_secret, "client secret"))
+    for _key, value, what in given:
+        problem = _token_problem(value, what)
+        if problem:
+            return JSONResponse({"ok": False, "error": "invalid_value", "detail": problem}, status_code=400)
+    items: list[tuple[str, Any, str]] = [(key, value.strip(), "connectors") for key, value, _what in given]
     store = get_config_store()
     if items:
         store.batch_set([(x_config_key(k), v, c) for k, v, c in items])
@@ -776,8 +804,9 @@ async def x_oauth2_callback(
 
     back = _own_base(request) + "/settings?tab=x"
     if error or not code or not state:
-        # X's own words for a refusal are a short code (access_denied ...).
-        why = re.sub(r"[^a-z_]", "", (error or "missing_code").lower())[:40] or "failed"
+        # X's refusal is one of the words the page has (access_denied ...),
+        # else "refused": the address carries Kazma's word, never X's text.
+        why = _sign_in_error_word(error)
         return RedirectResponse(f"{back}&x_oauth=error&msg={quote(why)}", status_code=302)
     try:
         attempt = await take_attempt(request, state, providers=("x",))

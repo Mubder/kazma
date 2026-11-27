@@ -26,7 +26,6 @@ kazma/
 ├── scripts/             # Ops: migrate, smoke, guard, tools-catalog regen, …
 ├── kazma.yaml           # Main config
 ├── kazma-permissions.yaml
-├── kazma-security.yaml
 ├── pyproject.toml       # Single hatchling build (6 packages in the wheel)
 ├── Dockerfile           # Main agent image
 ├── docker-compose.yml   # Host 9090 → container 8000

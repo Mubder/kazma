@@ -102,25 +102,25 @@ def _model_user_text(state: dict[str, Any]) -> str:
     return str(last["content"])
 
 
-@pytest.mark.parametrize(("words", "file_text", "secret"), [
+@pytest.mark.parametrize(("words", "file_text", "name_in_file"), [
     ("please keep this", FILE_EN, "Pierre"),
     ("احتفظ بهذا الملف", FILE_AR, "سارة"),
     ("", FILE_EN, "Pierre"),
 ])
-def test_the_route_fences_an_attached_text_file(monkeypatch, _sessions, words, file_text, secret):
-    state, rows = _send(monkeypatch, f"attached-{secret}-{bool(words)}", {
+def test_the_route_fences_an_attached_text_file(monkeypatch, _sessions, words, file_text, name_in_file):
+    state, rows = _send(monkeypatch, f"attached-{name_in_file}-{bool(words)}", {
         "message": words, "text_attachment": {"name": "notes.md", "text": file_text},
     })
     model = _model_user_text(state)
-    assert secret in model, model  # the model is given the file...
-    assert secret not in outside_fences(model), model  # ...as data, inside a fence
+    assert name_in_file in model, model  # the model is given the file...
+    assert name_in_file not in outside_fences(model), model  # ...as data, inside a fence
     assert 'source="document_attachment"' in model
-    assert secret not in own_words(model)
+    assert name_in_file not in own_words(model)
     assert _facts(model) == set()
     if words:
         assert words in own_words(model)
     row = [r for r in rows if r.get("role") == "user"][-1]
-    assert secret not in row["content"] and "notes.md" in row["content"], row
+    assert name_in_file not in row["content"] and "notes.md" in row["content"], row
     assert row["content"] == (f"{words}\n\n[Attached file: notes.md]" if words else "[Attached file: notes.md]")
 
 

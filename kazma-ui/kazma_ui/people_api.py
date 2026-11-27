@@ -48,6 +48,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import refusal_message
 from kazma_core.spaces import people
 from kazma_core.spaces.identity import IdentityError, IdentityUnavailable
 from kazma_core.spaces.scope import spaces_enforced
@@ -64,7 +65,10 @@ _UNAVAILABLE = {"ok": False, "error": "identity_unavailable",
 
 
 def _refused(exc: people.PeopleRefused) -> JSONResponse:
-    body: dict[str, Any] = {"ok": False, "error": exc.code, "message": str(exc)}
+    # The refusal's own sentence, redacted (errors.refusal_message): this
+    # answered str(exc) raw, which the section 26 F gate did not see -- it
+    # knew an exception parameter only by a name ending in Error.
+    body: dict[str, Any] = {"ok": False, "error": exc.code, "message": refusal_message(exc)}
     if exc.missing:
         body["missing"] = exc.missing
     return JSONResponse(body, status_code=exc.status)

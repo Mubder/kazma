@@ -178,13 +178,40 @@ def _memory_backup_prefix() -> str:
     return Path(primary_memory_db()).stem
 
 
+def _memory_backup_stamp(name: str) -> int | None:
+    """The timestamp of the memory database's backup *name*
+    (``memory_state_<timestamp>.db``), or None. The stamp is ASCII digits
+    as ``perform_native_backups`` writes it (``int(time.time())``): Unicode
+    digits (Arabic-Indic, superscripts) answered ``isdigit()`` too."""
+    stem, dot, ext = str(name or "").rpartition(".")
+    prefix, _, stamp = stem.rpartition("_")
+    if not (dot and ext == "db" and prefix == _memory_backup_prefix()):
+        return None
+    if not (stamp.isascii() and stamp.isdigit()) or len(stamp) > 20 or str(int(stamp)) != stamp:
+        return None
+    return int(stamp)
+
+
 def is_memory_backup_name(name: str) -> bool:
     """Whether *name* is a backup of the memory database by its name:
     ``memory_state_<timestamp>.db``, never the operations database's
     ``memory_ops_<timestamp>.db`` beside it."""
-    stem, dot, ext = str(name or "").rpartition(".")
-    prefix, _, stamp = stem.rpartition("_")
-    return bool(dot) and ext == "db" and prefix == _memory_backup_prefix() and stamp.isdigit()
+    return _memory_backup_stamp(name) is not None
+
+
+def memory_backup_path(name: str) -> Path | None:
+    """Where the memory database's backup a request names is, or None.
+
+    The file name is made again from its timestamp (the integer's own text)
+    and the memory database's name, inside ``backups_dir()``: no text the
+    request sent becomes part of a path (AGENTS.md section 66, as
+    ``universal._backup_dir_name`` does for the universal backups)."""
+    stamp = _memory_backup_stamp(name)
+    if stamp is None:
+        return None
+    from kazma_core.paths import backups_dir
+
+    return Path(backups_dir()) / f"{_memory_backup_prefix()}_{stamp}.db"
 
 
 def _is_memory_backup(path: Path) -> bool:

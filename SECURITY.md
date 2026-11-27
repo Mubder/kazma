@@ -1,232 +1,279 @@
-# Kazma Security Policy
+# Kazma security policy
 
-## Supported Versions
+[العربية](SECURITY.ar.md) · On the website: [kazma.ai/docs/security/security-policy](https://kazma.ai/docs/security/security-policy/)
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.21.x  | :white_check_mark: |
-| 0.20.x  | :white_check_mark: (critical security fixes only) |
-| < 0.20  | :x:                |
+Kazma is software you run for yourself. It can run code, write files and send
+messages on your machine, so this page says what protects you, how strong each
+protection is, and where it stops. Where a protection has been measured, the
+number is here; where it has not, the page says so. It also says how to report
+a weakness, and what happens after you do.
 
-Only the latest **0.21.x** release receives feature work and routine security
-patches. **0.20.x** may receive critical fixes for a limited window. Upgrade to
-the latest supported version when possible.
+## 1. Report it privately
 
-## Threat Model (operator)
+Use GitHub's private form first:
+**[Report a vulnerability](https://github.com/Mubder/kazma/security/advisories/new)**.
+Only you and the maintainers see what you write there. If you cannot use
+GitHub, write to **admin@kazma.ai**. Never open a public issue, discussion or
+pull request about a security problem.
 
-Kazma is designed as a **single-operator trusted-host agent** by default: whoever
-runs an install has full control of it and answers for what its agent does
-([who Kazma is for](docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install-and-the-people-they-let-in)).
+There is no PGP key. If you need an encrypted channel, say so in your first
+message and we will arrange one. The same contacts are written for machines
+(RFC 9116) in [`.well-known/security.txt`](.well-known/security.txt), which
+every install also serves at `/.well-known/security.txt`.
 
-| Profile | Ready when |
-|---------|------------|
-| Localhost + strong `KAZMA_SECRET` + HITL on | Recommended daily use |
-| Docker / LAN with `KAZMA_PRODUCTION=1` | After production hardening (see `.env.example`) |
-| Public multi-user SaaS | **Not** the default threat model — needs IdP, opaque sessions, real tenancy |
+A useful report holds:
 
-**Production flags (summary):**
+- what is wrong, and how serious you think it is;
+- the file and lines, if you have them;
+- the version Kazma prints (`kazma --version`, for example `0.21.2+g4d37b2c`:
+  the release, then the commit), your operating system and Python version, and
+  whether Kazma runs in Docker;
+- steps that reproduce it on the latest release or on `main`;
+- which row of [section 3](#3-what-holds-and-what-does-not) it gets past;
+- which of the [switches that weaken a security default](https://kazma.ai/docs/environment-variables/#switches-that-weaken-a-security-default)
+  are set, if any.
 
-- `KAZMA_HOST=127.0.0.1` default; non-loopback requires a strong secret
-- `KAZMA_TRUST_LAN=0` (default) — no LAN auto-cookie
-- `KAZMA_PRODUCTION=1` — Docker code_exec, YOLO off (override: `KAZMA_ALLOW_YOLO=1`), workspace root required
-- `KAZMA_VAULT_KEY` — encrypt secrets at rest
-- Never use the historical default secret `kazma-local-dev-secret`
+Please read sections 3 and 6 before you write. A report outside them is closed
+privately, with the reason, and is welcome again as an ordinary issue. There
+is no paid bounty.
 
-**Multi-replica / multi-user (Phase 4):**
+## 2. Who Kazma protects
 
-- Shared state: `KAZMA_DATABASE_URL=postgresql://…` + `pip install -e ".[postgres]"` — never share SQLite across replicas
-- Roles: viewer / operator / admin (`platform_rbac`); OIDC via `KAZMA_OIDC_*`
-- DR: `docs/docs/ops/disaster-recovery.md` + `scripts/backup_kazma.py` / `restore_kazma.py`
+Each install has one operator: the person who runs the server, holds its keys
+and edits its settings. Kazma protects that operator from the agent: from its
+mistakes, and from the web pages, documents and messages it reads. It does not
+protect an install from its own operator, who can switch any safeguard off.
+Until Spaces is on, anyone the operator lets in (a web login, or an account
+on a chat app's allowlist) acts with the operator's authority. Kazma is not a
+hosted service; it is provided as is, under the [MIT license](LICENSE).
 
-## Reporting a Vulnerability
+**Spaces**, which will let an operator share an install with a few people they
+know, each in a space of their own, is being built and is not in any release
+yet. Once it is on, it is a boundary between the people who use an install,
+not against its operator, who can read the disk, the databases and the
+backups. It has not been reviewed independently.
 
-We take security seriously. If you discover a vulnerability in Kazma,
-**please report it privately**. Do **not** open a public GitHub issue for
-security vulnerabilities.
+The whole account, mechanism by mechanism, is the
+[threat model](docs/THREAT_MODEL.md).
 
-### Preferred channels
+## 3. What holds, and what does not
 
-| Channel | Contact | Notes |
-| ------- | ------- | ----- |
-| Email | **admin@kazma.ai** | Primary channel for all vulnerability reports |
-| GitHub | [Private vulnerability reporting](https://github.com/Mubder/kazma/security/advisories/new) | Use when enabled on the repository |
+Approval is the protection that matters most, and it is a human one, not a
+technical one. Every other row narrows what an approved action can do, or what
+reaches the model in the first place.
 
-Machine-readable contact policy (RFC 9116):
+| Protection | What it stops | What it does not stop |
+|---|---|---|
+| **Approval** | A dangerous tool running without you seeing it. The always-ask tools (posting to X, the vault's tools, widening what the file tools may reach) ask every time, even with `KAZMA_ALLOW_YOLO=1`. | Anything you approve. Approval is consent, not containment. |
+| **Where code runs** (`python_exec`) | With E2B (opt-in): a microVM with its own kernel. With Docker (the default when Docker is present): no network, a read-only root, no Linux capabilities, an unprivileged user, and caps on memory, CPU and processes. | A kernel exploit: Docker shares your kernel. With neither, code runs as you on the host; production refuses that unless `KAZMA_CODE_EXEC_ALLOW_LOCAL=1`. |
+| **`shell_exec`** | Shells, `env`, unknown binaries, paths outside the workspace, and an allowed binary asked to run another program. In production it is off unless `KAZMA_HOST_SHELL=1`. | What the allowed binaries can do: `git` can push, `uv` can install a package and run its build hooks, `pytest` runs a repository's `conftest.py`. It runs on the host. |
+| **The prompt fence** | Untrusted text forging the fence's delimiters, and forged role tokens of five known chat-template patterns. | A model choosing to follow a polite request inside the fence. |
+| **Secrets** | Secrets at rest on disk (the vault, keyed by `KAZMA_VAULT_KEY`). The processes tools start get no `KAZMA_*` variable, no credential-named variable and no URL carrying a password; MCP servers get none of Kazma's secrets. | A process that can read the vault key from the environment. |
+| **Ways in** | Kazma listens on `127.0.0.1` by default, a network bind needs `KAZMA_SECRET`, and another machine must sign in. A chat app with an empty allowlist answers only its owner (since 2026-11-11). Agent-to-agent (A2A) is off by default and has read tools only. `kazma mcp` refuses a dangerous tool when no Kazma is running to ask you. | Anyone the operator lets in, who acts with the operator's authority. |
+| **What you add** (skills, MCP servers, packages) | Their tool calls pass the same approval gate. An MCP tool runs without a card only when you listed it in `KAZMA_MCP_SAFE_ALLOWLIST`, approved that call, or marked its server `trust: trusted` (ordinary reads only, and ignored in production unless `KAZMA_MCP_TRUSTED_IN_PROD=1`). A tool's name is never an approval. | What a skill, server or package does with the rights you give it. A stdio MCP server runs with Kazma's rights. |
 
-- Served by the app at `/.well-known/security.txt` and `/security.txt`
-- Source of truth in the repo: [`.well-known/security.txt`](.well-known/security.txt)
-- Canonical public URL (when the site is live): `https://kazma.ai/.well-known/security.txt`
+For code you do not trust, the strongest option puts the boundary around
+Kazma, not inside it: run Kazma itself in a virtual machine.
+`KAZMA_CODE_EXEC_DOCKER=force` and E2B are the steps before that (threat
+model, section 7). Every protection above can be switched off by the operator;
+each switch, with what it stops protecting, is listed under
+[switches that weaken a security default](https://kazma.ai/docs/environment-variables/#switches-that-weaken-a-security-default).
 
-**Encryption:** we do **not** currently publish a PGP key. Send reports over
-email or GitHub private reporting. If you need encrypted mail, say so in your
-initial contact and we will coordinate out of band.
+## 4. Measured, not asserted
 
-### Response targets (best effort)
+**On [AgentDojo](https://agentdojo.spylab.ai)**, a public prompt-injection
+benchmark by an independent group (Debenedetti et al., NeurIPS 2024), with 996
+runs per condition and each condition measured four times:
 
-These are **targets**, not contractual SLAs. Small open-source projects may
-miss them under load; we still aim to keep you informed.
+| Condition | Attack success |
+|---|:---:|
+| Undefended | 18.1% |
+| Spotlighting (a 4-character delimiter, from the literature) | 11.6% |
+| Kazma's fence | 10.4% |
 
-| Milestone | Target |
-| --------- | ------ |
-| Acknowledgment | 48 hours |
-| Initial assessment | 7 days |
-| Severity determination | 14 days |
-| Patch (when fix is in our control) | 30 days when practical |
-| Coordinated public disclosure | After a fix is available, or ~90 days if no fix is ready — coordinated with the reporter |
+The fence works (p < 0.001 against undefended), and it cannot be told apart
+from the four-character delimiter (p = 0.39). Both are stated, because a
+reviewer needs the second. Every figure re-derives from the committed run logs
+without an API key.
 
-### What to include
+**Offline, with no model in the loop**, in every build
+(`python scripts/injection_report.py`): none of the 35 attack payloads in the
+corpus forges the fence (56/56 with the 21 benign controls), and the
+persistence denylist refuses 13 of 13 payloads meant to plant a standing
+instruction, while 21 controls that sit one word from a deny pattern must stay
+storable.
 
-- **Description** — what is wrong and why it matters
-- **Reproduction** — steps, config, commands, or API calls
-- **Impact** — who/what is affected; exploit difficulty
-- **Affected version** — tag, commit, or package version
-- **Environment** — OS, Python version, Docker vs bare metal
-- **Suggested fix** (optional)
+**Against live models** (three runs each, temperature 0), the fence lowered
+compliance from 42% to 8% on `groq/compound-mini`, from 100% to 58% on
+`ollama/qwen2.5:7b` and from 42% to 8% on `ollama/mistral:7b`. The
+`compound-mini` row was measured before the 2026-09-12b hardening and has not
+been re-run, and none of these differences has a measured noise band: the same
+unchanged setup, run four times on AgentDojo, spread by 5.7 points. Two models
+complied with nothing in either condition, so the fence's effect on them is
+not measurable.
 
-## Scope
+The method, the payloads that still get through and a free offline
+reproduction are in [docs/INJECTION.md](docs/INJECTION.md).
 
-### In scope
+## 5. Known gaps
 
-| Component | Description |
-| --------- | ----------- |
-| Core engine | Task scheduling, session management, LLM dispatch |
-| MCP client | Model Context Protocol client connections |
-| Skill manifests | SKILL.md parsing, validation, and loading |
-| Delegation protocol | Agent-to-agent communication and task handoff |
-| RBAC / permissions | Role-based access control, tenant isolation |
-| Configuration system | Config loading, secrets handling, provider keys |
-| CLI interface | Command-line input handling, injection classes |
-| Data persistence | Session DB, memory stores, SQLite/Postgres |
-| Network layer | API endpoints, webhook handlers, gateway sockets |
-| Plugin / skill system | Loading, lifecycle, permission boundaries |
-| Document Intelligence | Intake, sandbox, storage, indexing (see docs) |
+Weaknesses that are open, unproven or unfinished are listed, each with its
+evidence, in [docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md). They are published
+beside the numbers so that a reader does not have to find them. This page
+names none of them, and no unfixed report is described anywhere before its fix
+is released.
 
-### Out of scope
+## 6. What counts as a vulnerability
 
-- **Third-party dependencies** — report to upstream; we will help coordinate when relevant
-- **Social engineering** of maintainers or users outside the software
-- **Volume-based DoS** against hosted instances (resource-exhaustion *bugs in code* remain in scope)
-- **Physical security** of the deployment host
-- **Issues solely in upstream LLM providers** (OpenAI, Anthropic, etc.)
+**In scope.** Each item names the protection it gets past.
 
-## No bug bounty (at this time)
+- A tool that needs approval running without its card; an approval taken from
+  anywhere but your own channel; or `KAZMA_ALLOW_YOLO=1` letting an always-ask
+  tool run without asking. *(Approval)*
+- Reaching an install from another machine without signing in (the web, a
+  socket, the API, A2A), or a private chat app answering a stranger. *(Ways in)*
+- A secret getting past the control meant to hold it: into logs, answers,
+  approval cards, URLs, command lines or a child process; or a tool reading
+  Kazma's own stores, settings or secret files. *(Secrets)*
+- Untrusted text that forges the fence's delimiters or a covered role token,
+  or that gets one of the persistence denylist's covered shapes stored as a
+  standing instruction. *(The prompt fence)*
+- Text from outside choosing an address that Kazma then fetches without
+  pinning it. *(The SSRF rules in [Security and safety](https://kazma.ai/docs/security-and-safety/))*
+- Code running where this page says it cannot: host `python_exec` in
+  production with `KAZMA_CODE_EXEC_ALLOW_LOCAL` unset, host `shell_exec` in
+  production with `KAZMA_HOST_SHELL` unset, or a Docker run without its
+  documented flags. *(Where code runs, `shell_exec`)*
+- Something you told Kazma to forget (a turn, a fact or a chat) coming back
+  from any writer, copy, backup or rebuild. Forgetting is a promise, so a
+  failure of it is a security report.
+- A flaw in Kazma's own install, update or release path: for example
+  `kazma update` installing a wheel without a valid signature, or a release
+  that verifies but was not built from this repository.
+- Code doing the opposite of what this page, the threat model or the switches
+  table says.
+- A weakness already listed in [KNOWN_GAPS](docs/KNOWN_GAPS.md) counts only
+  with a new way past the limit documented there.
 
-Kazma does **not** currently operate a paid bug bounty program. There are **no**
-guaranteed cash payouts, tiers, or SLAs for compensation.
+**Spaces, once it ships.** Spaces is not in any release yet. From the release
+that ships it, one space reaching another space's data is in scope.
 
-We still welcome responsible reports. At our discretion we may:
+**Not a vulnerability under this policy.** Send these as an ordinary issue, or
+to whoever owns the code:
 
-- Credit you in release notes or GitHub Security Advisories (with your consent)
-- Offer non-cash thanks (swag, public thanks) when practical
+- What you approved.
+- Prompt injection on its own, without one of the outcomes above: a model
+  following text inside the fence is the fence's documented limit.
+- What a setup you chose allows: host `shell_exec` after approval, what the
+  allowed binaries can do, the local fallback once switched on, or an escape
+  through the kernel Docker shares (report that to Docker or the kernel).
+- Anything that needs a switch from the weakening list to be set.
+- The operator, or anyone the operator let in; and the older multi-user
+  mode's tenancy (tenant ids on secrets, sessions and gates), which the threat
+  model says is not a boundary to rely on.
+- Third-party skills, MCP servers and packages, and what they do with the
+  rights you give them: report to their authors.
+- Third-party dependencies: report upstream; we will help coordinate.
+- The model provider: Kazma fences what comes back, and does not encrypt what
+  goes out.
+- my.kazma.ai and kazma.ai's infrastructure. my.kazma.ai is the maintainer's
+  own live install; do not test it.
+- Denial of service by volume, physical access to the host, and social
+  engineering.
 
-Do **not** treat any historical draft language, sample YAML, or third-party
-summaries as an active bounty. The authoritative statement is this file and
-`bug_bounty.enabled: false` in [`kazma-security.yaml`](kazma-security.yaml).
+## 7. Versions and updates
 
-## Security update process
+| Version | Gets security fixes |
+|---|---|
+| The latest release on [GitHub Releases](https://github.com/Mubder/kazma/releases) | Yes |
+| `main` | Yes: a fix lands here first |
+| Any older release | No: update to the latest |
 
-```
-Report → Acknowledge → Investigate → Patch → Advisory → Notify
-```
+A fix lands on `main` first and reaches installs in the next release. Update
+with `kazma update`; from 0.21.2 on it refuses a release whose wheel carries
+no valid signature (section 8). The old `v1.0.0` tag (July 2026) comes from an
+earlier numbering scheme: it is not a release and gets no fixes.
 
-1. **Report** — private channel above
-2. **Acknowledge** — tracking ID / confirmation when we can
-3. **Investigate** — severity and impact
-4. **Patch** — fix developed and reviewed (maintainer review; dual review when available)
-5. **Advisory ID** — internal IDs use `KAZMA-ADV-YYYY-…`. A real **CVE** is requested
-   only when appropriate (e.g. via GitHub Security Advisories / CVE assignment).
-   Generated IDs are **not** MITRE CVEs.
-6. **Notify** — GitHub Security Advisories and/or release notes when a fix ships
+## 8. Verifying a release
 
-Critical fixes may be backported to older supported versions at our discretion.
-
-## Prompt injection — measured, not asserted
-
-Untrusted text (web, tool results, MCP output, skill bodies) is wrapped in a
-labelled data fence before it reaches a model. That claim is scored against an
-adversarial corpus, with no model in the loop:
-
-```bash
-python scripts/injection_report.py
-```
-
-**56/56 containment** — no corpus payload can forge the fence's delimiters and
-place text outside it, or smuggle another vendor's role-control tokens
-(`<|im_start|>`, `[INST]`, `<<SYS>>`, Gemma turns) through it to the model's
-tokenizer. A hard gate; any escape fails the build.
-
-**13/13 persistence denylist** — every payload whose purpose is to plant a
-standing directive in a future system prompt is refused. Balanced by 21 control
-cases: real summaries that sit one word from a deny pattern and must stay
-storable, because a false positive here silently makes the agent forget. See
-**[docs/INJECTION.md](docs/INJECTION.md)**.
-
-Measured against live models as well (3 runs each, temperature 0): injection
-compliance on `groq/compound-mini` drops **42% -> 8%** with the fence on, on
-`ollama/qwen2.5:7b` **100% -> 58%**, and on `ollama/mistral:7b` **42% -> 8%** —
-three model families, three double-digit deltas. `deepseek-flash` complied with nothing
-in either condition, so the fence's effect on it is unmeasurable rather than
-proven — the doc reports that as a non-result instead of a win, along with the
-payloads that still get through and which of the current defenses have been
-measured against a model versus merely written down.
-
-## Threat model
-
-**[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)** states, mechanism by mechanism,
-what each safeguard stops and what it does not — including that the Docker
-sandbox shares your kernel and is a blast-radius reduction rather than a
-security boundary, that HITL approval is consent rather than containment, and
-which configuration flags turn each of them off. A safeguard described as
-stronger than it is costs more credibility than it buys.
-
-## Known gaps
-
-Weaknesses that are open, unproven, or unfinished are listed in
-**[docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md)**, with the evidence for each. A
-security claim is worth what its author will say against it, so the gaps are
-published beside the numbers rather than left for a reader to find.
-
-## Verifying a release (supply chain)
-
-Every release artifact is signed with **Sigstore** (keyless — there is no
-private key to leak or rotate), carries **SLSA build provenance**, and ships a
-**CycloneDX 1.6 SBOM** generated from the committed lockfile.
+A release is published by the repository's release workflow, which signs each
+file with Sigstore (keyless, so there is no private key to leak), attaches
+SLSA build provenance, and adds a CycloneDX 1.6 SBOM of the locked
+dependencies and a `SHA256SUMS` file. v0.21.2 is the first release since
+v0.11.0 published that way; v0.12.0 to v0.21.1 were uploaded by hand and carry
+no signatures. The check that matters most is one command:
 
 ```bash
 gh attestation verify kazma-<version>-py3-none-any.whl --repo Mubder/kazma
 ```
 
-Full instructions, including signature verification and what these guarantees
-do *not* cover, are in **[docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md)**.
+These prove where a file was built and from which commit. They do not make
+the build reproducible, they are not a code review, and the SBOM lists
+dependencies, not their vulnerabilities. Kazma is not on PyPI: the names there
+are held, with no code, so that no one else can publish under them. Never
+install `kazma` from PyPI by name. The full procedure is in
+[docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md).
 
-Two third-party UI assets are vendored rather than fetched at runtime
-(CodeMirror, MIT; IBM Plex Sans Arabic, OFL) so the interface renders with no
-outbound network. A test fails the build if a template starts loading remote
-script or styles again.
+## 9. Running it safely
 
-## Hardening checklist (operator recommendations)
+The two choices that matter most are where code runs and keeping approval on.
 
-These are **recommended** controls for deployments — not an assertion that every
-host automatically enforces all of them:
+- Keep Kazma on `127.0.0.1` (the default). To reach it from elsewhere, put a
+  reverse proxy with TLS in front, set a long random `KAZMA_SECRET`
+  (`openssl rand -hex 32`), and declare the proxy in `KAZMA_TRUSTED_PROXIES`.
+  Never use the old default secret `kazma-local-dev-secret`.
+- Set `KAZMA_VAULT_KEY`, so that secrets are encrypted at rest.
+- On Docker or a shared network, set `KAZMA_PRODUCTION=1`: it refuses host
+  `python_exec`, turns host `shell_exec` off, and requires an explicit
+  workspace.
+- For code you do not trust, use `KAZMA_CODE_EXEC_DOCKER=force` or E2B
+  (`KAZMA_E2B_API_KEY`), or run Kazma in a virtual machine.
+- Leave `KAZMA_ALLOW_YOLO` unset, and `KAZMA_TRUST_LAN` at `0`.
+- Give each chat app an allowlist of the accounts that may use it.
+- Approve each MCP call, and name a tool in `KAZMA_MCP_SAFE_ALLOWLIST` only
+  once you know what it does.
+- In Docker, keep the non-root `kazma` user the image already uses.
+- Check that no switch from the weakening list is set. The security report,
+  `GET /api/security/hardening`, reads the install's posture on demand.
 
-- [ ] Secrets never logged or committed; vault + strong `KAZMA_SECRET`
-- [ ] Input validation on external surfaces (API, CLI, skill manifests)
-- [ ] HITL / RBAC on for multi-user or network-exposed hosts
-- [ ] Dependency audits (OSV / GitHub Advisories) on a regular cadence
-- [ ] Least-privilege process user; skill/MCP permissions reviewed
-- [ ] TLS for any non-localhost exposure
-- [ ] Audit trail enabled for privileged operations where configured
-- [ ] Periodic review of `kazma-security.yaml` / `kazma-permissions.yaml` posture
+More in the [hardening guide](https://kazma.ai/docs/security/hardening-guide/)
+and [Security and safety](https://kazma.ai/docs/security-and-safety/).
 
-See also: [Security & Safety](docs/docs/guide/security-and-safety.md),
-[Hardening guide](docs/docs/security/hardening-guide.md).
+## 10. After you report
 
-## Contact
+| Step | Target |
+|---|---|
+| We acknowledge your report | within 3 days |
+| First assessment | within 7 days |
+| Fix, for an issue rated High or Critical | within 30 days |
+| Public disclosure | at most 90 days after your report, on a date agreed with you |
 
-- **Security email:** admin@kazma.ai
-- **GitHub:** [github.com/Mubder/kazma](https://github.com/Mubder/kazma) (non-sensitive issues only)
-- **Policy (docs mirror):** [Vulnerability reporting](docs/docs/security/vulnerability-reporting.md)
+These are targets, not a contract. If one will slip, we tell you why.
 
----
+- **Advisories.** A fix is published as a GitHub security advisory only after
+  the release that carries it is out. Where it fits, a CVE is requested
+  through GitHub. Kazma's internal `KAZMA-ADV-…` ids are not CVEs.
+- **Credit.** You are credited by name in the advisory and in the CHANGELOG,
+  unless you ask not to be.
+- **No bounty.** Kazma has no paid bug bounty.
 
-*Policy reviewed September 2026. No paid bounty. Re-review when program posture changes.*
+### Safe harbour
+
+Good-faith security research on an install of Kazma that you run yourself is
+welcome, and we will not take or support legal action against you for it. If someone else takes legal action over research that followed
+this policy, we will make it known that the research was authorised under it.
+In return: test only your own install, never my.kazma.ai (the maintainer's own
+install), kazma.ai's infrastructure or anyone else's install; do not degrade a
+service other people use; if you reach data that is not yours, stop there and
+tell us; and keep the details private until the fix is released or the agreed
+date arrives.
+
+## 11. Contact
+
+- A private report: [the GitHub form](https://github.com/Mubder/kazma/security/advisories/new),
+  or **admin@kazma.ai**
+- Anything that is not sensitive: [issues](https://github.com/Mubder/kazma/issues)
+- This policy on the website: [English](https://kazma.ai/docs/security/security-policy/)
+  · [العربية](https://kazma.ai/ar/docs/security/security-policy/)
+
+*Reviewed 2026-11-27.*

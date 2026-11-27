@@ -1696,7 +1696,8 @@ The hash runs in a worker thread so it does not pin the server loop.
 **By design** -- the boundary the rest of this page is written inside.
 
 **Single-operator trusted host.** Multi-user, network-exposed and multi-tenant
-deployments need work that is listed in `SECURITY.md` and not all done.
+deployments are outside what the safeguards are built for (THREAT_MODEL.md
+sections 6 and 7 say what a real boundary would take).
 Approval is consent, not containment: `shell_exec` after approval is host
 power, and `python_exec` is sandboxed only when `KAZMA_CODE_EXEC_DOCKER=force`.
 Mechanism by mechanism, this is written out in
