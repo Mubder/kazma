@@ -165,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {change}")
     for problem in done.unresolved:
         print(f"  [NOT IN PLACE] {problem}")
+    for note in done.notes:
+        print(f"  [NOTE] {note}")
     for table in done.left:
         print(f"  [LEFT] {table}: its lock was not had in time; run this again when Kazma is idle")
     print("The rules are in place." if done.complete else "The rules are not all in place.")
