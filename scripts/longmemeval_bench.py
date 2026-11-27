@@ -896,7 +896,8 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
         conn.close()
     if not out and weeks_due(store, parse_date(str(steps["at"]))):
         out.append("a week the store holds unsummarised at the question's time")
-    if not out and any(rollups_due(store, parse_date(str(steps["at"]))).values()):
+    due = rollups_due(store, parse_date(str(steps["at"]))) if not out else {}
+    if due.get("months") or due.get("projects"):
         # a month or project roll-up the product's sweep would plan (a
         # deleted one; the step 5 follow-up review's L-c)
         out.append("a roll-up the store lacks at the question's time")

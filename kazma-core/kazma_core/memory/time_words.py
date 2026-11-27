@@ -131,9 +131,19 @@ _MONTH_EN = re.compile(
     re.IGNORECASE,
 )
 _YEAR_EN = re.compile(r"\b(?:in|during|since)\s+((?:19|20)\d\d)\b", re.IGNORECASE)
+#: Letters ``fold_for_search`` folds away (alef with hamza or madda, taa
+#: marbuta, alef maqsura): a month's name with one is not its folded form.
+_FOLDED_AWAY = frozenset(map(chr, (0x0623, 0x0625, 0x0622, 0x0629, 0x0649)))
 #: What was true before (the history of a fact).
+#: "At the start" alone is "at first"; "at the start of" a period ("this
+#: month", "the week") or a month reads that start, and "at the start of"
+#: anything else (a story, a trip, Ramadan) names no time: one rule with the
+#: Arabic "في البداية" / "في بداية ..." (the sixth follow-up review's L2).
+_START_OF_EN = (rf"(?:at the start|in the beginning)(?! of\b)"
+                rf"|(?:at the start|in the beginning) of(?= (?:this|the|last) (?:month|week|year)\b"
+                rf"| (?:{_MONTH_WORDS})\b)")
 _HISTORY_EN = re.compile(
-    r"\b(?:at first|in the beginning|at the start|originally|original|used to|previously|"
+    rf"\b(?:at first|{_START_OF_EN}|originally|original|used to|previously|"
     r"formerly|former|back then|at the time|before that|my old|the old|first one|earlier)\b",
     re.IGNORECASE,
 )
@@ -151,7 +161,17 @@ _ROUTINE_AFTER_BEFORE = re.compile(
 )
 _HISTORY_AR = re.compile(
     r"(?:^|\s)(?:في البدايه|بالبدايه|في الاول|بالاول|اول شي|سابقا|سابق|من قبل|القديم|القديمه|"
-    r"قبل ما|قبل لا|قبل التغيير|قبل التاجيل)(?=\s|$|[؟?.,،])"
+    r"قبل ما|قبل لا|قبل التغيير|قبل التاجيل|"
+    # "at the start of" a period, as English "at the start of this month"
+    # is: "في بداية هذا الشهر", "أول هذا الشهر" (the step 5 follow-up's L3);
+    # only before a period's word made definite ("الشهر", "هالشهر", "هذا
+    # الشهر"), never a bare "بداية", "أول هذا الشي" (the fifth review's L-a)
+    # or "أول أسبوع" ("the first week": benchmark q1402)
+    r"(?:في بدايه|ببدايه|بدايه|في اول|باول|اول)"
+    r"(?= (?:هذا |هذي |هذه )?(?:ال|هال)(?:شهر|اسبوع|سنه|عام)(?:\s|$|[؟?.,،])"
+    # ... or a month's name, as English "at the start of January" is
+    rf"| (?:{'|'.join(k for k in _AR_MONTHS_RAW if not set(k) & _FOLDED_AWAY)})(?:\s|$|[؟?.,،])))"
+    r"(?=\s|$|[؟?.,،])"
 )
 _AR_AGO = re.compile(
     r"(?:^|\s)قبل\s+(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|اسبوع|اسابيع|شهر|شهور|اشهر|"
@@ -223,7 +243,9 @@ def _ar_month_pattern() -> re.Pattern[str]:
     if not _AR_MONTH_CACHE:
         _AR_MONTH_CACHE.update(_ar_months())
     names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
-    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
+    # "بداية يناير", "ببداية يناير", "أول يناير" read January, as "at the
+    # start of January" does (the seventh follow-up review's L-b)
+    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر|بدايه|ببدايه|اول)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
                       rf"(?=\s|$|[؟?.,،])")
 
 
@@ -338,6 +360,10 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     history = bool(_HISTORY_EN.search(text) or _HISTORY_AR.search(folded))
     for m in _HISTORY_EN.finditer(text):
         spans.append(m.group(0))
+    # The Arabic words too: they are the time asked about, not what a memory
+    # says (English's were; "في بداية هذا الشهر" kept "بداية" as a topic).
+    for m in _HISTORY_AR.finditer(folded):
+        spans.append(m.group(0).strip())
     before = _BEFORE_EN.search(text)
     if before and not _ROUTINE_AFTER_BEFORE.search(text):
         history = True

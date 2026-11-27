@@ -186,6 +186,109 @@ def _entries(*, kinds: tuple[str, ...] = KINDS, since: float = 0.0) -> list[Entr
                   str(r[7]), str(r[8]), str(r[9] or "")) for r in rows]
 
 
+def forgotten_summaries(tenant_id: str) -> set[str]:
+    """The summaries (weekly or roll-up) the ledger holds forgotten for
+    *tenant_id*: a forget of one (``summary``) and those a forget of
+    everything that mentions a name took with it (``mentions``, its
+    ``summaries``), journaled by the tenants ``tenant_view.ledger_reach``
+    names: its own, and the owner's while Spaces is not enforced. Never by id
+    alone: a member of another space could otherwise hold back the owner's
+    summary by naming its id (the fifth follow-up review's N2). A planner
+    asks it before writing one again, so a restored database that lost the
+    tombstone does not bring it back."""
+    from kazma_core.memory.tenant_view import ledger_reach
+
+    reach = set(ledger_reach(tenant_id))
+    out: set[str] = set()
+    for e in _entries(kinds=("summary", "mentions")):
+        if e.tenant_id not in reach:
+            continue
+        if e.kind == "summary" and e.summary_id:
+            out.add(e.summary_id)
+        elif e.kind == "mentions" and e.detail:
+            try:
+                out.update(str(s) for s in (json.loads(e.detail).get("summaries") or []))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning("[forget] a mentions entry's summaries could not be read (seq %s)", e.seq)
+    return out
+
+
+def _project_parts_in(e: Entry) -> dict[str, list[str]]:
+    """The forgotten PROJECTS' parts an entry journaled: a ``summary``
+    entry's own (``{"level": "project", "parts": [...]}``), a ``mentions``
+    entry's ``project_parts``. A month's never: its tombstone stays a
+    month's (the seventh follow-up review's M-a)."""
+    if not e.detail:
+        return {}
+    try:
+        detail = json.loads(e.detail)
+    except (ValueError, TypeError):
+        logger.warning("[forget] an entry's detail could not be read (seq %s)", e.seq)
+        return {}
+    if not isinstance(detail, dict):
+        return {}
+    if e.kind == "summary":
+        parts = detail.get("parts") if detail.get("level") == "project" else None
+        return {e.summary_id: [str(p) for p in parts]} if parts and e.summary_id else {}
+    found = detail.get("project_parts") or {}
+    return {str(k): [str(p) for p in v] for k, v in found.items() if v} if isinstance(found, dict) else {}
+
+
+def forgotten_rollup_parts(tenant_id: str) -> dict[str, set[str]]:
+    """The parts (weekly summary ids) each forgotten project roll-up had when
+    it was forgotten, by a ``summary`` or a ``mentions`` entry, for
+    *tenant_id* by ``tenant_view.ledger_reach``: after a memory restore that
+    lost the project's row, the planner still knows it (the sixth follow-up
+    review's M1; the seventh's M-b)."""
+    from kazma_core.memory.tenant_view import ledger_reach
+
+    reach = set(ledger_reach(tenant_id))
+    out: dict[str, set[str]] = {}
+    for e in _entries(kinds=("summary", "mentions")):
+        if e.tenant_id in reach:
+            for rid, parts in _project_parts_in(e).items():
+                out.setdefault(rid, set()).update(parts)
+    return out
+
+
+def backfill_project_parts(memory_conn: sqlite3.Connection) -> int:
+    """Fill the entries journaled before a forget recorded its projects'
+    parts (``summary`` and ``mentions`` entries), from the memory database
+    while it still holds those rows: so a restore that later loses them
+    still knows each project. Idempotent; said in the log when it fills any.
+    The number of entries filled."""
+    from kazma_core.memory.topic_rollups import project_parts_of
+
+    filled = 0
+    conn = _connect()
+    try:
+        for e in _entries(kinds=("summary", "mentions")):
+            have = _project_parts_in(e)
+            try:
+                detail = json.loads(e.detail) if e.detail else {}
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(detail, dict):
+                continue
+            ids = [e.summary_id] if e.kind == "summary" else [str(s) for s in detail.get("summaries") or []]
+            missing = [i for i in ids if i and i not in have]
+            found = project_parts_of(memory_conn, missing, e.tenant_id) if missing else {}
+            if not found:
+                continue
+            if e.kind == "summary":
+                detail.update(level="project", parts=found[e.summary_id])
+            else:
+                detail["project_parts"] = {**(detail.get("project_parts") or {}), **found}
+            with conn:
+                conn.execute("UPDATE forget_journal SET detail = ? WHERE seq = ?", (json.dumps(detail), e.seq))
+            filled += 1
+    finally:
+        conn.close()
+    if filled:
+        logger.info("[forget] %d older forget entries now hold their projects' parts", filled)
+    return filled
+
+
 def journaled_seqs() -> list[int]:
     """Every entry's sequence number, read without writing (the restore
     drill: it never writes into the live data directory). Empty when there

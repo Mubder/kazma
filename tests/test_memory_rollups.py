@@ -59,6 +59,17 @@ def mem(tmp_path, monkeypatch):
     db.close()
 
 
+@pytest.fixture(autouse=True)
+def _said_afresh():
+    """Each test says its held roll-ups afresh (the sixth review's L1:
+    ``_SAID_HELD`` outlived the test that filled it)."""
+    from kazma_core.memory import topic_rollups
+
+    topic_rollups._SAID_HELD.clear()
+    yield
+    topic_rollups._SAID_HELD.clear()
+
+
 #: A month long enough past (its end and the day's grace behind it).
 MONTH_START = _dt.datetime(2026, 6, 1)
 
@@ -164,14 +175,14 @@ def test_a_month_and_a_project_are_planned_with_their_sources(mem):
     turns = _training(mem)
     _weekly(mem, "other", 1, title="Laptop battery", text="A ThinkPad battery fix.", direction=7)
     out = _plan(mem)
-    assert out == {"months": 1, "projects": 1}
+    assert out == {"months": 1, "projects": 1, "held_by_forget": 0}
     [month] = _rollups(mem, "month")
     [project] = _rollups(mem, "project")
     assert month["status"] == project["status"] == "rebuild" and month["period_key"] == "2026-06"
     assert _parts(mem, month["id"]) == ["other", "tr0", "tr1", "tr2", "tr3"]
     assert _parts(mem, project["id"]) == ["tr0", "tr1", "tr2", "tr3"]  # the battery week is another topic
     assert _sources(mem, project["id"]) == {e for eids in turns.values() for e in eids}
-    assert _plan(mem) == {"months": 0, "projects": 0}  # nothing changed: nothing planned again
+    assert _plan(mem) == {"months": 0, "projects": 0, "held_by_forget": 0}  # nothing changed: nothing planned again
 
 
 def test_not_before_the_month_has_ended_and_settled(mem):
@@ -554,3 +565,821 @@ def test_control_the_stored_stretch_brings_a_neighbouring_month(monkeypatch, que
     stored = {r["id"]: (r["period_start"], r["period_end"]) for r in _kuwait_months()}
     assert "sum_m7" in _june_answer(monkeypatch, "UTC", question, stored)
     assert "sum_m5" in _june_answer(monkeypatch, "Pacific/Kiritimati", question, stored)
+
+
+# ── A roll-up the model skips is not asked again (the follow-up's O1) ────
+
+_SKIP = {"title": "", "summary": "", "skip": True}
+
+
+def _passes(mem, chat: _Chat, passes: int) -> int:
+    """The sweep's part, *passes* times: plan, then write every roll-up that
+    waits, as the queue's task does. The model calls it made."""
+    before = len(chat.calls)
+    for _ in range(passes):
+        _plan(mem)
+        for row in mem.db.execute(
+                "SELECT id FROM memory_summaries WHERE level != 'week' AND status = 'rebuild'").fetchall():
+            _write(mem, row["id"], chat)
+    return len(chat.calls) - before
+
+
+def test_a_skipped_project_is_not_planned_again_until_its_parts_change(mem):
+    _training(mem)
+    chat = _Chat(reply=_SKIP)
+    assert _passes(mem, chat, 1) == 2  # the month and the project, each skipped once
+    assert {r["status"] for r in _rollups(mem, "project")} == {"retired"}
+    assert _passes(mem, chat, 3) == 0  # settled: no model call again
+    _weekly(mem, "tr4", 4, title="Half marathon training: 16 km", text="A 16 km long run.", direction=0)
+    assert _passes(mem, chat, 1) >= 1  # a part added: asked again
+
+
+def test_control_with_skipped_projects_left_out_the_sweep_never_settles(mem, monkeypatch):
+    """The negative control: the project lookup as it was (retired projects
+    left out) plans the skipped project again and asks the model again."""
+    from kazma_core.memory import topic_rollups
+
+    real = topic_rollups._known_projects
+    monkeypatch.setattr(topic_rollups, "_known_projects", lambda conn, tenant: {
+        rid: known for rid, known in real(conn, tenant).items() if known[0] != "retired"})
+    _training(mem)
+    chat = _Chat(reply=_SKIP)
+    _passes(mem, chat, 1)
+    assert _passes(mem, chat, 4) >= 2
+
+
+def _months_store() -> sqlite3.Connection:
+    """May to July 2026 as month roll-ups a Kuwait server wrote, each about
+    the training."""
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    for row in _kuwait_months():
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'month', ?, ?, 'active', 0, 0, '{}')",
+            (row["id"], row["period_key"], row["period_start"], row["period_end"],
+             f"Half marathon training, {row['period_key']}", "The training runs and how the calf felt."))
+    return conn
+
+
+def _recalled(monkeypatch, zone: str, question: str) -> list[str]:
+    """``_recall_summaries`` itself on the store, the question read in *zone*."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    monkeypatch.setattr(recall, "_summaries_enabled", lambda: True)
+    monkeypatch.setattr(recall, "_encode_query", lambda query: None)
+    conn = _months_store()
+    token = recall._ASK.set(read_time(question, now=_ASKED_ON, zone=ZoneInfo(zone)))
+    try:
+        return [h.id for h in recall._recall_summaries(conn, question, "default")]
+    finally:
+        recall._ASK.reset(token)
+        conn.close()
+
+
+@pytest.mark.parametrize("zone", ["UTC", "Pacific/Kiritimati"])
+def test_recall_answers_june_with_june_through_its_own_path(monkeypatch, zone):
+    """The follow-up's L1: through ``_recall_summaries``, a said-in-June
+    question gets June alone, and a June question about the training shows no
+    other month."""
+    assert _recalled(monkeypatch, zone, "What did we talk about in June?") == ["sum_m6"]
+    assert _recalled(monkeypatch, zone, "شنو تكلمنا عنه في يونيو؟") == ["sum_m6"]
+    shown = _recalled(monkeypatch, zone, "How was my training going in June?")
+    assert "sum_m6" in shown and not {"sum_m5", "sum_m7"} & set(shown), shown
+
+
+def test_control_recall_with_the_stored_stretch_shows_a_neighbouring_month(monkeypatch):
+    """The negative control: ``_spans`` as the stretches were stored lets
+    July in (UTC) beside June."""
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_spans", lambda rows, weeks=None: {
+        str(r["id"]): (float(r["period_start"]), float(r["period_end"])) for r in rows})
+    said = _recalled(monkeypatch, "UTC", "What did we talk about in June?")
+    training = _recalled(monkeypatch, "UTC", "How was my training going in June?")
+    assert "sum_m7" in said or "sum_m7" in training, (said, training)
+
+
+def _honolulu_project() -> sqlite3.Connection:
+    """A project of weeks 2026-W19 to W22 (4 to 31 May) as a Honolulu server
+    wrote it: each stretch from its local midnight."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    honolulu = ZoneInfo("Pacific/Honolulu")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    starts = []
+    for week, day in ((19, 4), (20, 11), (21, 18), (22, 25)):
+        start = _dt.datetime(2026, 5, day, tzinfo=honolulu).timestamp()
+        starts.append(start)
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', 't', 's', 'active', 0, 0, '{}')",
+            (f"w{week}", f"2026-W{week}", start, start + 7 * 86400))
+    conn.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES ('proj', 'default', 'project:abc', ?, ?, 'project', 't', 's', 'active', 0, 0, '{}')",
+        (starts[0], starts[-1] + 7 * 86400))
+    conn.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('proj', ?)",
+                     [(f"w{w}",) for w in (19, 20, 21, 22)])
+    return conn
+
+
+def test_a_project_s_stretch_and_label_come_from_its_weeks(monkeypatch):
+    """The follow-up review's L2: a Honolulu-written project of May, read in
+    Kuwait (13 hours ahead), stays 4 May to 1 June and is named May."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall, topic_rollups
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: kuwait)
+    conn = _honolulu_project()
+    rows = conn.execute("SELECT * FROM memory_summaries WHERE level = 'project'").fetchall()
+    weeks = recall._project_weeks(conn, rows)
+    assert weeks == {"proj": ("2026-W19", "2026-W22")}
+    assert recall._spans(rows, weeks)["proj"] == (_dt.datetime(2026, 5, 4, tzinfo=kuwait).timestamp(),
+                                                  _dt.datetime(2026, 6, 1, tzinfo=kuwait).timestamp())
+    assert topic_rollups.rollup_label("project", rows[0]["period_start"], rows[0]["period_end"], "project:abc",
+                                      weeks["proj"]) == "Project, May 2026 to May 2026"
+    # the control: read at midday, 13 hours away, it moves a day and into June
+    start, end = recall._spans(rows)["proj"]
+    assert _dt.datetime.fromtimestamp(start, kuwait).day == 5 and _dt.datetime.fromtimestamp(end, kuwait).month == 6
+    conn.close()
+
+
+# ── "What did we talk about last week?" is answered by the week ──────────
+# (the follow-up review's O2: a said week was answered by its whole month)
+
+_LAST_WEEK = ["What did we talk about last week?", "شنو تكلمنا عنه الأسبوع الماضي؟"]
+
+
+def _weeks_and_months_store() -> sqlite3.Connection:
+    """June and July's roll-ups, and weeks W26, W27 and W31, as a Kuwait
+    server wrote them."""
+    from zoneinfo import ZoneInfo
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    conn = _months_store()
+    for week, (month, day) in ((26, (6, 22)), (27, (6, 29)), (31, (7, 27))):
+        start = _dt.datetime(2026, month, day, tzinfo=kuwait).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', ?, 'What we talked about that week.', 'active', 0, 0, '{}')",
+            (f"sum_w{week}", f"2026-W{week}", start, start + 7 * 86400, f"Week {week}"))
+    return conn
+
+
+def _asked_last_week(monkeypatch, zone: str, question: str) -> list[str]:
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    monkeypatch.setattr(recall, "_summaries_enabled", lambda: True)
+    monkeypatch.setattr(recall, "_encode_query", lambda query: None)
+    monday = _dt.datetime(2026, 8, 3, 10, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    conn = _weeks_and_months_store()
+    token = recall._ASK.set(read_time(question, now=monday, zone=ZoneInfo(zone)))
+    try:
+        return [h.id for h in recall._recall_summaries(conn, question, "default")]
+    finally:
+        recall._ASK.reset(token)
+        conn.close()
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+@pytest.mark.parametrize("zone", ["Asia/Kuwait", "UTC"])
+def test_last_week_is_answered_by_its_weekly_summary(monkeypatch, zone, question):
+    assert _asked_last_week(monkeypatch, zone, question) == ["sum_w31"]
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_control_with_months_for_every_period_last_week_gets_july(monkeypatch, question):
+    """The negative control: months answering every said period (as before)
+    gives July's roll-up, not the week."""
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_SAID_BY_MONTHS_S", 0.0)
+    assert _asked_last_week(monkeypatch, "Asia/Kuwait", question) == ["sum_m7"]
+
+
+# ── Which project a group is: never by row order; never a forgotten one ──
+# (the follow-up's M1: after ANALYZE a retired project came first and took a
+# forgotten or an active project's weeks)
+
+def _six_weeks_and_two_projects(mem, x_status: str, *, x_first: bool) -> None:
+    """Weeks w0-w5 on one topic; a skipped (retired) project R of w0-w2 and a
+    project X of w2-w5 in *x_status*, inserted in either order."""
+    for week in range(6):
+        _weekly(mem, f"w{week}", week, title=f"Garden week {week}", text="The garden beds.", direction=0)
+    projects = [("sum_b_X", x_status, ["w2", "w3", "w4", "w5"], "{}"),
+                ("sum_a_R", "retired", ["w0", "w1", "w2"], '{"skipped": true}')]
+    for rid, status, parts, meta in projects if x_first else reversed(projects):
+        mem.db.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, 0, 0, 'project', '', '', ?, 0, 0, ?)",
+            (rid, f"project:{rid}", status, meta))
+        mem.db.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, ?)",
+                           [(rid, p) for p in parts])
+    mem.db.commit()
+
+
+def _project_state(mem) -> dict[str, tuple[str, list[str]]]:
+    return {r["id"]: (r["status"], _parts(mem, r["id"])) for r in _rollups(mem, "project")}
+
+
+@pytest.mark.parametrize("analyze", [False, True])
+@pytest.mark.parametrize("x_first", [False, True])
+def test_a_group_sharing_a_week_with_a_forgotten_project_is_never_written(mem, analyze, x_first):
+    _six_weeks_and_two_projects(mem, "forgotten", x_first=x_first)
+    if analyze:
+        mem.db.execute("ANALYZE")
+    assert _plan(mem)["projects"] == 0
+    assert _project_state(mem) == {"sum_a_R": ("retired", ["w0", "w1", "w2"]),
+                                   "sum_b_X": ("forgotten", ["w2", "w3", "w4", "w5"])}
+
+
+@pytest.mark.parametrize("analyze", [False, True])
+@pytest.mark.parametrize("x_first", [False, True])
+def test_an_active_project_takes_its_grown_group_over_a_retired_one(mem, analyze, x_first):
+    _six_weeks_and_two_projects(mem, "active", x_first=x_first)
+    if analyze:
+        mem.db.execute("ANALYZE")
+    assert _plan(mem)["projects"] == 1
+    assert _project_state(mem) == {"sum_a_R": ("retired", ["w0", "w1", "w2"]),
+                                   "sum_b_X": ("rebuild", ["w0", "w1", "w2", "w3", "w4", "w5"])}
+
+
+def test_a_project_forgotten_in_the_ledger_alone_is_not_written_again(mem):
+    """A restored store that lost the tombstone: the ledger still says so."""
+    from kazma_core.memory import forget_journal
+
+    _six_weeks_and_two_projects(mem, "active", x_first=True)
+    forget_journal.append("summary", tenant_id="default", summary_id="sum_b_X")
+    assert _plan(mem)["projects"] == 0
+
+
+def test_control_the_first_match_by_row_order_takes_the_wrong_project(mem, monkeypatch):
+    """The negative control: c0dad2c05's lookup (the first overlapping row,
+    a tombstone only when it comes first) writes the forgotten weeks into
+    the retired project, and takes the active project's weeks."""
+    from kazma_core.memory import topic_rollups
+
+    def first_match(existing, parts):
+        return next((rid for rid, (status, held, _skip) in existing.items()
+                     if held and len(held & set(parts)) >= topic_rollups._SAME_PROJECT_SHARE
+                     * min(len(held), len(parts))), None)
+
+    monkeypatch.setattr(topic_rollups, "_project_of", first_match)
+    monkeypatch.setattr(topic_rollups, "_forgotten_project_of", lambda existing, tombstones, parts: None)
+    _six_weeks_and_two_projects(mem, "forgotten", x_first=False)
+    _plan(mem)
+    assert _project_state(mem)["sum_a_R"] == ("rebuild", ["w0", "w1", "w2", "w3", "w4", "w5"])
+
+
+# ── A roll-up retired for too few parts comes back with them (M2) ────────
+
+@pytest.mark.parametrize("level", ["project", "month"])
+def test_a_roll_up_retired_for_too_few_parts_comes_back_with_them(mem, level):
+    """Weeks written again (a version bump): the roll-up is written while two
+    of its weeks are retired, so it retires for too few live parts. When the
+    weeks come back active under the same ids, it is planned again; one the
+    model skipped is not (the O1 tests)."""
+    _training(mem)
+    _plan(mem)
+    [rollup] = _rollups(mem, level)
+    mem.db.execute("UPDATE memory_summaries SET status = 'retired' WHERE id IN ('tr1', 'tr2', 'tr3')")
+    mem.db.commit()
+    chat = _Chat()
+    assert _write(mem, rollup["id"], chat) and not chat.calls  # too few: retired, no model call
+    assert _row(mem, rollup["id"])["status"] == "retired"
+    mem.db.execute("UPDATE memory_summaries SET status = 'active' WHERE id IN ('tr1', 'tr2', 'tr3')")
+    mem.db.commit()
+    _plan(mem)
+    assert _row(mem, rollup["id"])["status"] == "rebuild"
+
+
+# ── A said week shows all its topics (M3); "this month" falls back (L1) ──
+
+def _week_of_four_topics() -> sqlite3.Connection:
+    """W31 (27 July to 2 August) with four topics, and August's weeks W32 and
+    W33, as a Kuwait server wrote them; no August roll-up yet."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    rows = [("w31_training", 31, (7, 27)), ("w31_battery", 31, (7, 27)), ("w31_garden", 31, (7, 27)),
+            ("w31_tax", 31, (7, 27)), ("w32_trip", 32, (8, 3)), ("w33_trip", 33, (8, 10))]
+    for sid, week, (month, day) in rows:
+        start = _dt.datetime(2026, month, day, tzinfo=kuwait).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', ?, ?, 'active', 0, 0, '{}')",
+            (sid, f"2026-W{week}", start, start + 7 * 86400, sid.split("_")[1].title(), "Talked about it. " * 40))
+    return conn
+
+
+def _said(monkeypatch, question: str, now: float, conn: sqlite3.Connection, zone: str = "Asia/Kuwait") -> list:
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    monkeypatch.setattr(recall, "_summaries_enabled", lambda: True)
+    monkeypatch.setattr(recall, "_encode_query", lambda query: None)
+    token = recall._ASK.set(read_time(question, now=now, zone=ZoneInfo(zone)))
+    try:
+        return recall._recall_summaries(conn, question, "default")
+    finally:
+        recall._ASK.reset(token)
+        conn.close()
+
+
+_MONDAY_3_AUG = _dt.datetime(2026, 8, 3, 10, tzinfo=__import__("zoneinfo").ZoneInfo("Asia/Kuwait")).timestamp()
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_a_said_week_shows_every_topic_of_it(monkeypatch, question):
+    hits = _said(monkeypatch, question, _MONDAY_3_AUG, _week_of_four_topics())
+    assert sorted(h.id for h in hits) == ["w31_battery", "w31_garden", "w31_tax", "w31_training"]
+    assert all(len(h.metadata["display"]) <= 300 for h in hits)  # shortened as a listing is
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_control_with_two_summaries_a_week_shows_two_of_four(monkeypatch, question):
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_LIST_SUMMARY_LIMIT", 2)
+    assert len(_said(monkeypatch, question, _MONDAY_3_AUG, _week_of_four_topics())) == 2
+
+
+@pytest.mark.parametrize("day", [19, 21])
+@pytest.mark.parametrize("question", ["What did we talk about this month?", "شنو تكلمنا عنه هذا الشهر؟"])
+def test_this_month_before_its_roll_up_is_answered_by_its_weeks(monkeypatch, day, question):
+    """The follow-up's L1: from the 20th "this month" is a month's question,
+    and its roll-up is written only after the month ends: its weeks answer."""
+    from zoneinfo import ZoneInfo
+
+    now = _dt.datetime(2026, 8, day, 12, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    assert {h.id for h in _said(monkeypatch, question, now, _week_of_four_topics())} >= {"w32_trip"}
+
+
+def test_control_without_the_fallback_this_month_on_the_21st_gets_nothing(monkeypatch):
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+
+    real = recall._months_said_in
+
+    def months_only(query, ask, rows, level, span):
+        return real(query, ask, rows, {rid: ("month" if kind == "month" else "none") for rid, kind in level.items()},
+                    span)
+
+    monkeypatch.setattr(recall, "_months_said_in", months_only)
+    now = _dt.datetime(2026, 8, 21, 12, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    hits = _said(monkeypatch, "What did we talk about this month?", now, _week_of_four_topics())
+    assert not any(h.metadata.get("source") == "period" or h.source == "period" for h in hits)
+
+
+# ── A project's weeks reach recall's own path (L2) ───────────────────────
+
+@pytest.mark.parametrize("question", ["What did we say about the training in June?",
+                                      "شنو قلنا عن التدريب في يونيو؟"])
+def test_recall_keeps_a_may_project_out_of_june_through_its_own_path(monkeypatch, question):
+    conn = _honolulu_project()
+    conn.execute("UPDATE memory_summaries SET title = 'Half marathon training', "
+                 "summary_text = 'The training runs, التدريب والجري.' WHERE id = 'proj'")
+    now = _dt.datetime(2026, 8, 15, 12, tzinfo=_dt.UTC).timestamp()
+    assert "proj" not in {h.id for h in _said(monkeypatch, question, now, conn)}
+
+
+def test_control_recall_without_the_project_s_weeks_shows_it_in_june(monkeypatch):
+    from kazma_core.memory import recall
+
+    real = recall._spans
+    monkeypatch.setattr(recall, "_spans", lambda rows, weeks=None: real(rows))
+    conn = _honolulu_project()
+    conn.execute("UPDATE memory_summaries SET title = 'Half marathon training', "
+                 "summary_text = 'The training runs, التدريب والجري.' WHERE id = 'proj'")
+    now = _dt.datetime(2026, 8, 15, 12, tzinfo=_dt.UTC).timestamp()
+    assert "proj" in {h.id for h in _said(monkeypatch, "What did we say about the training in June?", now, conn)}
+
+
+# ── A forgotten project holds back only itself (the follow-up's N1) ──────
+
+def _training_then_injury(mem) -> None:
+    """Training weeks w0-w4 (one topic) and the injury it became, w5-w14
+    (another); project X, of the training and the week it turned (w0-w5),
+    forgotten."""
+    for week in range(5):
+        _weekly(mem, f"w{week}", week, title=f"Training week {week}", text="Training runs.", direction=0)
+    for week in range(5, 15):
+        _weekly(mem, f"w{week}", week, title=f"Knee injury week {week}", text="The knee injury.", direction=5)
+    mem.db.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES ('sum_X', 'default', 'project:X', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')")
+    mem.db.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('sum_X', ?)",
+                       [(f"w{w}",) for w in range(6)])
+    mem.db.commit()
+
+
+def test_a_project_sharing_one_week_with_a_forgotten_one_is_written(mem, caplog):
+    import logging
+
+    _training_then_injury(mem)
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.topic_rollups"):
+        out = _plan(mem, now=_dt.datetime(2026, 12, 1).timestamp())
+    projects = {r["id"]: (r["status"], _parts(mem, r["id"])) for r in _rollups(mem, "project")}
+    injury = [rid for rid, (status, parts) in projects.items() if status == "rebuild"]
+    assert len(injury) == 1 and set(projects[injury[0]][1]) == {f"w{w}" for w in range(5, 15)}
+    assert projects["sum_X"][0] == "forgotten" and out["held_by_forget"] == 1  # the training is X: held
+    assert "roll-up sum_X was forgotten" in caplog.text
+
+
+def test_control_the_any_week_rule_never_writes_the_injury(mem, monkeypatch):
+    from kazma_core.memory import topic_rollups
+
+    monkeypatch.setattr(topic_rollups, "_forgotten_project_of", lambda existing, tombstones, parts: next(
+        (rid for rid in tombstones if existing.get(rid, ("", set(), False))[1] & set(parts)), None))
+    _training_then_injury(mem)
+    assert _plan(mem, now=_dt.datetime(2026, 12, 1).timestamp())["projects"] == 0
+
+
+@pytest.mark.parametrize("how", ["its own id in the ledger", "the same project forgotten"])
+def test_a_project_forgotten_after_it_was_planned_is_not_written(mem, how):
+    from kazma_core.memory import forget_journal
+
+    _training(mem)
+    _plan(mem)
+    [project] = _rollups(mem, "project")
+    if how == "its own id in the ledger":
+        forget_journal.append("summary", tenant_id="default", summary_id=project["id"])
+    else:
+        mem.db.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES ('sum_old', 'default', 'project:old', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')")
+        mem.db.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('sum_old', ?)",
+                           [(p,) for p in _parts(mem, project["id"])])
+        mem.db.commit()
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and not chat.calls
+    assert _row(mem, project["id"])["status"] == "retired"
+
+
+def test_control_a_project_nothing_forgot_is_written(mem):
+    _training(mem)
+    _plan(mem)
+    [project] = _rollups(mem, "project")
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and len(chat.calls) == 1
+
+
+# ── The ledger's forgets reach the month too, "mentions" included (L2) ───
+
+@pytest.mark.parametrize("kind", ["summary", "mentions"])
+def test_a_month_the_ledger_holds_forgotten_is_not_planned(mem, kind):
+    import json as _json
+
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    if kind == "summary":
+        forget_journal.append("summary", tenant_id="default", summary_id=rid)
+    else:
+        forget_journal.append("mentions", tenant_id="default", detail=_json.dumps({"summaries": [rid]}))
+    out = _plan(mem)
+    assert out["months"] == 0 and out["held_by_forget"] >= 1
+    assert topic_rollups._ledger_forgotten("default") == {rid}
+
+
+# ── The ledger is read by the space's reach, never by id alone (N2) ──────
+
+@pytest.mark.parametrize("enforced", [False, True])
+def test_another_space_s_ledger_entry_never_holds_the_owner_s_month(mem, monkeypatch, enforced):
+    """The fifth follow-up review's N2: a member of space B who names the
+    owner's (computable) June id holds nothing back, Spaces on or off."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: enforced)
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    forget_journal.append("summary", tenant_id="space-b", summary_id=rid)
+    assert topic_rollups._ledger_forgotten("default") == set()
+    out = _plan(mem)
+    assert out["months"] == 1 and out["held_by_forget"] == 0
+
+
+def test_the_owner_s_ledger_reaches_every_space_while_spaces_is_off(mem, monkeypatch):
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    forget_journal.append("summary", tenant_id="default", summary_id="sum_x")
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: False)
+    assert topic_rollups._ledger_forgotten("space-b") == {"sum_x"}
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: True)
+    assert topic_rollups._ledger_forgotten("space-b") == set()
+
+
+def test_a_refused_forget_writes_nothing_to_the_ledger(mem, monkeypatch):
+    """Space B forgetting the owner's summary is refused (not found), and
+    the ledger is left as it was; the owner's own forget is journaled."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: True)
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    before = forget_journal.journaled_seqs()
+    out = forget_summary(month["id"], tenant_id="space-b", conn=mem.db)
+    assert out == {"ok": False, "error": "not_found"} and forget_journal.journaled_seqs() == before
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    assert len(forget_journal.journaled_seqs()) == len(before) + 1
+
+
+def _ledger_reads_by_id_alone(source: str, path: str) -> list[str]:
+    """Each call that reads the forget ledger's summaries with no tenant."""
+    import ast
+
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if name in ("forgotten_summaries", "forgotten_rollup_parts", "_ledger_forgotten") and not (
+                    node.args or node.keywords):
+                found.append(f"{path}:{node.lineno} {name}()")
+    return found
+
+
+def test_no_ledger_reader_reads_by_id_alone():
+    """From source: every read of the ledger's forgotten summaries names the
+    tenant it reads for (``tenant_view.ledger_reach``)."""
+    found = []
+    for path in sorted((_REPO / "kazma-core/kazma_core").rglob("*.py")):
+        found += _ledger_reads_by_id_alone(path.read_text(encoding="utf-8"), path.relative_to(_REPO).as_posix())
+    assert found == []
+
+
+def test_control_a_read_by_id_alone_is_found():
+    assert _ledger_reads_by_id_alone("ids = forgotten_summaries()\nmore = _ledger_forgotten()\n", "old.py") == [
+        "old.py:1 forgotten_summaries()", "old.py:2 _ledger_forgotten()"]
+
+
+# ── A live group never loses its id to a tombstone; one line a skip (L-b, L-c)
+
+def test_a_live_group_whose_id_is_a_tombstone_s_gets_another(mem):
+    from kazma_core.memory import topic_rollups
+
+    _training(mem)
+    taken = topic_rollups._rollup_id("default", "project", "tr0")
+    mem.db.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES (?, 'default', 'project:old', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')", (taken,))
+    mem.db.execute("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, 'an-old-week')", (taken,))
+    mem.db.commit()
+    assert _plan(mem)["projects"] == 1
+    planned = [r for r in _rollups(mem, "project") if r["status"] == "rebuild"]
+    assert len(planned) == 1 and planned[0]["id"] != taken
+    assert _parts(mem, planned[0]["id"]) == ["tr0", "tr1", "tr2", "tr3"]
+
+
+def test_a_held_roll_up_is_said_once_not_every_pass(mem, caplog):
+    import logging
+
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    forget_journal.append("summary", tenant_id="default", summary_id=rid)
+    topic_rollups._SAID_HELD.discard(rid)
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.topic_rollups"):
+        counts = [_plan(mem)["held_by_forget"] for _ in range(3)]
+    assert counts == [1, 1, 1] and caplog.text.count(f"roll-up {rid} was forgotten") == 1
+
+
+# ── More topics than shown: the largest, and how many more (L1) ──────────
+
+def _week_of_eight_topics() -> sqlite3.Connection:
+    """W31 with eight topics; the id order is the reverse of their size."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    start = _dt.datetime(2026, 7, 27, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    for n, letter in enumerate("abcdefgh"):
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, turn_count, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', '2026-W31', ?, ?, 'week', ?, 'Talked.', 'active', ?, 0, 0, '{}')",
+            (f"t_{letter}", start, start + 7 * 86400, f"Topic {letter}", n + 1))
+    return conn
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_a_said_week_shows_its_largest_topics_and_says_how_many_more(monkeypatch, question):
+    hits = _said(monkeypatch, question, _MONDAY_3_AUG, _week_of_eight_topics())
+    assert [h.id for h in hits] == ["t_h", "t_g", "t_f", "t_e", "t_d", "t_c"]
+    assert "2 more weekly summaries of this period are not shown" in hits[-1].metadata["display"]
+
+
+def test_control_ranked_by_id_the_week_shows_its_smallest(monkeypatch):
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_said_rank", lambda by_id, share, span: lambda rid: (-share[rid], rid))
+    hits = _said(monkeypatch, _LAST_WEEK[0], _MONDAY_3_AUG, _week_of_eight_topics())
+    assert [h.id for h in hits] == ["t_a", "t_b", "t_c", "t_d", "t_e", "t_f"]
+
+
+# ── A forgotten project survives a memory restore (the sixth review's M1) ─
+
+def _forgotten_then_restored(mem) -> str:
+    """A written training project, forgotten, then a memory restore that
+    lost its row and parts: only the ledger knows it."""
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    mem.db.execute("DELETE FROM memory_summary_parts WHERE rollup_id = ?", (rid,))
+    mem.db.execute("DELETE FROM memory_summaries WHERE id = ?", (rid,))
+    mem.db.commit()
+    return rid
+
+
+def test_a_forgotten_project_is_not_written_again_after_a_restore(mem):
+    rid = _forgotten_then_restored(mem)
+    out = _plan(mem)
+    assert out["projects"] == 0 and out["held_by_forget"] >= 1
+    assert _rollups(mem, "project") == [] and rid not in {r["id"] for r in _rollups(mem, "project")}
+
+
+def test_a_forgotten_project_whose_first_week_changed_is_held_by_its_parts(mem):
+    """The journaled parts match the group by the share rule, whatever id
+    the group's first week would give it."""
+    _forgotten_then_restored(mem)
+    _weekly(mem, "tr_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 0
+
+
+def test_control_without_the_ledger_the_restored_project_comes_back(mem, monkeypatch):
+    """The negative control: the restored store alone (no ids, no parts from
+    the ledger) plans the forgotten project again."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _forgotten_then_restored(mem)
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {})
+    monkeypatch.setattr(topic_rollups, "_ledger_forgotten", lambda tenant_id: set())
+    assert _plan(mem)["projects"] == 1
+
+
+@pytest.mark.parametrize("parts_known", [True, False])
+def test_a_group_on_a_forgotten_id_is_renumbered_only_when_its_parts_are_known(mem, monkeypatch, parts_known):
+    """With the tombstone's parts known (another project), the live group
+    gets another id (the fifth review's L-b); unknown, it may be that very
+    project, so it is held (M1)."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    taken = topic_rollups._rollup_id("default", "project", "tr0")
+    forget_journal.append("summary", tenant_id="default", summary_id=taken)
+    if parts_known:
+        monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {taken: {"an-old-week"}})
+    out = _plan(mem)
+    assert out["projects"] == (1 if parts_known else 0)
+    assert taken not in {r["id"] for r in _rollups(mem, "project")}
+
+
+# ── A month's forget holds back no project (the seventh review's M-a) ────
+
+def test_forgetting_a_month_leaves_the_projects_over_its_weeks_written(mem):
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    [project] = _rollups(mem, "project")
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and len(chat.calls) == 1
+    assert _row(mem, project["id"])["status"] == "active"
+
+
+def test_control_a_month_journaled_as_a_project_retires_the_project(mem, monkeypatch):
+    """The negative control: da56cce39 journaled a month's parts as a
+    project's, and the project over its weeks was retired."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    [project] = _rollups(mem, "project")
+    month_parts = set(_parts(mem, month["id"]))
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {month["id"]: month_parts})
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and not chat.calls
+    assert _row(mem, project["id"])["status"] == "retired"
+
+
+# ── A project's parts are journaled, pinned (L-a), by "mentions" too (M-b) ─
+
+def test_a_project_s_forget_journals_its_parts(mem):
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_a_restored_project_is_held_when_an_earlier_week_sorts_first(mem):
+    """The restore case where the group's first id changes, so only the
+    journaled parts can hold it (L-a: without them it was planned)."""
+    _forgotten_then_restored(mem)
+    _weekly(mem, "aa_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 0
+
+
+def test_control_without_the_journaled_parts_the_earlier_week_brings_it_back(mem, monkeypatch):
+    from kazma_core.memory import forget_journal
+
+    _forgotten_then_restored(mem)
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {})
+    _weekly(mem, "aa_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 1
+
+
+def test_forgetting_what_mentions_a_name_journals_the_project_s_parts(mem):
+    from kazma_core.memory import forget, forget_journal
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    mem.db.execute("UPDATE memory_summaries SET title = 'Zanzibar marathon block' WHERE id = ?", (rid,))
+    mem.db.commit()
+    assert forget.forget_mentions("Zanzibar", tenant_id="default")["ok"]
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_an_older_entry_is_filled_with_its_project_s_parts_once(mem, caplog):
+    """The backfill (M-b): an entry journaled before parts were (by id only)
+    takes them from the row while it is there; then a restore that loses the
+    row still holds the project; a second pass fills nothing."""
+    import logging
+
+    from kazma_core.memory import forget_journal
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    forget_journal.append("summary", tenant_id="default", summary_id=rid)  # the old shape: no parts
+    assert forget_journal.forgotten_rollup_parts("default") == {}
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.forget_journal"):
+        assert forget_journal.backfill_project_parts(mem.db) == 1
+    assert "1 older forget entries now hold their projects' parts" in caplog.text
+    assert forget_journal.backfill_project_parts(mem.db) == 0
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_a_kept_older_row_and_the_journal_join_their_parts(mem):
+    """L-c: a restore kept an older row with other parts; the journal's and
+    the row's together are the project."""
+    from kazma_core.memory import topic_rollups
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    journaled = set(_parts(mem, rid))
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    mem.db.execute("DELETE FROM memory_summary_parts WHERE rollup_id = ?", (rid,))
+    mem.db.execute("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, 'an-older-week')", (rid,))
+    mem.db.commit()
+    existing, _tombstones = topic_rollups._known_with_the_ledger(mem.db, "default")
+    assert existing[rid][1] == journaled | {"an-older-week"}

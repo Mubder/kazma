@@ -117,7 +117,59 @@ queued by the maintenance sweep with at most two weeks in flight.
   June question in EN and AR in four zones, the stored stretch as control).
   Weeks and months are named and filed from their keys too (`rollup_label`,
   `_week_month`, `_month_settled`; a gate reads every place that dates a
-  stored stretch from source).
+  stored stretch from source), and a project from its first and last part's
+  week keys (`recall._project_weeks`; read at midday, a zone 13 hours away
+  moved it a day: the follow-up review's L2). A said period shorter than
+  `_SAID_BY_MONTHS_S` (20 days: "What did we talk about last week?", "شنو
+  تكلمنا عنه الأسبوع الماضي؟") is answered by its weekly summaries by share,
+  not its whole month (O2), every topic of the week up to the listing's
+  limit, shortened as a listing is (the third follow-up review's M3: two of
+  four, by row order), ranked by `_said_rank` (the most of the period, the
+  newest stretch, the most turns, the id), the last one saying how many more
+  are not shown (the fourth's L1); when that level holds nothing yet the
+  other answers ("this month" from the 20th, before its roll-up is
+  written). One "start of" rule in both languages (`time_words._START_OF_EN`,
+  `_HISTORY_AR`): "at the start" / "في البداية" alone is "at first"; "at the
+  start of" a definite period or a month ("this month", "الشهر", "January",
+  "يناير") reads that period's start; "at the start of" anything else (a
+  story, Ramadan) names no time; "أول أسبوع" is "the first week" (paired
+  tests). A roll-up the model skips is retired with its
+  parts and planned again only when they change: a project was left out of
+  `_known_projects` and planned under the same id on every other sweep,
+  about 48 model calls a day each (O1; gate: the sweep settles after a skip,
+  a new part asks again, and the old lookup as control never settles). Only
+  a skip settles: `_retire(skipped=True)` marks it, and a roll-up retired for
+  too few live parts (a week written again after a version bump) is planned
+  again when they are live, month or project (M2). Which project a group
+  continues is never row order (`_project_of`: active, then waiting, then
+  retired; then the most weeks shared; then the id). A group that IS a
+  forgotten project, by the same share rule (`_forgotten_project_of`), in
+  the store or the forget ledger (`forget_journal.forgotten_summaries`: a
+  `summary` forget and a `mentions` forget's summaries, journaled by the
+  tenants `tenant_view.ledger_reach` names, never by id alone: another
+  space naming the owner's id held its month back, the fifth follow-up's N2;
+  a source gate finds a read with no tenant), is not planned again. A
+  project's forget entry journals its parts, a `summary` forget's and a
+  forget by text's (`forget_journal.forgotten_rollup_parts`; older entries
+  filled once a process by `backfill_project_parts`), so after a memory
+  restore that lost its row the project is still known by them, joined with
+  an older row's own (the sixth follow-up's M1; the seventh's M-b, L-c). A
+  month's parts are never journaled: its tombstone stays a month's, and
+  forgetting June holds back no project over its weeks (the seventh's M-a). A new
+  group whose id is a project's with known parts gets another id; one whose
+  id is a tombstone with no parts known is held, since it may be that very
+  project. Each skip is counted (`plan_rollups`' `held_by_forget`) and said
+  once a process.
+  `forget_summary` journals only once the summary is the caller's: a refused
+  forget writes nothing to the ledger. Sharing
+  a week is not enough: training that turned into an injury, the training
+  forgotten, still lets the injury be a project (the fourth follow-up's N1).
+  The writer asks again (`_forgotten_now`): a roll-up forgotten after it was
+  planned, or the same project as one forgotten since, is retired with no
+  model call. Gates: both row orders with and without ANALYZE (M1), the
+  injury written (control: the any-week rule), the write-time check (control:
+  a project nothing forgot is written), the ledger's month by `summary` from
+  another space and by `mentions`.
   Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
   from it: through a turn and through a weekly summary; a roll-up that names
   no source, and a store without the re-read, as controls),

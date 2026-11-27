@@ -69,7 +69,12 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   (`keep_turn_out`, a `turn` entry naming no memory) too since 2026-11-21 --
   and an entry of a chat records the chat's keys (`keys_detail`; a replay
   reads them with `entry_keys`: a chat forgotten and then deleted came back
-  under its other key, since the store no longer named it); the memory
+  under its other key, since the store no longer named it); a summary
+  forget or a forget by text records each forgotten PROJECT roll-up's parts
+  (`project_parts`, never a month's), and older entries are filled from the
+  rows once a process while they hold them (`backfill_project_parts`), so a
+  restore that loses a project's row still knows it (§15 J; W6 step 5's
+  follow-up reviews); the memory
   database records what it applied
   (`memory_forget_applied`, inside it, so a restored older copy lacks the
   marks of later forgets). `forget_episode` runs EVERY step every time (the

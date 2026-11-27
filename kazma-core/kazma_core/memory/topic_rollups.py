@@ -163,10 +163,13 @@ def _week_month(row: Any, zone: Any) -> tuple[str, float, float]:
     return _month_of(float(row["period_start"]) + _MIDDAY_S, zone)
 
 
-def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any) -> tuple[float, float]:
+def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any,
+               weeks: tuple[str, str] | None = None) -> tuple[float, float]:
     """A summary's stretch of time in *zone*, as epoch seconds: a week from
-    its key's Monday to the next, a month from its key's first to the next,
-    with no zone in the key; else its stored stretch read at midday, from its
+    its key's Monday to the next, a month from its key's first to the next, a
+    project from its first part's Monday to the Monday after its last
+    (*weeks*: their keys; the follow-up review's L2), with no zone in a key;
+    else its stored stretch read at midday, from its
     first day's midnight to the midnight after its last. Recall compares it
     with the question's period (the step 5 follow-up review's L-a: a stretch
     a server wrote in its own local time, compared as stored, put a June
@@ -174,6 +177,9 @@ def stretch_of(level: str, period_key: str, period_start: float, period_end: flo
     def midnight(day: _dt.date) -> float:
         return _dt.datetime(day.year, day.month, day.day, tzinfo=zone).timestamp()
 
+    first_week, last_week = (_week_monday(weeks[0]), _week_monday(weeks[1])) if weeks else (None, None)
+    if first_week is not None and last_week is not None:
+        return midnight(first_week), midnight(last_week + _dt.timedelta(days=7))
     monday = _week_monday(period_key) if level == "week" else None
     if monday is not None:
         return midnight(monday), midnight(monday + _dt.timedelta(days=7))
@@ -187,7 +193,8 @@ def stretch_of(level: str, period_key: str, period_start: float, period_end: flo
                                                 zone).date() + _dt.timedelta(days=1)))
 
 
-def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "") -> str:
+def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "",
+                 weeks: tuple[str, str] | None = None) -> str:
     """How recall's block and the roll-up prompts name a summary's stretch of
     time, in English (Kazma's own text): "Week of Oct 06, 2026",
     "October 2026", "Project, Sep 2026 to Nov 2026". A week and a month are
@@ -206,7 +213,13 @@ def rollup_label(level: str, period_start: float, period_end: float, period_key:
     if level == "month":
         return (_month_first(period_key) or day(start + _MIDDAY_S)).strftime("%B %Y")
     if level == "project":
-        first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
+        # from its parts' weeks (*weeks*: the first and last part's keys), else
+        # its stretch read at midday
+        first_week, last_week = (_week_monday(weeks[0]), _week_monday(weeks[1])) if weeks else (None, None)
+        if first_week is not None and last_week is not None:
+            first, last = first_week, last_week + _dt.timedelta(days=6)
+        else:
+            first, last = day(start + _MIDDAY_S), day(max(float(period_end or 0) - _MIDDAY_S, start + _MIDDAY_S))
         return f"Project, {first.strftime('%b %Y')} to {last.strftime('%b %Y')}"
     return f"Week of {(_week_monday(period_key) or day(start + _MIDDAY_S)).strftime('%b %d, %Y')}"
 
@@ -277,12 +290,27 @@ def _month_settled(conn: sqlite3.Connection, tenant_id: str, key: str, zone: Any
     return not any(_week_month(row, zone)[0] == key for row in waiting)
 
 
+#: The forgotten roll-ups already said held back, once each in a process:
+#: the sweep runs every 15 minutes (§58: no line said again each pass).
+_SAID_HELD: set[str] = set()
+
+
+def _held_by_forget(held: list[int], level: str, rid: str) -> None:
+    """Count a roll-up left unwritten because it was forgotten; say it the
+    first time."""
+    held[0] += 1
+    if rid not in _SAID_HELD:
+        _SAID_HELD.add(rid)
+        logger.info("[summaries] %s roll-up %s was forgotten: not written again", level, rid)
+
+
 def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
-                 budget: list[int]) -> int:
+                 budget: list[int], held: list[int]) -> int:
     months: dict[str, tuple[float, float, list[str]]] = {}
     from kazma_core.memory.topic_summaries import memory_zone
 
     zone = memory_zone()
+    forgotten = _ledger_forgotten(tenant_id)
     for row in weekly:
         key, start, end = _week_month(row, zone)
         months.setdefault(key, (start, end, []))[2].append(str(row["id"]))
@@ -293,10 +321,17 @@ def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.
         if end + _MONTH_GRACE_S > now or len(parts) < MIN_PARTS:
             continue
         rid = _rollup_id(tenant_id, "month", key)
-        row = conn.execute("SELECT status FROM memory_summaries WHERE id = ? AND tenant_id = ?",
+        row = conn.execute("SELECT status, metadata_json FROM memory_summaries WHERE id = ? AND tenant_id = ?",
                            (rid, tenant_id)).fetchone()
-        if row is not None and (row["status"] == "forgotten" or _parts_of(conn, rid) == sorted(parts)):
-            continue  # a tombstone, or written (or waiting) from these very parts
+        if rid in forgotten or (row is not None and row["status"] == "forgotten"):
+            _held_by_forget(held, "month", rid)
+            continue
+        if row is not None and (
+                _parts_of(conn, rid) == sorted(parts) and (row["status"] != "retired" or _skipped(row))):
+            # written, waiting or skipped by the model from
+            # these very parts (retired for too few live parts, it comes back
+            # when they do: the follow-up's M2)
+            continue
         if not _month_settled(conn, tenant_id, key, zone):
             continue
         _mark_rebuild(conn, tenant_id=tenant_id, level="month", rollup_id=rid, key=key, start=start,
@@ -336,33 +371,163 @@ def _project_groups(weekly: list[sqlite3.Row]) -> list[list[sqlite3.Row]]:
     return groups
 
 
-def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
-                   budget: list[int]) -> int:
-    existing = {
-        str(r["id"]): (str(r["status"]), set(_parts_of(conn, str(r["id"]))))
+def _skipped(row: Any) -> bool:
+    """Whether a retired roll-up was retired because the model skipped it
+    (``rebuild_rollup``), not for too few live parts."""
+    try:
+        return bool(json.loads(row["metadata_json"] or "{}").get("skipped"))
+    except (ValueError, TypeError):
+        return False
+
+
+def _ledger_forgotten(tenant_id: str) -> set[str]:
+    """The summaries the forget ledger holds forgotten for *tenant_id* (§15
+    I: a writer asks it first)."""
+    from kazma_core.memory.forget_journal import forgotten_summaries
+
+    return forgotten_summaries(tenant_id)
+
+
+def project_parts_of(conn: sqlite3.Connection, ids: Iterable[str], tenant_id: str) -> dict[str, list[str]]:
+    """The parts of each PROJECT roll-up of *tenant_id* among *ids* (a
+    month's are left out: a month's tombstone stays a month's; the seventh
+    follow-up review's M-a), for a forget's journal entry."""
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    wanted = [str(i) for i in ids]
+    if not wanted:
+        return {}
+    only = narrowed_to(tenant_id)
+    projects = [str(r[0]) for r in conn.execute(
+        "SELECT id FROM memory_summaries WHERE level = 'project' AND (? IS NULL OR tenant_id = ?) "
+        f"AND id IN ({','.join('?' for _ in wanted)})", (only, only, *wanted))]
+    return {rid: parts for rid in projects if (parts := _parts_of(conn, rid))}
+
+
+#: Whether this process has filled older forget entries with their projects'
+#: parts (``forget_journal.backfill_project_parts``, once a process).
+_BACKFILLED: list[bool] = [False]
+
+
+def _known_with_the_ledger(conn: sqlite3.Connection, tenant_id: str) -> tuple[
+        dict[str, tuple[str, set[str], bool]], set[str]]:
+    """The known projects and the tombstones, with what the forget ledger
+    holds: an id it holds forgotten is a tombstone whatever its row says,
+    and one whose row is gone (a memory restore) is known by the parts its
+    entry journaled (the sixth follow-up review's M1)."""
+    from kazma_core.memory.forget_journal import forgotten_rollup_parts
+
+    existing = _known_projects(conn, tenant_id)
+    ledger = _ledger_forgotten(tenant_id)
+    for rid, parts in forgotten_rollup_parts(tenant_id).items():
+        # an older row a restore kept, with other parts: both are the
+        # project's (the seventh review's L-c)
+        known = existing.get(rid, ("forgotten", set(), False))
+        existing[rid] = ("forgotten", set(known[1]) | set(parts), known[2])
+    tombstones = {rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger
+    existing = {rid: (("forgotten", *known[1:]) if rid in tombstones else known) for rid, known in existing.items()}
+    return existing, tombstones
+
+
+def _new_project_id(tenant_id: str, parts: list[str], taken: set[str]) -> str:
+    """A new project's id: from its first week, else (that id a project's
+    whose parts are known, a tombstone's or a live one's) from its first week
+    and a number (the fifth review's L-b: a live group was skipped for good
+    under a forgotten id). The caller holds back a group whose id is a
+    tombstone with no parts known: it may be that very project (M1)."""
+    rid = _rollup_id(tenant_id, "project", parts[0])
+    n = 1
+    while rid in taken:
+        rid = _rollup_id(tenant_id, "project", f"{parts[0]}#{n}")
+        n += 1
+    return rid
+
+
+def _known_projects(conn: sqlite3.Connection, tenant_id: str) -> dict[str, tuple[str, set[str], bool]]:
+    """Every project roll-up the space has, by id: its status, its parts and
+    whether the model skipped it. A retired one is among them: one the model
+    skipped keeps its parts and is not planned again until they change (the
+    step 5 follow-up's O1: left out, the same group was planned under the
+    same id on every other sweep, about 48 model calls a day each)."""
+    return {
+        str(r["id"]): (str(r["status"]), set(_parts_of(conn, str(r["id"]))), _skipped(r))
         for r in conn.execute(
-            "SELECT id, status FROM memory_summaries WHERE tenant_id = ? AND level = 'project' "
-            "AND status != 'retired'", (tenant_id,))
+            "SELECT id, status, metadata_json FROM memory_summaries WHERE tenant_id = ? AND level = 'project' "
+            "ORDER BY id", (tenant_id,))
     }
+
+
+#: Which project a group is when several share its weeks: an active one,
+#: then one waiting to be written, then a retired one; then the most weeks
+#: shared; then the id. Never the order rows come back in (the follow-up's
+#: M1: after ANALYZE a retired project came first and took the weeks).
+_MATCH_ORDER = {"active": 0, "rebuild": 1, "retired": 2}
+
+
+def _same_project(held: set[str], parts: set[str]) -> bool:
+    """Whether a project of *held* weeks and a group of *parts* are one: they
+    share :data:`_SAME_PROJECT_SHARE` of the smaller."""
+    return bool(held) and len(held & parts) >= _SAME_PROJECT_SHARE * min(len(held), len(parts))
+
+
+def _forgotten_project_of(existing: dict[str, tuple[str, set[str], bool]], tombstones: set[str],
+                          parts: list[str]) -> str | None:
+    """The forgotten project *parts* would write again: a tombstone it is the
+    same project as, by the rule :func:`_project_of` matches by. Sharing a
+    week is not enough (the follow-up's N1: training that turned into an
+    injury, the training forgotten, never let the injury be written)."""
+    wanted = set(parts)
+    return min((rid for rid in tombstones if _same_project(existing.get(rid, ("", set(), False))[1], wanted)),
+               default=None)
+
+
+def _project_of(existing: dict[str, tuple[str, set[str], bool]], parts: list[str]) -> str | None:
+    """The known project *parts* continue, by :data:`_MATCH_ORDER`; None for
+    a new one. A tombstone is never one (the caller skips a group that
+    overlaps it)."""
+    wanted = set(parts)
+    matches = [rid for rid, (status, held, _skip) in existing.items()
+               if status in _MATCH_ORDER and _same_project(held, wanted)]
+    return min(matches, key=lambda rid: (_MATCH_ORDER[existing[rid][0]], -len(existing[rid][1] & wanted), rid),
+               default=None)
+
+
+def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
+                   budget: list[int], held_back: list[int]) -> int:
+    existing, tombstones = _known_with_the_ledger(conn, tenant_id)
     planned = 0
     for group in _project_groups(weekly):
         if budget[0] <= 0:
             break
         parts = sorted(str(r["id"]) for r in group)
-        match = next((rid for rid, (_s, held) in existing.items()
-                      if held and len(held & set(parts)) >= _SAME_PROJECT_SHARE * min(len(held), len(parts))), None)
+        # Forgetting is final (§15 I): a group that is a forgotten project,
+        # in the store or the ledger, is not written again under any id
+        # (the follow-up's M1, N1).
+        forgotten = _forgotten_project_of(existing, tombstones, parts)
+        if forgotten is not None:
+            _held_by_forget(held_back, "project", forgotten)
+            continue
+        match = _project_of(existing, parts)
         if match is not None:
-            status, held = existing[match]
-            if status == "forgotten" or held == set(parts):
+            status, held, skipped = existing[match]
+            # written, waiting or skipped by the model from these very
+            # parts; retired for too few live parts, it comes back (M2)
+            if held == set(parts) and (status != "retired" or skipped):
                 continue
             rid = match
         else:
             rid = _rollup_id(tenant_id, "project", parts[0])
+            if rid in tombstones and not existing.get(rid, ("", set(), False))[1]:
+                # a tombstone whose parts are unknown: it may be this very
+                # project, so it is held, never renumbered (M1)
+                _held_by_forget(held_back, "project", rid)
+                continue
+            rid = _new_project_id(tenant_id, parts, {r for r, known in existing.items() if known[1]})
         start = min(float(r["period_start"]) for r in group)
         end = max(float(r["period_end"]) for r in group)
         _mark_rebuild(conn, tenant_id=tenant_id, level="project", rollup_id=rid, key=f"project:{rid[4:16]}",
                       start=start, end=end, parts=parts, now=now)
-        existing[rid] = ("rebuild", set(parts))
+        existing[rid] = ("rebuild", set(parts), False)
         planned += 1
         budget[0] -= 1
     return planned
@@ -374,17 +539,24 @@ def plan_rollups(conn: sqlite3.Connection, *, now: float | None = None) -> dict[
     queue's ``topic_summary_rebuild`` task writes them. Cheap when nothing is
     due; at most :data:`_PLANNED_PER_PASS` roll-ups a pass."""
     now = time.time() if now is None else float(now)
-    out = {"months": 0, "projects": 0}
+    if not _BACKFILLED[0]:
+        from kazma_core.memory.forget_journal import backfill_project_parts
+
+        backfill_project_parts(conn)
+        _BACKFILLED[0] = True
+    out = {"months": 0, "projects": 0, "held_by_forget": 0}
+    held = [0]
     budget = [_PLANNED_PER_PASS]
     tenants = [str(r[0]) for r in conn.execute(
         "SELECT DISTINCT tenant_id FROM memory_summaries WHERE level = 'week' AND status = 'active'")]
     for tenant in tenants:
         weekly = _weekly(conn, tenant)
-        out["months"] += _plan_months(conn, tenant, weekly, now, budget)
-        out["projects"] += _plan_projects(conn, tenant, weekly, now, budget)
+        out["months"] += _plan_months(conn, tenant, weekly, now, budget, held)
+        out["projects"] += _plan_projects(conn, tenant, weekly, now, budget, held)
         conn.commit()
         if budget[0] <= 0:
             break
+    out["held_by_forget"] = held[0]
     return out
 
 
@@ -456,12 +628,28 @@ def _read_parts(conn: sqlite3.Connection, rollup_id: str, tenant_id: str) -> lis
         (*ids, tenant_id)).fetchall()
 
 
-def _retire(conn: sqlite3.Connection, rollup_id: str, tenant_id: str) -> None:
+def _forgotten_now(conn: sqlite3.Connection, level: str, rollup_id: str, tenant_id: str, parts: list[str]) -> bool:
+    """Whether roll-up *rollup_id*, planned before a forget, is now forgotten
+    or the same project as one forgotten since (the follow-up's N1: the
+    writer had no check of its own)."""
+    if rollup_id in _ledger_forgotten(tenant_id):
+        return True
+    if level != "project":
+        return False
+    existing, tombstones = _known_with_the_ledger(conn, tenant_id)
+    return _forgotten_project_of(existing, tombstones - {rollup_id}, parts) is not None
+
+
+def _retire(conn: sqlite3.Connection, rollup_id: str, tenant_id: str, *, skipped: bool = False) -> None:
+    """Retire a roll-up waiting to be written: the model *skipped* it (then
+    it is not planned again until its parts change), or too few of its parts
+    are live (then it comes back when they are; the follow-up's M2)."""
     conn.execute(
         "UPDATE memory_summaries SET status = 'retired', title = '', summary_text = '', embedding = NULL, "
-        "embedding_model_version = NULL, queued_at = NULL, updated_at = ? WHERE id = ? AND tenant_id = ? "
-        "AND status = 'rebuild'",
-        (time.time(), rollup_id, tenant_id))
+        "embedding_model_version = NULL, queued_at = NULL, updated_at = ?, "
+        "metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.skipped', json(?)) "
+        "WHERE id = ? AND tenant_id = ? AND status = 'rebuild'",
+        (time.time(), "true" if skipped else "false", rollup_id, tenant_id))
     conn.commit()
 
 
@@ -522,6 +710,11 @@ async def rebuild_rollup(conn: sqlite3.Connection, row: sqlite3.Row, *, chat: An
     parts = await asyncio.to_thread(_read_parts, conn, str(row["id"]), tenant)
     if any(p["status"] == "rebuild" for p in parts):
         return True  # a part is still being written again: this one waits for it
+    if await asyncio.to_thread(_forgotten_now, conn, level, str(row["id"]), tenant, [str(p["id"]) for p in parts]):
+        # Forgotten since it was planned: never written (no model call).
+        logger.info("[summaries] %s roll-up %s was forgotten since it was planned: not written", level, row["id"])
+        await asyncio.to_thread(_retire, conn, str(row["id"]), tenant)
+        return True
     live = [p for p in parts if p["status"] == "active"]
     if len(live) < MIN_PARTS:
         await asyncio.to_thread(_retire, conn, str(row["id"]), tenant)
@@ -540,7 +733,7 @@ async def rebuild_rollup(conn: sqlite3.Connection, row: sqlite3.Row, *, chat: An
         logger.warning("[summaries] the model call for roll-up %s failed: %s -- retried later", row["id"], exc)
         return False
     if parsed is None or parsed["skip"]:
-        await asyncio.to_thread(_retire, conn, str(row["id"]), tenant)
+        await asyncio.to_thread(_retire, conn, str(row["id"]), tenant, skipped=True)
         return True
     read = {str(p["id"]): float(p["updated_at"] or 0) for p in live}
     stored = await asyncio.to_thread(_store, conn, str(row["id"]), tenant, read, title=parsed["title"],

@@ -536,5 +536,5 @@ def test_control_a_store_with_its_month_roll_up_has_none_due(scripts, tmp_path):
     written, _turn = scripts
     store = tmp_path / "held.db"
     _weeks_store(store, with_month=True)
-    assert written.bench.rollups_due(store, written.bench.parse_date("2026/07/20 (Mon) 10:00")) == \
-        {"months": 0, "projects": 0}
+    due = written.bench.rollups_due(store, written.bench.parse_date("2026/07/20 (Mon) 10:00"))
+    assert (due["months"], due["projects"]) == (0, 0)
