@@ -127,6 +127,8 @@ class PeopleRefused(ValueError):
         super().__init__(message)
         self.code = code
         self.status = status
+        #: Kazma's sentence, which the page shows (``errors.refusal_message``).
+        self.message = message
         #: For ``preconditions_missing``: each precondition that does not
         #: hold (id, title, detail, fix).
         self.missing = list(missing or [])

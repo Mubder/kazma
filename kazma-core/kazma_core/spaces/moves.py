@@ -43,6 +43,8 @@ class MoveRefused(ValueError):
         super().__init__(message)
         self.code = code
         self.status = status
+        #: Kazma's sentence, which the page shows (errors.refusal_message).
+        self.message = message
 
 
 def move_rule(*, from_space: str, to_space: str, by: str) -> tuple[MoveRefused | None, bool]:

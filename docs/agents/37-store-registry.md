@@ -37,7 +37,8 @@ location rule, migration exporter, importer) — the bundle silently left
   `workspace/` sandbox; `vault.db` / `hitl_gates.db` by name anywhere) is
   what the SQL tools, the file tools (reads AND writes — reads were open
   until this), `python_exec`, `shell_exec`, the commitment exec resolver
-  (before the approval card) and the card disclosure all ask;
+  (before the approval card), the card disclosure and every IDE read (the
+  web IDE and its LSP, the IDE MCP server, the TUI preview: section 10) all ask;
   `store_refusal()` says what the store holds and which tool reads it. A
   path grant cannot open a store, so the file refusal never offers one.
 - **Kazma's secret files and store copies are stores too** (2026-11

@@ -92,6 +92,45 @@
 - A Postgres copy that is down when Kazma starts no longer slows every
   memory search by seconds: Kazma asks it again once a minute, not on each
   search.
+
+## The code-scanning alerts of 26 November, each judged (2026-11-26)
+
+- **135 open alerts read against the code.** 100 close with these changes,
+  33 are false positives the owner dismisses with the reason given, and 2
+  (Scorecard's review and branch-protection checks) are the owner's choice.
+  The list is `docs/audits/CODEQL_TRIAGE_2026-11-26.md`. No log line printed
+  a secret.
+- **Settings stop reading as secrets to the scanner**: one variable named
+  `secret` on the path every setting is read through made every setting a
+  secret to CodeQL, and 88 log lines of ids and counts were reported. The
+  value is returned unnamed. A test holds that path to CodeQL's own name
+  rules.
+- **Refusals go to the page as Kazma's sentence**: the People, Spaces, chat
+  link, own key and history import routes answer the sentence the refusal
+  keeps, redacted, never the exception's text. The People page answered it
+  raw. The check that every answer carries no exception text missed it; it
+  now knows every exception class Kazma defines.
+- **The IDE opens none of Kazma's own files, inside the workspace too**:
+  the IDE checked a path inside the workspace for containment only, so its
+  code completion, hover and symbols read Kazma's secret files there. On an
+  install whose workspace is the install folder that is `.env`. The IDE,
+  its MCP server and the terminal app's preview now refuse Kazma's stores
+  and secret files wherever they are. An alert reported this earlier (#53)
+  and was dismissed; the owner reopens it.
+- **The IDE's read-only git reads the repository's versions only**: no
+  `--no-index`, `git diff` only in a repository, and none of Kazma's own
+  files as an operand. Git with no approval (the IDE's, `/ide git`, the
+  agent's `git_diff`) shows a file's contents only in a work tree git
+  itself accepts and a repository that holds none of Kazma's files; the
+  answer says why in English or Arabic. A network path given to git is
+  refused before anything touches it.
+- **Smaller ones**: a memory backup to restore is found by its timestamp
+  (a name with Unicode digits passed before); X's sign-in refusal comes
+  back to Settings as a word the page has, in English and Arabic, and an
+  outage at X says X could not be reached; a sealed zip's entries are
+  tested never to share a keystream. Documents, a document's move and a
+  Knowledge URL answer their refusal's sentence too, and a refusal with no
+  sentence is answered in the reader's language.
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 
 - **Postgres's own client library stands in**: from 11:30 UTC Windows'

@@ -79,6 +79,48 @@ workspace. Three new modules; understanding their interaction is essential.
   remain future work.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
+- **Containment is not the store rule: every IDE read asks
+  `is_kazma_store` too, inside the workspace** (2026-11-26, the review of
+  that day's code-scanning triage). `resolve` asked the path policy only for
+  a path outside the workspace, and the LSP request read a path inside it
+  whole: on live the workspace is the install folder, and code completion
+  offered the words of `.env`. Code scanning had reported that read (#53);
+  it was dismissed because `resolve` "contains" it. `resolve` now refuses
+  Kazma's stores and secret files wherever they are; the IDE MCP server's
+  `read_file` / `search_code` and the TUI's file preview ask the same
+  predicate. A save, a patch or a delete resolves with `write=True`, so
+  Kazma's configuration (readable by every door) is refused before the
+  tool and its card run. **Git with no card** (the IDE's read-only git:
+  `/api/ide/git`, the chat command `/ide git`; the agent's `git_diff`):
+  `ide/git_policy.validate_read_paths` allows read verbs and flags only (no
+  `--no-index`), operands inside the workspace and asked `is_kazma_store`,
+  a network or device operand refused on its text before anything resolves
+  it, no reflog selector and no stash entry but the latest. A content read
+  (`diff`, `show`, `log`, `blame`, `stash`) then runs only when
+  `safety/git_kazma_files.read_refusal` lets it: git itself accepts the
+  workspace as a work tree (`rev-parse --is-inside-work-tree`, the read's
+  own argv and environment; `is_a_repository` is only the early, cheap
+  refusal), and the repository holds none of Kazma's files
+  (`store_registry.kazma_paths_among`:
+  the predicate's rules screened on the text, then the predicate). Git prints
+  a file it holds by forms that never name it, so naming cannot be the rule.
+  The refusal is a
+  catalog sentence in English and Arabic. The census counts as a read a
+  process an IDE module starts (called or handed to a thread) and a call of
+  a helper of the packages that reads a file itself (`read_exact` and its
+  kin). Paths read again later ask again: the checkpoint review
+  (`FileCheckpointStore.review`, `check_path_access` before each held path
+  is read; `not_shown` counts what it leaves out, and the page says so),
+  and the code index (`indexer._kazmas_own` before a file is read, not at
+  every stat: about a millisecond a file; every `ensure_index` drops what it
+  already held of a Kazma file, screened). A path
+  `resolve` answers outside the workspace is asked in the caller's mode, a
+  save's in write mode. Gate: `tests/test_ide_reads_refuse_kazma_files.py`
+  (a census of every file read in `kazma_core/ide/` and every module that
+  drives `get_ide_service()`, each declared with a probe that plants
+  Kazma's secret files in the workspace; every public IdeService method is
+  probed or declared with why it is no door; the control blinds the
+  predicate and every probe finds the secret).
 - **A relative path an agent tool is given means the active workspace**
   (`binding.resolve_tool_path`), the directory `shell_exec` runs in — never
   the server process's CWD. Every file tool, `check_path_access` and the

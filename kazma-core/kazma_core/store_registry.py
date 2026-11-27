@@ -51,6 +51,7 @@ import fnmatch
 import logging
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,6 +84,7 @@ __all__ = [
     "is_secret_file_name",
     "kazma_file_under",
     "kazma_files_in",
+    "kazma_paths_among",
     "readers_for_store",
     "space_rule",
     "store_name_for",
@@ -1811,6 +1813,51 @@ def is_kazma_store(path: str | Path, *, write: bool = False) -> bool:
         or bool(_DB_COPY_NAME.search(name))
         or _has_sqlite_header(resolved)
     )
+
+
+def kazma_paths_among(root: str | Path, rel_paths: Iterable[str]) -> list[str]:
+    """Which of *rel_paths* -- relative to *root*, as git lists a
+    repository's index or history -- name one of Kazma's own stores or
+    secret files (:func:`is_kazma_store`), sorted.
+
+    For listings of many thousand paths: the predicate resolves its path
+    (about a millisecond each), so every path is screened first by what can
+    make it Kazma's -- its name (a secret file's, a protected store's, a
+    database's or a copy's), its place under the data dir, or being the file
+    ``KAZMA_ENV_FILE`` names -- and only a path the screen keeps is asked.
+    The screen is the predicate's own rules read on the text, so it narrows
+    the work, not the answer.
+    """
+    base = Path(root)
+    try:
+        from kazma_core.paths import data_dir
+
+        data = os.path.normcase(str(data_dir().resolve()))
+    except (ImportError, OSError, RuntimeError):
+        data = ""
+    named = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
+    try:
+        env_file = os.path.normcase(str(Path(named).expanduser().resolve())) if named else ""
+    except (OSError, RuntimeError, ValueError):
+        env_file = ""
+    found: set[str] = set()
+    for rel in rel_paths:
+        if not rel:
+            continue
+        leaf = rel.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        name = _strip_sidecar(leaf)
+        full = os.path.normcase(os.path.normpath(os.path.join(str(base), rel)))
+        candidate = (
+            is_secret_file_name(leaf)
+            or name in _ALWAYS_PROTECTED
+            or name.endswith(_DB_SUFFIXES)
+            or bool(_DB_COPY_NAME.search(name))
+            or (bool(data) and (full == data or full.startswith(data + os.sep)))
+            or (bool(env_file) and full == env_file)
+        )
+        if candidate and is_kazma_store(base / rel):
+            found.add(rel)
+    return sorted(found)
 
 
 def _has_sqlite_header(path: Path) -> bool:

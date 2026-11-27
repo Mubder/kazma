@@ -178,6 +178,8 @@ class LinkRefused(ValueError):
         super().__init__(message)
         self.code = code
         self.status = status
+        #: Kazma's sentence, which the page shows (``errors.refusal_message``).
+        self.message = message
 
 
 @dataclass(frozen=True)
