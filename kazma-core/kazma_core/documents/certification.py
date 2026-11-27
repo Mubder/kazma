@@ -53,7 +53,10 @@ class _ProcessTreeSampler:
             self.metrics["resource_sampling_status"] = "unavailable"
             return
         root = psutil.Process()
-        seen: set[tuple[int, float]] = set()
+        # psutil's own identity of a process (pid and its start since boot on
+        # Linux): a pair with create_time() counted one worker twice when the
+        # boot time stepped (kazma_core.process_start).
+        seen: set[psutil.Process] = set()
 
         def sample() -> None:
             while not self.stop.is_set():
@@ -64,7 +67,7 @@ class _ProcessTreeSampler:
                     for child in children:
                         try:
                             worker_rss += child.memory_info().rss
-                            seen.add((child.pid, child.create_time()))
+                            seen.add(child)
                         except psutil.Error:
                             continue  # A worker can exit between enumeration and inspection.
                     self.metrics["tree_rss_sampled_peak_bytes"] = max(

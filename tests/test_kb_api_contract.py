@@ -104,6 +104,30 @@ def test_a_second_crawl_of_a_library_is_its_own_code(api, monkeypatch):
         running.finish("completed")
 
 
+def test_a_second_crawl_is_refused_after_the_clock_moved(api, monkeypatch):
+    """The same refusal once the wall clock stepped (prepush's Linux part,
+    2026-11-27). On Linux a reading of this process's start moves with the
+    boot time, which Docker Desktop's WSL2 VM stepped by a whole second about
+    every 30 s: the ingest read the running crawl's own owner as gone, took
+    the crawl over (200) and the crawl's finish was refused. Here every reading
+    after the crawl started is a second later, as /proc/stat said then."""
+    import kazma_core.security.ssrf as ssrf
+    import psutil
+    from kazma_core.web_acquire import crawl_jobs
+
+    monkeypatch.setattr(ssrf, "validate_url", lambda *a, **k: ())
+    running = crawl_jobs.start("docs", "https://docs.example.test/", {"mode": "local_only"})
+    real = psutil.Process.create_time
+    monkeypatch.setattr(psutil.Process, "create_time", lambda self: real(self) + 1.0)
+    try:
+        resp = api.client.post("/api/kb/ingest", json={"library_id": "docs", "mode": "site",
+                                                       "url": "https://docs.example.test/"})
+        assert resp.status_code == 409 and resp.json()["code"] == "library_busy"
+        assert crawl_jobs.inspect_jobs(running.job_id)["status"] == "running"
+    finally:
+        running.finish("completed")
+
+
 def _codes_answered(source: str) -> set[str]:
     """Every literal code the module passes to ``_fail``."""
     found = set()

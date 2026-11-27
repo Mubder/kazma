@@ -10,8 +10,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
-import psutil
 import sqlite3
 import threading
 import time
@@ -313,7 +311,10 @@ def _bounded_session_row(session):
 
 
 def _process_owner():
-    return [os.getpid(), psutil.Process().create_time()]
+    """This process as a session's owner: [pid, start(, stamp)]."""
+    from kazma_core import process_start
+
+    return process_start.own_identity()
 
 
 def _reconcile_sessions(connection):
@@ -804,7 +805,8 @@ def cancel_session(session_id: str) -> ResearchSession | None:
                 _cancel_on_its_loop(task)
             return final
         owner = sess.meta.get('process_owner')
-        if owner and owner[0] != os.getpid():
+        from kazma_core import process_start
+        if owner and not process_start.identity_is_this_process(owner):
             from kazma_core.web_acquire.crawl_jobs import _alive
             if _alive(owner):
                 raise ResearchSessionBusyError('This research session is owned by another live process; cancel it through that owner.')
@@ -844,8 +846,12 @@ async def start_deep_research(
     from kazma_core.workspace.binding import resolve_active_root
     root = await call(resolve_active_root)
     if resume_session_id is not None:
-        sess = await call(_claim_session, resume_session_id, _process_owner(), root,
-            on_cancel=lambda claimed: _complete_cancellation(claimed.id))
+        def claim() -> ResearchSession:
+            # The owner is read in the thread too: it reads /proc (Linux)
+            # or psutil (macOS), never on the loop (AGENTS §35).
+            return _claim_session(resume_session_id, _process_owner(), root)
+
+        sess = await call(claim, on_cancel=lambda claimed: _complete_cancellation(claimed.id))
         export_docx = bool(sess.meta.get('export_docx'))
     else:
         sess = await call(create_session, topic, depth=depth, max_sources=max_sources,
