@@ -1383,3 +1383,44 @@ def test_a_kept_older_row_and_the_journal_join_their_parts(mem):
     mem.db.commit()
     existing, _tombstones = topic_rollups._known_with_the_ledger(mem.db, "default")
     assert existing[rid][1] == journaled | {"an-older-week"}
+
+
+# ── The backfill runs from the sweep, and never stops it (final review) ──
+
+def test_the_sweep_backfills_older_entries_once(mem, monkeypatch):
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    calls = []
+    monkeypatch.setattr(topic_rollups, "_BACKFILLED", [False])
+    monkeypatch.setattr(forget_journal, "backfill_project_parts", lambda conn: calls.append(conn) or 0)
+    _training(mem)
+    _plan(mem)
+    _plan(mem)
+    assert len(calls) == 1
+
+
+def test_a_failed_backfill_does_not_stop_the_planning(mem, monkeypatch, caplog):
+    import logging
+
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    def broken(conn):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(topic_rollups, "_BACKFILLED", [False])
+    monkeypatch.setattr(forget_journal, "backfill_project_parts", broken)
+    _training(mem)
+    with caplog.at_level(logging.WARNING, logger="kazma_core.memory.topic_rollups"):
+        out = _plan(mem)
+    assert (out["months"], out["projects"]) == (1, 1)
+    assert "could not be filled" in caplog.text and topic_rollups._BACKFILLED == [False]  # tried again
+
+
+def test_a_malformed_project_parts_entry_is_skipped(mem):
+    import json as _json
+
+    from kazma_core.memory import forget_journal
+
+    forget_journal.append("mentions", tenant_id="default",
+                          detail=_json.dumps({"summaries": ["x", "y"], "project_parts": {"x": 5, "y": ["w1"]}}))
+    assert forget_journal.forgotten_rollup_parts("default") == {"y": {"w1"}}

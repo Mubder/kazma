@@ -231,7 +231,10 @@ def _project_parts_in(e: Entry) -> dict[str, list[str]]:
         parts = detail.get("parts") if detail.get("level") == "project" else None
         return {e.summary_id: [str(p) for p in parts]} if parts and e.summary_id else {}
     found = detail.get("project_parts") or {}
-    return {str(k): [str(p) for p in v] for k, v in found.items() if v} if isinstance(found, dict) else {}
+    if not isinstance(found, dict):
+        return {}
+    # a malformed project's parts are skipped, never blocking the rest
+    return {str(k): [str(p) for p in v] for k, v in found.items() if isinstance(v, list) and v}
 
 
 def forgotten_rollup_parts(tenant_id: str) -> dict[str, set[str]]:
@@ -278,7 +281,8 @@ def backfill_project_parts(memory_conn: sqlite3.Connection) -> int:
             if e.kind == "summary":
                 detail.update(level="project", parts=found[e.summary_id])
             else:
-                detail["project_parts"] = {**(detail.get("project_parts") or {}), **found}
+                held = detail.get("project_parts")
+                detail["project_parts"] = {**(held if isinstance(held, dict) else {}), **found}
             with conn:
                 conn.execute("UPDATE forget_journal SET detail = ? WHERE seq = ?", (json.dumps(detail), e.seq))
             filled += 1
