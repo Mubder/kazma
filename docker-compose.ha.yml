@@ -20,7 +20,7 @@ services:
   db:
     # Pinned by version and digest (tests/test_container_services.py);
     # Dependabot's docker-compose updates propose new ones.
-    image: postgres:18.7-alpine@sha256:75dcac3dfb1cd01ca3536910bbc84128759362f8b118bf8c55b38a94f68f3b73
+    image: postgres:19.0-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f
     container_name: kazma-db
     environment:
       POSTGRES_USER: kazma
@@ -91,7 +91,7 @@ services:
   nginx:
     # The stable line (an even minor: 1.30; an odd one is nginx's development
     # line, which Dependabot proposes too), pinned by version and digest.
-    image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+    image: nginx:1.31.0-alpine@sha256:2f07d83bf561b506400dc183b1b2003803e39efbd22451f848adaba14d28c7c7
     container_name: kazma-nginx
     ports:
       - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:80"
