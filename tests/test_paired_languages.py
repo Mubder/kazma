@@ -441,6 +441,21 @@ def _to_come(case: tuple[str, str]) -> bool:
     return says_to_come(case[0], case[1], "2026-05-31")
 
 
+def _asks_what_was_said_then(text: str) -> tuple[bool, float]:
+    """Whether *text* asks only what was said in a period, and that period's
+    length in days, asked on 19 August 2026 (``question_shape``,
+    ``time_words``)."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.question_shape import asks_what_was_said
+    from kazma_core.memory.time_words import read_time
+
+    ask = read_time(text, now=datetime(2026, 8, 19, 12, tzinfo=UTC).timestamp(), zone=UTC)
+    if ask is None or ask.start is None:
+        return False, 0.0
+    return asks_what_was_said(text, ask.words), round((ask.end - ask.start) / 86400, 1)
+
+
 def _events_lost(lang: int) -> int:
     """Of the openings twinned in ``fixtures/memory_events/openings.json`` and
     the events told after each, how many one language loses."""
@@ -635,6 +650,14 @@ PAIRS: list[Pair] = [
          ("I'm going to the concert tomorrow", "2026-06-01"), ("رايح الحفلة بكرة", "2026-06-01"), _to_come, True),
     Pair("a_day_nearer_behind", (M + "memory/time_words.py",),
          ("I finished it on 10 December", "2026-12-10"), ("خلصته يوم 10 ديسمبر", "2026-12-10"), _to_come, False),
+    # the step 5 follow-up's L3: "at the start of this month" asks what was
+    # said in Arabic as in English
+    Pair("said_at_the_start_of_this_month", (M + "memory/time_words.py", M + "memory/question_shape.py"),
+         "What did we talk about at the start of this month?", "شنو تكلمنا عنه في بداية هذا الشهر؟",
+         _asks_what_was_said_then, (True, 18.5)),
+    Pair("said_early_this_month", (M + "memory/time_words.py", M + "memory/question_shape.py"),
+         "What did we talk about at the start of this month?", "شنو تكلمنا عنه أول هذا الشهر؟",
+         _asks_what_was_said_then, (True, 18.5)),
     Pair("a_weekday_gone_by", (M + "memory/time_words.py",),
          ("I sold it last Friday", "2026-06-05"), ("بعته الجمعة اللي فاتت", "2026-06-05"), _to_come, False),
     Pair("a_correction_denies", (M + "memory/event_text.py",),

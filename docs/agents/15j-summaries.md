@@ -124,8 +124,13 @@ queued by the maintenance sweep with at most two weeks in flight.
   تكلمنا عنه الأسبوع الماضي؟") is answered by its weekly summaries by share,
   not its whole month (O2), every topic of the week up to the listing's
   limit, shortened as a listing is (the third follow-up review's M3: two of
-  four, by row order); when that level holds nothing yet the other answers
-  ("this month" from the 20th, before its roll-up is written). A roll-up the model skips is retired with its
+  four, by row order), ranked by `_said_rank` (the most of the period, the
+  newest stretch, the most turns, the id), the last one saying how many more
+  are not shown (the fourth's L1); when that level holds nothing yet the
+  other answers ("this month" from the 20th, before its roll-up is
+  written). Arabic "في بداية هذا الشهر" and "أول هذا الشهر" are read as
+  English "at the start of this month" is, their words the time's
+  (`time_words._HISTORY_AR`; a paired test). A roll-up the model skips is retired with its
   parts and planned again only when they change: a project was left out of
   `_known_projects` and planned under the same id on every other sweep,
   about 48 model calls a day each (O1; gate: the sweep settles after a skip,
@@ -134,12 +139,20 @@ queued by the maintenance sweep with at most two weeks in flight.
   too few live parts (a week written again after a version bump) is planned
   again when they are live, month or project (M2). Which project a group
   continues is never row order (`_project_of`: active, then waiting, then
-  retired; then the most weeks shared; then the id), and a group that shares
-  a week with a forgotten project, in the store or the forget ledger
-  (`forget_journal.forgotten_summaries`), is never written again (M1: after
-  ANALYZE a retired project came first and took a forgotten one's weeks;
-  gate: both row orders, with and without ANALYZE, the first-match lookup as
-  control).
+  retired; then the most weeks shared; then the id). A group that IS a
+  forgotten project, by the same share rule (`_forgotten_project_of`), in
+  the store or the forget ledger (`forget_journal.forgotten_summaries`: a
+  `summary` forget and a `mentions` forget's summaries, by id alone), is not
+  planned again under any id, and a forgotten roll-up's own id never is; each
+  such skip is logged and counted (`plan_rollups`' `held_by_forget`). Sharing
+  a week is not enough: training that turned into an injury, the training
+  forgotten, still lets the injury be a project (the fourth follow-up's N1).
+  The writer asks again (`_forgotten_now`): a roll-up forgotten after it was
+  planned, or the same project as one forgotten since, is retired with no
+  model call. Gates: both row orders with and without ANALYZE (M1), the
+  injury written (control: the any-week rule), the write-time check (control:
+  a project nothing forgot is written), the ledger's month by `summary` from
+  another space and by `mentions`.
   Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
   from it: through a turn and through a weekly summary; a roll-up that names
   no source, and a store without the re-read, as controls),

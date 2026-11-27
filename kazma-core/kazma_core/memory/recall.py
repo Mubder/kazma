@@ -3504,7 +3504,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         return []
     try:
         rows = conn.execute(
-            "SELECT id, period_key, period_start, period_end, level, title, summary_text, embedding, "
+            "SELECT id, period_key, period_start, period_end, level, title, summary_text, turn_count, embedding, "
             "embedding_model_version "
             "FROM memory_summaries WHERE tenant_id = ? AND status = 'active'",
             (space_named_or_bound(tenant_id),),
@@ -3644,16 +3644,21 @@ def _months_said_in(
     if trace is not None:
         trace.append({"kind": "summary", "cut": 0.0, "evidence": dict(share)})
     by_id = {str(row["id"]): row for row in rows}
-    ordered = sorted(share, key=lambda rid: (-share[rid], span[rid][0], rid))
+    ordered = sorted(share, key=_said_rank(by_id, share, span))
     # A week's topics are all shown, up to the listing's limit and as short
-    # as a listing's (the follow-up's M3: two of four, by row order).
+    # as a listing's (the follow-up's M3: two of four, by row order); how
+    # many more there are is said (L1 of the fourth follow-up review).
     limit = _LIST_SUMMARY_LIMIT if by == "week" else _SUMMARY_LIMIT
     shown = ordered[:limit]
+    left_out = len(ordered) - len(shown)
 
     def display(rid: str) -> str:
         text = _summary_display(by_id[rid])
         if len(shown) > _SUMMARY_LIMIT and len(text) > _LIST_SUMMARY_SHOW_CHARS:
-            return text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
+            text = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
+        if left_out and rid == shown[-1]:
+            text += (f" [{left_out} more {'weekly summaries' if by == 'week' else 'monthly summaries'} of this "
+                     "period are not shown: memory_list lists them]")
         return text
 
     return [
@@ -3673,6 +3678,17 @@ def _months_said_in(
         )
         for rid in shown
     ]
+
+
+def _said_rank(by_id: dict[str, Any], share: dict[str, float], span: dict[str, tuple[float, float]]) -> Any:
+    """How a said period's summaries are ranked: the most of the period
+    first; then the newest stretch; then the most turns (a week's topics are
+    written largest first); then the id. Never the order rows come back in."""
+    def turns(rid: str) -> int:
+        row = by_id[rid]
+        return int((row["turn_count"] if "turn_count" in row.keys() else 0) or 0)
+
+    return lambda rid: (-share[rid], -span[rid][0], -turns(rid), rid)
 
 
 def _summaries_in_time(hits: list[RecallHit], ask: Any, span: dict[str, tuple[float, float]]) -> list[RecallHit]:

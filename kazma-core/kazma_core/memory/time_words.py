@@ -151,7 +151,10 @@ _ROUTINE_AFTER_BEFORE = re.compile(
 )
 _HISTORY_AR = re.compile(
     r"(?:^|\s)(?:في البدايه|بالبدايه|في الاول|بالاول|اول شي|سابقا|سابق|من قبل|القديم|القديمه|"
-    r"قبل ما|قبل لا|قبل التغيير|قبل التاجيل)(?=\s|$|[؟?.,،])"
+    r"قبل ما|قبل لا|قبل التغيير|قبل التاجيل|"
+    # "at the start of" a period, as English "at the start" is: "في بداية
+    # هذا الشهر", "أول هذا الشهر" (the step 5 follow-up's L3)
+    r"في بدايه|ببدايه|بدايه|في اول|باول|اول(?= هذا| هال))(?=\s|$|[؟?.,،])"
 )
 _AR_AGO = re.compile(
     r"(?:^|\s)قبل\s+(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|اسبوع|اسابيع|شهر|شهور|اشهر|"
@@ -338,6 +341,10 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     history = bool(_HISTORY_EN.search(text) or _HISTORY_AR.search(folded))
     for m in _HISTORY_EN.finditer(text):
         spans.append(m.group(0))
+    # The Arabic words too: they are the time asked about, not what a memory
+    # says (English's were; "في بداية هذا الشهر" kept "بداية" as a topic).
+    for m in _HISTORY_AR.finditer(folded):
+        spans.append(m.group(0).strip())
     before = _BEFORE_EN.search(text)
     if before and not _ROUTINE_AFTER_BEFORE.search(text):
         history = True

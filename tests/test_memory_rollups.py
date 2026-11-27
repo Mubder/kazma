@@ -164,14 +164,14 @@ def test_a_month_and_a_project_are_planned_with_their_sources(mem):
     turns = _training(mem)
     _weekly(mem, "other", 1, title="Laptop battery", text="A ThinkPad battery fix.", direction=7)
     out = _plan(mem)
-    assert out == {"months": 1, "projects": 1}
+    assert out == {"months": 1, "projects": 1, "held_by_forget": 0}
     [month] = _rollups(mem, "month")
     [project] = _rollups(mem, "project")
     assert month["status"] == project["status"] == "rebuild" and month["period_key"] == "2026-06"
     assert _parts(mem, month["id"]) == ["other", "tr0", "tr1", "tr2", "tr3"]
     assert _parts(mem, project["id"]) == ["tr0", "tr1", "tr2", "tr3"]  # the battery week is another topic
     assert _sources(mem, project["id"]) == {e for eids in turns.values() for e in eids}
-    assert _plan(mem) == {"months": 0, "projects": 0}  # nothing changed: nothing planned again
+    assert _plan(mem) == {"months": 0, "projects": 0, "held_by_forget": 0}  # nothing changed: nothing planned again
 
 
 def test_not_before_the_month_has_ended_and_settled(mem):
@@ -837,7 +837,7 @@ def test_control_the_first_match_by_row_order_takes_the_wrong_project(mem, monke
                      * min(len(held), len(parts))), None)
 
     monkeypatch.setattr(topic_rollups, "_project_of", first_match)
-    monkeypatch.setattr(topic_rollups, "_overlaps_a_tombstone", lambda existing, tombstones, parts: False)
+    monkeypatch.setattr(topic_rollups, "_forgotten_project_of", lambda existing, tombstones, parts: None)
     _six_weeks_and_two_projects(mem, "forgotten", x_first=False)
     _plan(mem)
     assert _project_state(mem)["sum_a_R"] == ("rebuild", ["w0", "w1", "w2", "w3", "w4", "w5"])
@@ -975,3 +975,131 @@ def test_control_recall_without_the_project_s_weeks_shows_it_in_june(monkeypatch
                  "summary_text = 'The training runs, التدريب والجري.' WHERE id = 'proj'")
     now = _dt.datetime(2026, 8, 15, 12, tzinfo=_dt.UTC).timestamp()
     assert "proj" in {h.id for h in _said(monkeypatch, "What did we say about the training in June?", now, conn)}
+
+
+# ── A forgotten project holds back only itself (the follow-up's N1) ──────
+
+def _training_then_injury(mem) -> None:
+    """Training weeks w0-w4 (one topic) and the injury it became, w5-w14
+    (another); project X, of the training and the week it turned (w0-w5),
+    forgotten."""
+    for week in range(5):
+        _weekly(mem, f"w{week}", week, title=f"Training week {week}", text="Training runs.", direction=0)
+    for week in range(5, 15):
+        _weekly(mem, f"w{week}", week, title=f"Knee injury week {week}", text="The knee injury.", direction=5)
+    mem.db.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES ('sum_X', 'default', 'project:X', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')")
+    mem.db.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('sum_X', ?)",
+                       [(f"w{w}",) for w in range(6)])
+    mem.db.commit()
+
+
+def test_a_project_sharing_one_week_with_a_forgotten_one_is_written(mem, caplog):
+    import logging
+
+    _training_then_injury(mem)
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.topic_rollups"):
+        out = _plan(mem, now=_dt.datetime(2026, 12, 1).timestamp())
+    projects = {r["id"]: (r["status"], _parts(mem, r["id"])) for r in _rollups(mem, "project")}
+    injury = [rid for rid, (status, parts) in projects.items() if status == "rebuild"]
+    assert len(injury) == 1 and set(projects[injury[0]][1]) == {f"w{w}" for w in range(5, 15)}
+    assert projects["sum_X"][0] == "forgotten" and out["held_by_forget"] == 1  # the training is X: held
+    assert "roll-up sum_X was forgotten" in caplog.text
+
+
+def test_control_the_any_week_rule_never_writes_the_injury(mem, monkeypatch):
+    from kazma_core.memory import topic_rollups
+
+    monkeypatch.setattr(topic_rollups, "_forgotten_project_of", lambda existing, tombstones, parts: next(
+        (rid for rid in tombstones if existing.get(rid, ("", set(), False))[1] & set(parts)), None))
+    _training_then_injury(mem)
+    assert _plan(mem, now=_dt.datetime(2026, 12, 1).timestamp())["projects"] == 0
+
+
+@pytest.mark.parametrize("how", ["its own id in the ledger", "the same project forgotten"])
+def test_a_project_forgotten_after_it_was_planned_is_not_written(mem, how):
+    from kazma_core.memory import forget_journal
+
+    _training(mem)
+    _plan(mem)
+    [project] = _rollups(mem, "project")
+    if how == "its own id in the ledger":
+        forget_journal.append("summary", tenant_id="default", summary_id=project["id"])
+    else:
+        mem.db.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES ('sum_old', 'default', 'project:old', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')")
+        mem.db.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES ('sum_old', ?)",
+                           [(p,) for p in _parts(mem, project["id"])])
+        mem.db.commit()
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and not chat.calls
+    assert _row(mem, project["id"])["status"] == "retired"
+
+
+def test_control_a_project_nothing_forgot_is_written(mem):
+    _training(mem)
+    _plan(mem)
+    [project] = _rollups(mem, "project")
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and len(chat.calls) == 1
+
+
+# ── The ledger's forgets reach the month too, "mentions" included (L2) ───
+
+@pytest.mark.parametrize("kind", ["summary", "mentions"])
+def test_a_month_the_ledger_holds_forgotten_is_not_planned(mem, kind):
+    import json as _json
+
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    if kind == "summary":
+        forget_journal.append("summary", tenant_id="another-space", summary_id=rid)
+    else:
+        forget_journal.append("mentions", tenant_id="default", detail=_json.dumps({"summaries": [rid]}))
+    out = _plan(mem)
+    assert out["months"] == 0 and out["held_by_forget"] >= 1
+    # the ledger holds it by id alone (a "summary" entry of another space
+    # too); with nothing in it June is planned (the first test of this file)
+    assert topic_rollups._ledger_forgotten() == {rid}
+
+
+# ── More topics than shown: the largest, and how many more (L1) ──────────
+
+def _week_of_eight_topics() -> sqlite3.Connection:
+    """W31 with eight topics; the id order is the reverse of their size."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    start = _dt.datetime(2026, 7, 27, tzinfo=ZoneInfo("Asia/Kuwait")).timestamp()
+    for n, letter in enumerate("abcdefgh"):
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, turn_count, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', '2026-W31', ?, ?, 'week', ?, 'Talked.', 'active', ?, 0, 0, '{}')",
+            (f"t_{letter}", start, start + 7 * 86400, f"Topic {letter}", n + 1))
+    return conn
+
+
+@pytest.mark.parametrize("question", _LAST_WEEK)
+def test_a_said_week_shows_its_largest_topics_and_says_how_many_more(monkeypatch, question):
+    hits = _said(monkeypatch, question, _MONDAY_3_AUG, _week_of_eight_topics())
+    assert [h.id for h in hits] == ["t_h", "t_g", "t_f", "t_e", "t_d", "t_c"]
+    assert "2 more weekly summaries of this period are not shown" in hits[-1].metadata["display"]
+
+
+def test_control_ranked_by_id_the_week_shows_its_smallest(monkeypatch):
+    from kazma_core.memory import recall
+
+    monkeypatch.setattr(recall, "_said_rank", lambda by_id, share, span: lambda rid: (-share[rid], rid))
+    hits = _said(monkeypatch, _LAST_WEEK[0], _MONDAY_3_AUG, _week_of_eight_topics())
+    assert [h.id for h in hits] == ["t_a", "t_b", "t_c", "t_d", "t_e", "t_f"]

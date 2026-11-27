@@ -13,7 +13,11 @@
   talk about in June?" is answered by June's summary alone; "What did we
   talk about last week?" by every topic of that week, not the whole month's.
 - A topic you told Kazma to forget is never summarised across weeks again,
-  however the database orders its rows.
+  however the database orders its rows; a different topic that shares a week
+  with it still is. When a week had more topics than are shown, the largest
+  are shown and Kazma says how many more there are. "شنو تكلمنا عنه في بداية
+  هذا الشهر؟" is answered as "What did we talk about at the start of this
+  month?" is.
 - A topic Kazma decides not to summarise across weeks is no longer offered
   to the model again on every sweep (about 48 model calls a day for each).
 - Kazma's LongMemEval benchmark can now measure memory as Kazma writes it:

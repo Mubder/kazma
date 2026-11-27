@@ -186,11 +186,24 @@ def _entries(*, kinds: tuple[str, ...] = KINDS, since: float = 0.0) -> list[Entr
                   str(r[7]), str(r[8]), str(r[9] or "")) for r in rows]
 
 
-def forgotten_summaries(tenant_id: str) -> set[str]:
-    """The summaries (weekly or roll-up) forgotten in *tenant_id*, by id, as
-    the ledger holds them: a planner asks it before writing one again, so a
-    restored database that has lost the tombstone does not bring it back."""
-    return {e.summary_id for e in _entries(kinds=("summary",)) if e.tenant_id == tenant_id and e.summary_id}
+def forgotten_summaries() -> set[str]:
+    """Every summary (weekly or roll-up) the ledger holds forgotten, by id: a
+    forget of one (``summary``) and those a forget of everything that
+    mentions a name took with it (``mentions``, its ``summaries``). By id
+    alone: ids are salted with their space, and a forget journals the
+    caller's space, not the row's (the step 5 follow-up's L2). A planner asks
+    it before writing one again, so a restored database that lost the
+    tombstone does not bring it back."""
+    out: set[str] = set()
+    for e in _entries(kinds=("summary", "mentions")):
+        if e.kind == "summary" and e.summary_id:
+            out.add(e.summary_id)
+        elif e.kind == "mentions" and e.detail:
+            try:
+                out.update(str(s) for s in (json.loads(e.detail).get("summaries") or []))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning("[forget] a mentions entry's summaries could not be read (seq %s)", e.seq)
+    return out
 
 
 def journaled_seqs() -> list[int]:
