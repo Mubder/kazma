@@ -243,8 +243,9 @@ def _ar_month_pattern() -> re.Pattern[str]:
     if not _AR_MONTH_CACHE:
         _AR_MONTH_CACHE.update(_ar_months())
     names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
-    # "بداية يناير" reads January, as "at the start of January" does
-    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر|بدايه)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
+    # "بداية يناير", "ببداية يناير", "أول يناير" read January, as "at the
+    # start of January" does (the seventh follow-up review's L-b)
+    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر|بدايه|ببدايه|اول)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
                       rf"(?=\s|$|[؟?.,،])")
 
 

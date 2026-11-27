@@ -388,6 +388,27 @@ def _ledger_forgotten(tenant_id: str) -> set[str]:
     return forgotten_summaries(tenant_id)
 
 
+def project_parts_of(conn: sqlite3.Connection, ids: Iterable[str], tenant_id: str) -> dict[str, list[str]]:
+    """The parts of each PROJECT roll-up of *tenant_id* among *ids* (a
+    month's are left out: a month's tombstone stays a month's; the seventh
+    follow-up review's M-a), for a forget's journal entry."""
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    wanted = [str(i) for i in ids]
+    if not wanted:
+        return {}
+    only = narrowed_to(tenant_id)
+    projects = [str(r[0]) for r in conn.execute(
+        "SELECT id FROM memory_summaries WHERE level = 'project' AND (? IS NULL OR tenant_id = ?) "
+        f"AND id IN ({','.join('?' for _ in wanted)})", (only, only, *wanted))]
+    return {rid: parts for rid in projects if (parts := _parts_of(conn, rid))}
+
+
+#: Whether this process has filled older forget entries with their projects'
+#: parts (``forget_journal.backfill_project_parts``, once a process).
+_BACKFILLED: list[bool] = [False]
+
+
 def _known_with_the_ledger(conn: sqlite3.Connection, tenant_id: str) -> tuple[
         dict[str, tuple[str, set[str], bool]], set[str]]:
     """The known projects and the tombstones, with what the forget ledger
@@ -399,8 +420,10 @@ def _known_with_the_ledger(conn: sqlite3.Connection, tenant_id: str) -> tuple[
     existing = _known_projects(conn, tenant_id)
     ledger = _ledger_forgotten(tenant_id)
     for rid, parts in forgotten_rollup_parts(tenant_id).items():
-        if rid not in existing or not existing[rid][1]:
-            existing[rid] = ("forgotten", parts, False)
+        # an older row a restore kept, with other parts: both are the
+        # project's (the seventh review's L-c)
+        known = existing.get(rid, ("forgotten", set(), False))
+        existing[rid] = ("forgotten", set(known[1]) | set(parts), known[2])
     tombstones = {rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger
     existing = {rid: (("forgotten", *known[1:]) if rid in tombstones else known) for rid, known in existing.items()}
     return existing, tombstones
@@ -516,6 +539,11 @@ def plan_rollups(conn: sqlite3.Connection, *, now: float | None = None) -> dict[
     queue's ``topic_summary_rebuild`` task writes them. Cheap when nothing is
     due; at most :data:`_PLANNED_PER_PASS` roll-ups a pass."""
     now = time.time() if now is None else float(now)
+    if not _BACKFILLED[0]:
+        from kazma_core.memory.forget_journal import backfill_project_parts
+
+        backfill_project_parts(conn)
+        _BACKFILLED[0] = True
     out = {"months": 0, "projects": 0, "held_by_forget": 0}
     held = [0]
     budget = [_PLANNED_PER_PASS]

@@ -1521,6 +1521,11 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     conn = _open()
     try:
         found = _mentions_found(conn, needle, tenant=caller)
+        from kazma_core.memory.topic_rollups import project_parts_of
+
+        # the forgotten projects' parts, so a restore that loses their rows
+        # still knows them (the seventh follow-up review's M-b)
+        project_parts = project_parts_of(conn, found.get("summaries") or [], caller)
     finally:
         conn.close()
     found["queue"] = _queued_mentions(needle, tenant=caller)
@@ -1535,7 +1540,8 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
             out = {"ok": True, "lessons_removed": lessons}
         out["about_me_holds_it"] = about_me
         return out
-    seq = forget_journal.append("mentions", tenant_id=caller, detail=json.dumps(_journal_detail(found, caller)))
+    seq = forget_journal.append("mentions", tenant_id=caller,
+                                detail=json.dumps({**_journal_detail(found, caller), "project_parts": project_parts}))
     memory_results = [forget_episode(eid, tenant_id=caller, by="user") for eid in found["episodes"]]
     conn = _open()
     try:

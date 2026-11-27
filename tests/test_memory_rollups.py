@@ -1275,3 +1275,111 @@ def test_a_group_on_a_forgotten_id_is_renumbered_only_when_its_parts_are_known(m
     out = _plan(mem)
     assert out["projects"] == (1 if parts_known else 0)
     assert taken not in {r["id"] for r in _rollups(mem, "project")}
+
+
+# ── A month's forget holds back no project (the seventh review's M-a) ────
+
+def test_forgetting_a_month_leaves_the_projects_over_its_weeks_written(mem):
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    [project] = _rollups(mem, "project")
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and len(chat.calls) == 1
+    assert _row(mem, project["id"])["status"] == "active"
+
+
+def test_control_a_month_journaled_as_a_project_retires_the_project(mem, monkeypatch):
+    """The negative control: da56cce39 journaled a month's parts as a
+    project's, and the project over its weeks was retired."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    [project] = _rollups(mem, "project")
+    month_parts = set(_parts(mem, month["id"]))
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {month["id"]: month_parts})
+    chat = _Chat()
+    assert _write(mem, project["id"], chat) and not chat.calls
+    assert _row(mem, project["id"])["status"] == "retired"
+
+
+# ── A project's parts are journaled, pinned (L-a), by "mentions" too (M-b) ─
+
+def test_a_project_s_forget_journals_its_parts(mem):
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_a_restored_project_is_held_when_an_earlier_week_sorts_first(mem):
+    """The restore case where the group's first id changes, so only the
+    journaled parts can hold it (L-a: without them it was planned)."""
+    _forgotten_then_restored(mem)
+    _weekly(mem, "aa_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 0
+
+
+def test_control_without_the_journaled_parts_the_earlier_week_brings_it_back(mem, monkeypatch):
+    from kazma_core.memory import forget_journal
+
+    _forgotten_then_restored(mem)
+    monkeypatch.setattr(forget_journal, "forgotten_rollup_parts", lambda tenant_id: {})
+    _weekly(mem, "aa_early", -1, title="Half marathon training: the plan", text="The plan.", direction=0)
+    assert _plan(mem)["projects"] == 1
+
+
+def test_forgetting_what_mentions_a_name_journals_the_project_s_parts(mem):
+    from kazma_core.memory import forget, forget_journal
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    mem.db.execute("UPDATE memory_summaries SET title = 'Zanzibar marathon block' WHERE id = ?", (rid,))
+    mem.db.commit()
+    assert forget.forget_mentions("Zanzibar", tenant_id="default")["ok"]
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_an_older_entry_is_filled_with_its_project_s_parts_once(mem, caplog):
+    """The backfill (M-b): an entry journaled before parts were (by id only)
+    takes them from the row while it is there; then a restore that loses the
+    row still holds the project; a second pass fills nothing."""
+    import logging
+
+    from kazma_core.memory import forget_journal
+
+    rid = _written_project(mem)
+    parts = set(_parts(mem, rid))
+    forget_journal.append("summary", tenant_id="default", summary_id=rid)  # the old shape: no parts
+    assert forget_journal.forgotten_rollup_parts("default") == {}
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.forget_journal"):
+        assert forget_journal.backfill_project_parts(mem.db) == 1
+    assert "1 older forget entries now hold their projects' parts" in caplog.text
+    assert forget_journal.backfill_project_parts(mem.db) == 0
+    assert forget_journal.forgotten_rollup_parts("default") == {rid: parts}
+
+
+def test_a_kept_older_row_and_the_journal_join_their_parts(mem):
+    """L-c: a restore kept an older row with other parts; the journal's and
+    the row's together are the project."""
+    from kazma_core.memory import topic_rollups
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    rid = _written_project(mem)
+    journaled = set(_parts(mem, rid))
+    assert forget_summary(rid, tenant_id="default", conn=mem.db)["ok"]
+    mem.db.execute("DELETE FROM memory_summary_parts WHERE rollup_id = ?", (rid,))
+    mem.db.execute("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, 'an-older-week')", (rid,))
+    mem.db.commit()
+    existing, _tombstones = topic_rollups._known_with_the_ledger(mem.db, "default")
+    assert existing[rid][1] == journaled | {"an-older-week"}

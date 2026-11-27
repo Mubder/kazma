@@ -149,10 +149,13 @@ queued by the maintenance sweep with at most two weeks in flight.
   tenants `tenant_view.ledger_reach` names, never by id alone: another
   space naming the owner's id held its month back, the fifth follow-up's N2;
   a source gate finds a read with no tenant), is not planned again. A
-  roll-up's forget entry journals its parts (`forget_summary`,
-  `forget_journal.forgotten_rollup_parts`), so after a memory restore that
-  lost its row the project is still known by them (the sixth follow-up's
-  M1: renumbered past its id, the forgotten project was written again). A new
+  project's forget entry journals its parts, a `summary` forget's and a
+  forget by text's (`forget_journal.forgotten_rollup_parts`; older entries
+  filled once a process by `backfill_project_parts`), so after a memory
+  restore that lost its row the project is still known by them, joined with
+  an older row's own (the sixth follow-up's M1; the seventh's M-b, L-c). A
+  month's parts are never journaled: its tombstone stays a month's, and
+  forgetting June holds back no project over its weeks (the seventh's M-a). A new
   group whose id is a project's with known parts gets another id; one whose
   id is a tombstone with no parts known is held, since it may be that very
   project. Each skip is counted (`plan_rollups`' `held_by_forget`) and said

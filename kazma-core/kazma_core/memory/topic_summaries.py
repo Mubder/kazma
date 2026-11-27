@@ -1135,10 +1135,11 @@ def forget_summary(
         # Journaled once the summary is the caller's, before it changes; a
         # roll-up with its parts, so a restore that loses its row still
         # knows the project it was (the sixth follow-up review's M1).
-        parts = [str(r[0]) for r in conn.execute(
-            "SELECT part_id FROM memory_summary_parts WHERE rollup_id = ? ORDER BY part_id", (summary_id,))]
+        from kazma_core.memory.topic_rollups import project_parts_of
+
+        parts = project_parts_of(conn, [summary_id], caller).get(summary_id)  # a project's only (M-a)
         seq = (forget_journal.append("summary", tenant_id=caller, summary_id=summary_id,
-                                     detail=json.dumps({"parts": parts}) if parts else "")
+                                     detail=json.dumps({"level": "project", "parts": parts}) if parts else "")
                if journal else None)
         if row["status"] == "forgotten":
             forget_journal.mark_applied(conn, seq)
