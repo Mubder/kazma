@@ -3658,7 +3658,7 @@ def _months_said_in(
             text = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
         if left_out and rid == shown[-1]:
             text += (f" [{left_out} more {'weekly summaries' if by == 'week' else 'monthly summaries'} of this "
-                     "period are not shown: memory_list lists them]")
+                     "period are not shown]")
         return text
 
     return [

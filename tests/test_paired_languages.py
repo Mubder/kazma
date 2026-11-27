@@ -456,6 +456,16 @@ def _asks_what_was_said_then(text: str) -> tuple[bool, float]:
     return asks_what_was_said(text, ask.words), round((ask.end - ask.start) / 86400, 1)
 
 
+def _reads_a_time(text: str) -> bool:
+    """Whether ``time_words`` reads any time (a period, or what was true
+    before) in *text*."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.time_words import read_time
+
+    return read_time(text, now=datetime(2026, 8, 19, 12, tzinfo=UTC).timestamp(), zone=UTC) is not None
+
+
 def _events_lost(lang: int) -> int:
     """Of the openings twinned in ``fixtures/memory_events/openings.json`` and
     the events told after each, how many one language loses."""
@@ -658,6 +668,12 @@ PAIRS: list[Pair] = [
     Pair("said_early_this_month", (M + "memory/time_words.py", M + "memory/question_shape.py"),
          "What did we talk about at the start of this month?", "شنو تكلمنا عنه أول هذا الشهر؟",
          _asks_what_was_said_then, (True, 18.5)),
+    # the fifth follow-up review's L-a: a bare "start" or "first" names no
+    # time in either language
+    Pair("the_start_of_a_story_is_no_time", (M + "memory/time_words.py",),
+         "What is the start of the story?", "شنو بداية القصة؟", _reads_a_time, False),
+    Pair("first_this_thing_is_no_time", (M + "memory/time_words.py",),
+         "Where do I live, first this thing?", "وين أسكن، أول هذا الشي؟", _reads_a_time, False),
     Pair("a_weekday_gone_by", (M + "memory/time_words.py",),
          ("I sold it last Friday", "2026-06-05"), ("بعته الجمعة اللي فاتت", "2026-06-05"), _to_come, False),
     Pair("a_correction_denies", (M + "memory/event_text.py",),

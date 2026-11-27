@@ -152,9 +152,13 @@ _ROUTINE_AFTER_BEFORE = re.compile(
 _HISTORY_AR = re.compile(
     r"(?:^|\s)(?:في البدايه|بالبدايه|في الاول|بالاول|اول شي|سابقا|سابق|من قبل|القديم|القديمه|"
     r"قبل ما|قبل لا|قبل التغيير|قبل التاجيل|"
-    # "at the start of" a period, as English "at the start" is: "في بداية
-    # هذا الشهر", "أول هذا الشهر" (the step 5 follow-up's L3)
-    r"في بدايه|ببدايه|بدايه|في اول|باول|اول(?= هذا| هال))(?=\s|$|[؟?.,،])"
+    # "at the start of" a period, as English "at the start of this month"
+    # is: "في بداية هذا الشهر", "أول هذا الشهر" (the step 5 follow-up's L3);
+    # only before a period's word made definite ("الشهر", "هالشهر", "هذا
+    # الشهر"), never a bare "بداية", "أول هذا الشي" (the fifth review's L-a)
+    # or "أول أسبوع" ("the first week": benchmark q1402)
+    r"(?:في بدايه|ببدايه|بدايه|في اول|باول|اول)"
+    r"(?= (?:هذا |هذي |هذه )?(?:ال|هال)(?:شهر|اسبوع|سنه|عام)(?:\s|$|[؟?.,،])))(?=\s|$|[؟?.,،])"
 )
 _AR_AGO = re.compile(
     r"(?:^|\s)قبل\s+(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|اسبوع|اسابيع|شهر|شهور|اشهر|"

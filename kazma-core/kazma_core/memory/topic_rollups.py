@@ -290,10 +290,18 @@ def _month_settled(conn: sqlite3.Connection, tenant_id: str, key: str, zone: Any
     return not any(_week_month(row, zone)[0] == key for row in waiting)
 
 
+#: The forgotten roll-ups already said held back, once each in a process:
+#: the sweep runs every 15 minutes (§58: no line said again each pass).
+_SAID_HELD: set[str] = set()
+
+
 def _held_by_forget(held: list[int], level: str, rid: str) -> None:
-    """Say and count a roll-up left unwritten because it was forgotten."""
+    """Count a roll-up left unwritten because it was forgotten; say it the
+    first time."""
     held[0] += 1
-    logger.info("[summaries] %s roll-up %s was forgotten: not written again", level, rid)
+    if rid not in _SAID_HELD:
+        _SAID_HELD.add(rid)
+        logger.info("[summaries] %s roll-up %s was forgotten: not written again", level, rid)
 
 
 def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
@@ -302,7 +310,7 @@ def _plan_months(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.
     from kazma_core.memory.topic_summaries import memory_zone
 
     zone = memory_zone()
-    forgotten = _ledger_forgotten()
+    forgotten = _ledger_forgotten(tenant_id)
     for row in weekly:
         key, start, end = _week_month(row, zone)
         months.setdefault(key, (start, end, []))[2].append(str(row["id"]))
@@ -372,12 +380,24 @@ def _skipped(row: Any) -> bool:
         return False
 
 
-def _ledger_forgotten() -> set[str]:
-    """The summaries the forget ledger holds forgotten, by id (§15 I: a
-    writer asks it first)."""
+def _ledger_forgotten(tenant_id: str) -> set[str]:
+    """The summaries the forget ledger holds forgotten for *tenant_id* (§15
+    I: a writer asks it first)."""
     from kazma_core.memory.forget_journal import forgotten_summaries
 
-    return forgotten_summaries()
+    return forgotten_summaries(tenant_id)
+
+
+def _new_project_id(tenant_id: str, parts: list[str], taken: set[str]) -> str:
+    """A new project's id: from its first week, else (that id a tombstone's
+    or another project's) from its first week and a number (the fifth
+    review's L-b: a live group was skipped for good under a forgotten id)."""
+    rid = _rollup_id(tenant_id, "project", parts[0])
+    n = 1
+    while rid in taken:
+        rid = _rollup_id(tenant_id, "project", f"{parts[0]}#{n}")
+        n += 1
+    return rid
 
 
 def _known_projects(conn: sqlite3.Connection, tenant_id: str) -> dict[str, tuple[str, set[str], bool]]:
@@ -432,7 +452,7 @@ def _project_of(existing: dict[str, tuple[str, set[str], bool]], parts: list[str
 def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite3.Row], now: float,
                    budget: list[int], held_back: list[int]) -> int:
     existing = _known_projects(conn, tenant_id)
-    ledger = _ledger_forgotten()
+    ledger = _ledger_forgotten(tenant_id)
     tombstones = {rid for rid, (status, _held, _skip) in existing.items() if status == "forgotten"} | ledger
     # One the ledger holds forgotten is a tombstone, whatever its row says.
     existing = {rid: (("forgotten", *known[1:]) if rid in tombstones else known) for rid, known in existing.items()}
@@ -457,10 +477,7 @@ def _plan_projects(conn: sqlite3.Connection, tenant_id: str, weekly: list[sqlite
                 continue
             rid = match
         else:
-            rid = _rollup_id(tenant_id, "project", parts[0])
-            if rid in tombstones:  # never a tombstone's id
-                _held_by_forget(held_back, "project", rid)
-                continue
+            rid = _new_project_id(tenant_id, parts, tombstones | set(existing))
         start = min(float(r["period_start"]) for r in group)
         end = max(float(r["period_end"]) for r in group)
         _mark_rebuild(conn, tenant_id=tenant_id, level="project", rollup_id=rid, key=f"project:{rid[4:16]}",
@@ -565,7 +582,7 @@ def _forgotten_now(conn: sqlite3.Connection, level: str, rollup_id: str, tenant_
     """Whether roll-up *rollup_id*, planned before a forget, is now forgotten
     or the same project as one forgotten since (the follow-up's N1: the
     writer had no check of its own)."""
-    ledger = _ledger_forgotten()
+    ledger = _ledger_forgotten(tenant_id)
     if rollup_id in ledger:
         return True
     if level != "project":

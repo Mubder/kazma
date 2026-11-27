@@ -142,9 +142,14 @@ queued by the maintenance sweep with at most two weeks in flight.
   retired; then the most weeks shared; then the id). A group that IS a
   forgotten project, by the same share rule (`_forgotten_project_of`), in
   the store or the forget ledger (`forget_journal.forgotten_summaries`: a
-  `summary` forget and a `mentions` forget's summaries, by id alone), is not
-  planned again under any id, and a forgotten roll-up's own id never is; each
-  such skip is logged and counted (`plan_rollups`' `held_by_forget`). Sharing
+  `summary` forget and a `mentions` forget's summaries, journaled by the
+  tenants `tenant_view.ledger_reach` names, never by id alone: another
+  space naming the owner's id held its month back, the fifth follow-up's N2;
+  a source gate finds a read with no tenant), is not planned again; a new
+  group never takes a tombstone's id, it gets another; each skip is counted
+  (`plan_rollups`' `held_by_forget`) and said once a process.
+  `forget_summary` journals only once the summary is the caller's: a refused
+  forget writes nothing to the ledger. Sharing
   a week is not enough: training that turned into an injury, the training
   forgotten, still lets the injury be a project (the fourth follow-up's N1).
   The writer asks again (`_forgotten_now`): a roll-up forgotten after it was

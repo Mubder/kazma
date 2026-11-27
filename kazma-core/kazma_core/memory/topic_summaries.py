@@ -1118,8 +1118,7 @@ def forget_summary(
     (``forget_journal``): a restored memory database forgets it again."""
     from kazma_core.memory import forget_journal
 
-    seq = (forget_journal.append("summary", tenant_id=space_named_or_bound(tenant_id), summary_id=summary_id)
-           if journal else None)
+    seq = None
     own = conn is None
     conn = conn or _open()
     if conn is None:
@@ -1132,7 +1131,9 @@ def forget_summary(
             "WHERE id = ? AND (? IS NULL OR tenant_id = ?)", (summary_id, only, only),
         ).fetchone()
         if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"]) != caller):
-            return {"ok": False, "error": "not_found"}
+            return {"ok": False, "error": "not_found"}  # refused: nothing journaled (the fifth review's N2)
+        # Journaled once the summary is the caller's, before it changes.
+        seq = forget_journal.append("summary", tenant_id=caller, summary_id=summary_id) if journal else None
         if row["status"] == "forgotten":
             forget_journal.mark_applied(conn, seq)
             conn.commit()

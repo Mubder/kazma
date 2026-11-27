@@ -186,16 +186,23 @@ def _entries(*, kinds: tuple[str, ...] = KINDS, since: float = 0.0) -> list[Entr
                   str(r[7]), str(r[8]), str(r[9] or "")) for r in rows]
 
 
-def forgotten_summaries() -> set[str]:
-    """Every summary (weekly or roll-up) the ledger holds forgotten, by id: a
-    forget of one (``summary``) and those a forget of everything that
-    mentions a name took with it (``mentions``, its ``summaries``). By id
-    alone: ids are salted with their space, and a forget journals the
-    caller's space, not the row's (the step 5 follow-up's L2). A planner asks
-    it before writing one again, so a restored database that lost the
+def forgotten_summaries(tenant_id: str) -> set[str]:
+    """The summaries (weekly or roll-up) the ledger holds forgotten for
+    *tenant_id*: a forget of one (``summary``) and those a forget of
+    everything that mentions a name took with it (``mentions``, its
+    ``summaries``), journaled by the tenants ``tenant_view.ledger_reach``
+    names: its own, and the owner's while Spaces is not enforced. Never by id
+    alone: a member of another space could otherwise hold back the owner's
+    summary by naming its id (the fifth follow-up review's N2). A planner
+    asks it before writing one again, so a restored database that lost the
     tombstone does not bring it back."""
+    from kazma_core.memory.tenant_view import ledger_reach
+
+    reach = set(ledger_reach(tenant_id))
     out: set[str] = set()
     for e in _entries(kinds=("summary", "mentions")):
+        if e.tenant_id not in reach:
+            continue
         if e.kind == "summary" and e.summary_id:
             out.add(e.summary_id)
         elif e.kind == "mentions" and e.detail:

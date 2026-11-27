@@ -1059,14 +1059,116 @@ def test_a_month_the_ledger_holds_forgotten_is_not_planned(mem, kind):
     _training(mem)
     rid = topic_rollups._rollup_id("default", "month", "2026-06")
     if kind == "summary":
-        forget_journal.append("summary", tenant_id="another-space", summary_id=rid)
+        forget_journal.append("summary", tenant_id="default", summary_id=rid)
     else:
         forget_journal.append("mentions", tenant_id="default", detail=_json.dumps({"summaries": [rid]}))
     out = _plan(mem)
     assert out["months"] == 0 and out["held_by_forget"] >= 1
-    # the ledger holds it by id alone (a "summary" entry of another space
-    # too); with nothing in it June is planned (the first test of this file)
-    assert topic_rollups._ledger_forgotten() == {rid}
+    assert topic_rollups._ledger_forgotten("default") == {rid}
+
+
+# ── The ledger is read by the space's reach, never by id alone (N2) ──────
+
+@pytest.mark.parametrize("enforced", [False, True])
+def test_another_space_s_ledger_entry_never_holds_the_owner_s_month(mem, monkeypatch, enforced):
+    """The fifth follow-up review's N2: a member of space B who names the
+    owner's (computable) June id holds nothing back, Spaces on or off."""
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: enforced)
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    forget_journal.append("summary", tenant_id="space-b", summary_id=rid)
+    assert topic_rollups._ledger_forgotten("default") == set()
+    out = _plan(mem)
+    assert out["months"] == 1 and out["held_by_forget"] == 0
+
+
+def test_the_owner_s_ledger_reaches_every_space_while_spaces_is_off(mem, monkeypatch):
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    forget_journal.append("summary", tenant_id="default", summary_id="sum_x")
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: False)
+    assert topic_rollups._ledger_forgotten("space-b") == {"sum_x"}
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: True)
+    assert topic_rollups._ledger_forgotten("space-b") == set()
+
+
+def test_a_refused_forget_writes_nothing_to_the_ledger(mem, monkeypatch):
+    """Space B forgetting the owner's summary is refused (not found), and
+    the ledger is left as it was; the owner's own forget is journaled."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    monkeypatch.setattr("kazma_core.memory.tenant_view.spaces_enforced", lambda: True)
+    _training(mem)
+    _plan(mem)
+    [month] = _rollups(mem, "month")
+    before = forget_journal.journaled_seqs()
+    out = forget_summary(month["id"], tenant_id="space-b", conn=mem.db)
+    assert out == {"ok": False, "error": "not_found"} and forget_journal.journaled_seqs() == before
+    assert forget_summary(month["id"], tenant_id="default", conn=mem.db)["ok"]
+    assert len(forget_journal.journaled_seqs()) == len(before) + 1
+
+
+def _ledger_reads_by_id_alone(source: str, path: str) -> list[str]:
+    """Each call that reads the forget ledger's summaries with no tenant."""
+    import ast
+
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if name in ("forgotten_summaries", "_ledger_forgotten") and not (node.args or node.keywords):
+                found.append(f"{path}:{node.lineno} {name}()")
+    return found
+
+
+def test_no_ledger_reader_reads_by_id_alone():
+    """From source: every read of the ledger's forgotten summaries names the
+    tenant it reads for (``tenant_view.ledger_reach``)."""
+    found = []
+    for path in sorted((_REPO / "kazma-core/kazma_core").rglob("*.py")):
+        found += _ledger_reads_by_id_alone(path.read_text(encoding="utf-8"), path.relative_to(_REPO).as_posix())
+    assert found == []
+
+
+def test_control_a_read_by_id_alone_is_found():
+    assert _ledger_reads_by_id_alone("ids = forgotten_summaries()\nmore = _ledger_forgotten()\n", "old.py") == [
+        "old.py:1 forgotten_summaries()", "old.py:2 _ledger_forgotten()"]
+
+
+# ── A live group never loses its id to a tombstone; one line a skip (L-b, L-c)
+
+def test_a_live_group_whose_id_is_a_tombstone_s_gets_another(mem):
+    from kazma_core.memory import topic_rollups
+
+    _training(mem)
+    taken = topic_rollups._rollup_id("default", "project", "tr0")
+    mem.db.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+        "summary_text, status, created_at, updated_at, metadata_json) "
+        "VALUES (?, 'default', 'project:old', 0, 0, 'project', '', '', 'forgotten', 0, 0, '{}')", (taken,))
+    mem.db.execute("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, 'an-old-week')", (taken,))
+    mem.db.commit()
+    assert _plan(mem)["projects"] == 1
+    planned = [r for r in _rollups(mem, "project") if r["status"] == "rebuild"]
+    assert len(planned) == 1 and planned[0]["id"] != taken
+    assert _parts(mem, planned[0]["id"]) == ["tr0", "tr1", "tr2", "tr3"]
+
+
+def test_a_held_roll_up_is_said_once_not_every_pass(mem, caplog):
+    import logging
+
+    from kazma_core.memory import forget_journal, topic_rollups
+
+    _training(mem)
+    rid = topic_rollups._rollup_id("default", "month", "2026-06")
+    forget_journal.append("summary", tenant_id="default", summary_id=rid)
+    topic_rollups._SAID_HELD.discard(rid)
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.topic_rollups"):
+        counts = [_plan(mem)["held_by_forget"] for _ in range(3)]
+    assert counts == [1, 1, 1] and caplog.text.count(f"roll-up {rid} was forgotten") == 1
 
 
 # ── More topics than shown: the largest, and how many more (L1) ──────────
