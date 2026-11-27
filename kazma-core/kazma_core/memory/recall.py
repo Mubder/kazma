@@ -3517,7 +3517,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
 
     ask = _ASK.get()
     level = {str(row["id"]): str(row["level"] or "week") for row in rows}
-    span = {str(row["id"]): (float(row["period_start"] or 0), float(row["period_end"] or 0)) for row in rows}
+    span = _spans(rows)
     if ask is not None and ask.period and ask.said:
         months = _months_said_in(query, ask, rows, level, span)
         if months:
@@ -3557,6 +3557,18 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
                 hit.metadata["display"] = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
         return hits[:_LIST_SUMMARY_LIMIT]
     return hits[:_SUMMARY_LIMIT]
+
+
+def _spans(rows: list[Any]) -> dict[str, tuple[float, float]]:
+    """Each summary's stretch of time in the operator's zone, from its key
+    (``topic_rollups.stretch_of``), as the question's period is read."""
+    from kazma_core.memory.topic_rollups import stretch_of
+
+    zone = _memory_zone()
+    return {str(row["id"]): stretch_of(str(row["level"] or "week"),
+                                       str((row["period_key"] if "period_key" in row.keys() else "") or ""),
+                                       row["period_start"], row["period_end"], zone)
+            for row in rows}
 
 
 def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:

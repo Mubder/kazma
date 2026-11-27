@@ -163,6 +163,30 @@ def _week_month(row: Any, zone: Any) -> tuple[str, float, float]:
     return _month_of(float(row["period_start"]) + _MIDDAY_S, zone)
 
 
+def stretch_of(level: str, period_key: str, period_start: float, period_end: float, zone: Any) -> tuple[float, float]:
+    """A summary's stretch of time in *zone*, as epoch seconds: a week from
+    its key's Monday to the next, a month from its key's first to the next,
+    with no zone in the key; else its stored stretch read at midday, from its
+    first day's midnight to the midnight after its last. Recall compares it
+    with the question's period (the step 5 follow-up review's L-a: a stretch
+    a server wrote in its own local time, compared as stored, put a June
+    question's neighbouring month in its answer)."""
+    def midnight(day: _dt.date) -> float:
+        return _dt.datetime(day.year, day.month, day.day, tzinfo=zone).timestamp()
+
+    monday = _week_monday(period_key) if level == "week" else None
+    if monday is not None:
+        return midnight(monday), midnight(monday + _dt.timedelta(days=7))
+    first = _month_first(period_key) if level == "month" else None
+    if first is not None:
+        _key, start, end = _month_bounds(first, zone)
+        return start, end
+    begun = float(period_start or 0)
+    return (midnight(_dt.datetime.fromtimestamp(begun + _MIDDAY_S, zone).date()),
+            midnight(_dt.datetime.fromtimestamp(max(float(period_end or 0) - _MIDDAY_S, begun + _MIDDAY_S),
+                                                zone).date() + _dt.timedelta(days=1)))
+
+
 def rollup_label(level: str, period_start: float, period_end: float, period_key: str = "") -> str:
     """How recall's block and the roll-up prompts name a summary's stretch of
     time, in English (Kazma's own text): "Week of Oct 06, 2026",

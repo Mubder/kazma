@@ -473,3 +473,84 @@ def test_a_waiting_old_week_holds_back_its_own_month(zone):
     assert not topic_rollups._month_settled(conn, "default", "2026-06", ZoneInfo(zone))
     assert topic_rollups._month_settled(conn, "default", "2026-05", ZoneInfo(zone))
     conn.close()
+
+
+@pytest.mark.parametrize("waiting", [True, False])
+def test_a_month_waits_for_its_old_kuwait_week_through_the_sweep(monkeypatch, waiting):
+    """The follow-up review's L-b, through ``plan_rollups``: June's weeks as a
+    Kuwait server wrote them, read in UTC. While W23 (1 June) waits to be
+    written again, June is not planned (on 44524a234 it fell in May and June
+    was planned, then written again); with W23 written, June is planned."""
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import topic_rollups
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: _dt.UTC)
+    kuwait = ZoneInfo("Asia/Kuwait")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_primary_schema(conn)
+    for key, day, status in (("2026-W23", 1, "rebuild" if waiting else "active"), ("2026-W24", 8, "active"),
+                             ("2026-W25", 15, "active")):
+        start = _dt.datetime(2026, 6, day, tzinfo=kuwait).timestamp()
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, title, "
+            "summary_text, status, created_at, updated_at, metadata_json) "
+            "VALUES (?, 'default', ?, ?, ?, 'week', 't', 's', ?, 0, 0, '{}')",
+            (f"sum_{key}", key, start, start + 7 * 86400, status))
+    planned = topic_rollups.plan_rollups(conn, now=_dt.datetime(2026, 8, 1, tzinfo=_dt.UTC).timestamp())
+    months = [r["period_key"] for r in conn.execute("SELECT period_key FROM memory_summaries WHERE level = 'month'")]
+    conn.close()
+    assert (planned["months"], months) == ((0, []) if waiting else (1, ["2026-06"]))
+
+
+# ── "What did we talk about in June?" answers June in every zone ─────────
+# (the follow-up review's L-a: recall compared a Kuwait-written month's
+# stored stretch with the question's period, and showed July in UTC and New
+# York, May in Kiritimati)
+
+_JUNE_QUESTIONS = ["What did we talk about in June?", "شنو تكلمنا عنه في يونيو؟"]
+_ASKED_ON = _dt.datetime(2026, 8, 15, 12, tzinfo=_dt.UTC).timestamp()
+
+
+def _kuwait_months() -> list[dict]:
+    from zoneinfo import ZoneInfo
+
+    kuwait = ZoneInfo("Asia/Kuwait")
+    rows = []
+    for month in (5, 6, 7):
+        start = _dt.datetime(2026, month, 1, tzinfo=kuwait).timestamp()
+        end = _dt.datetime(2026, month + 1, 1, tzinfo=kuwait).timestamp()
+        rows.append({"id": f"sum_m{month}", "level": "month", "period_key": f"2026-{month:02d}",
+                     "period_start": start, "period_end": end, "title": f"month {month}", "summary_text": "s"})
+    return rows
+
+
+def _june_answer(monkeypatch, zone: str, question: str, spans=None) -> list[str]:
+    from zoneinfo import ZoneInfo
+
+    from kazma_core.memory import recall
+    from kazma_core.memory.time_words import read_time
+
+    monkeypatch.setattr("kazma_core.memory.recall._memory_zone", lambda: ZoneInfo(zone))
+    rows = _kuwait_months()
+    ask = read_time(question, now=_ASKED_ON, zone=ZoneInfo(zone))
+    level = {r["id"]: "month" for r in rows}
+    hits = recall._months_said_in(question, ask, rows, level, spans or recall._spans(rows))
+    return [h.id for h in hits]
+
+
+@pytest.mark.parametrize("question", _JUNE_QUESTIONS)
+@pytest.mark.parametrize("zone", ["Asia/Kuwait", "UTC", "America/New_York", "Pacific/Kiritimati"])
+def test_a_question_about_june_is_answered_by_june_alone(monkeypatch, zone, question):
+    assert _june_answer(monkeypatch, zone, question) == ["sum_m6"]
+
+
+@pytest.mark.parametrize("question", _JUNE_QUESTIONS)
+def test_control_the_stored_stretch_brings_a_neighbouring_month(monkeypatch, question):
+    """The negative control: the stretches as stored (44524a234's reading)
+    put July beside June in UTC and May beside it in Kiritimati."""
+    stored = {r["id"]: (r["period_start"], r["period_end"]) for r in _kuwait_months()}
+    assert "sum_m7" in _june_answer(monkeypatch, "UTC", question, stored)
+    assert "sum_m5" in _june_answer(monkeypatch, "Pacific/Kiritimati", question, stored)

@@ -383,8 +383,10 @@
   again, the weeks left read by the product's own `_due_periods` on the
   store at the question's time, and a week marked done whose summaries the
   store no longer holds, so a store whose summaries were deleted is refused
-  with or without its week markers; a done file without the question's time
-  is refused), not only the done file; rounds whose deep pass was never answered
+  with or without its week markers; a month or project roll-up the
+  product's `plan_rollups` would plan, run on a throwaway copy at the
+  question's time, so a deleted roll-up is refused too; a done file without
+  the question's time is refused), not only the done file; rounds whose deep pass was never answered
   are said with every number (`written_with`: 144 of 12,089 on the pilot,
   the extraction's failed passes). A question whose sweeps do not settle
   says so (`--sweeps`), apart from a failed call. **The replay** finds a

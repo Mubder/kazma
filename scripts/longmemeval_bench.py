@@ -898,7 +898,43 @@ def store_unfinished(store: Path, steps: dict[str, Any]) -> list[str]:
         conn.close()
     if not out and weeks_due(store, parse_date(str(steps["at"]))):
         out.append("a week the store holds unsummarised at the question's time")
+    if not out and any(rollups_due(store, parse_date(str(steps["at"]))).values()):
+        # a month or project roll-up the product's sweep would plan (a
+        # deleted one; the step 5 follow-up review's L-c)
+        out.append("a roll-up the store lacks at the question's time")
     return out
+
+
+def rollups_due(store: Path, now: float) -> dict[str, int]:
+    """The month and project roll-ups the product's sweep would plan on
+    *store* at *now*: ``topic_rollups.plan_rollups`` on a throwaway copy
+    (it writes and commits), in UTC, with the weekly summaries' own vector
+    model as the embedder's."""
+    from unittest import mock
+
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+    from kazma_core.memory import topic_rollups
+
+    with tempfile.TemporaryDirectory(prefix="kazma-rollups-due-") as folder:
+        copy = Path(folder) / "store.db"
+        snapshot_copy(store, copy, read_only=True)
+        conn = sqlite3.connect(str(copy))
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                found = conn.execute(
+                    "SELECT embedding_model_version, COUNT(*) n FROM memory_summaries WHERE level = 'week' "
+                    "AND status = 'active' AND embedding IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 1").fetchone()
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc):
+                    return {}
+                raise
+            model = str(found[0] or "") if found else ""
+            with (mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC),
+                  mock.patch("kazma_core.memory.embedder.get_embedding_model_name", lambda: model)):
+                return topic_rollups.plan_rollups(conn, now=now)
+        finally:
+            conn.close()
 
 
 def weeks_due(store: Path, now: float) -> list[Any]:
