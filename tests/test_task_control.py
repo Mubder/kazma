@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from kazma_core.swarm.task import SwarmTask, TaskType
+from kazma_core.swarm.task import SwarmTask, TaskStatus, TaskType
 from kazma_core.swarm.task_control import build_retry_task, cancel_active_task
 
 
@@ -78,6 +78,47 @@ def test_build_retry_from_history():
     assert new.prompt == "do work"
     assert new.metadata.get("retry_of") == "old"
     assert new.metadata.get("k") == 1
+
+
+def test_cancel_active_ended_task_is_left_alone():
+    """A success still holding its slot is not cancelled, and its run is not."""
+    t = _task("c")
+    t.status = TaskStatus.COMPLETED
+    handle = MagicMock()
+    handle.done.return_value = False
+    finalize = MagicMock()
+    ok = cancel_active_task(
+        task_id="c",
+        active_tasks={"c": t},
+        task_handles={"c": handle},
+        finalize=finalize,
+    )
+    assert ok is False
+    handle.cancel.assert_not_called()
+    finalize.assert_not_called()
+
+
+def test_cancel_active_recorded_ending_is_left_alone():
+    """An id in the ending set has ended even before its status says so."""
+    t = _task("d")
+    finalize = MagicMock()
+    ok = cancel_active_task(
+        task_id="d",
+        active_tasks={"d": t},
+        task_handles={},
+        finalize=finalize,
+        endings={"d"},
+    )
+    assert ok is False
+    finalize.assert_not_called()
+
+
+def test_build_retry_skips_an_ended_slot():
+    ended = _task("old")
+    ended.status = TaskStatus.COMPLETED
+    assert build_retry_task(
+        task_id="old", history={}, active_tasks={"old": ended}, task_store=None,
+    ) is None
 
 
 def test_build_retry_missing():

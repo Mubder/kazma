@@ -286,12 +286,20 @@ def _not_run(engine: Any, task: Any, started: float, task_span: Any, error: str,
     refusal, as the capacity refusal is."""
     from time import perf_counter
 
-    from kazma_core.swarm.task import TaskResult
+    from kazma_core.swarm.task import TaskResult, task_has_ended
 
     metadata: dict[str, Any] = {"durable": "temporal", "execution_outcome": "none_invoked"}
     if workflow_id:
         metadata["workflow_id"] = workflow_id
-    if task.id not in getattr(engine, "_active_tasks", {}):
+    # A task that has ended is not active, even while its slot is held for
+    # the ending write. Finalizing it again would record "failed" over that
+    # ending.
+    active = getattr(engine, "_active_tasks", None)
+    held = active.get(task.id) if isinstance(active, dict) else None
+    if held is None or task_has_ended(held, getattr(engine, "_endings_recorded", None)):
+        existing = getattr(held, "result", None) if held is not None else None
+        if existing is not None:
+            return existing
         return TaskResult(task_id=task.id, status="failed", error=error, metadata=metadata)
     if task_span is not None:
         engine._tracing_emitter.end_span(task_span, status="error", status_msg=error)

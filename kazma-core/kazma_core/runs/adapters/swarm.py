@@ -37,6 +37,20 @@ def _engine() -> Any:
     return get_swarm_engine()
 
 
+def _live(engine: Any) -> dict[str, Any]:
+    """Tasks the engine still calls active.
+
+    ``list_active_tasks`` leaves out a task that has ended, including while
+    its admission slot waits on the ending write. The admission table is the
+    engine's; this adapter does not read it."""
+    if engine is None:
+        return {}
+    listed = getattr(engine, "list_active_tasks", None)
+    if not callable(listed):
+        return {}
+    return {task.id: task for task in list(listed())}
+
+
 class _SwarmAdapter:
     STATE_MAP: dict[str, str] = {
         "pending": RunState.QUEUED,
@@ -50,7 +64,7 @@ class _SwarmAdapter:
 
     async def list_runs(self, now: float, *, window_s: float) -> list[Run]:
         engine = _engine()
-        active = dict(getattr(engine, "_active_tasks", {}) or {}) if engine is not None else {}
+        active = _live(engine)
         store = getattr(engine, "_task_store", None) if engine is not None else None
         rows = await asyncio.to_thread(self._stored, store, now - window_s) if store is not None else []
         tasks: dict[str, Any] = {t.id: t for t in rows}

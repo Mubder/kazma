@@ -126,8 +126,7 @@ async def cancel_task(task_id: str) -> dict[str, Any]:
         return refused
     # A task in flight, or a pipeline paused before a restart (restored as a
     # paused in-flight task, SW-E09): the panel offers Cancel on both.
-    active = (engine.get_active_task(task_id) if hasattr(engine, "get_active_task")
-              else getattr(engine, "_active_tasks", {}).get(task_id))
+    active = engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else None
     if active is None:
         task_obj = engine.get_task(task_id)
         if task_obj is None or task_obj.status != "paused":

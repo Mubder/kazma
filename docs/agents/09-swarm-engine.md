@@ -67,8 +67,9 @@ compatibility. **All public API methods and constructors are unchanged.**
   control, the run-anyway admission included; the Postgres cases
   `@pytest.mark.postgres`).
 - **An admitted task keeps its slot until its ending is stored**
-  (2026-11-27). The limit counts `_active_tasks` (a paused task does not).
-  The soak counts stored `started_at` / `completed_at`, and a row with no
+  (2026-11-27). The limit counts `_active_tasks` (a paused task does not;
+  a task that has finished still counts until the ending is stored). The
+  soak counts stored `started_at` / `completed_at`, and a row with no
   `completed_at` counts as running until the check. `_finalize_task` used to
   drop the slot and then write the ending in a thread: under load the next
   task was admitted and its start stored while the previous ending was still
@@ -77,12 +78,28 @@ compatibility. **All public API methods and constructors are unchanged.**
   not overlap. The slot is released when that write returns, before the
   write is marked done (`_release_admission_slot`); a cancelled write
   releases from its done callback so the slot cannot stay held. A new task
-  cannot start until that `completed_at` is stored. `reject_checkpoint`
-  used to pop the slot again on its own and does not. A refusal before a RUNNING row (`_store_refused`,
-  a share refusal, a duplicate, a stop during admission) still drops the
-  slot at once: nothing of this run was stored as running. Gate:
-  `tests/test_swarm_slot_matches_store.py` (the old pop beside the end stamp
-  as the control).
+  cannot start until that `completed_at` is stored. A refusal before a
+  RUNNING row (`_store_refused`, a share refusal, a duplicate, a stop during
+  admission) still drops the slot at once: nothing of this run was stored as
+  running.
+  **That slot is not active work** (2026-11-28). While the ending is stored
+  the task stays in the table, and its status is already one it never leaves
+  (or its id is in `_endings_recorded`). `task_has_ended` is the one check.
+  `list_active_tasks` and `get_active_task` leave it out, so the panel's
+  Active tab, the `kazma_active_tasks` gauge and the run list do too.
+  `cancel_task` returns false and the watchdog does not reap it: those
+  callers wrote "cancelled" or "timeout" over a success and told the user
+  the success was cancelled. The cap still counts the slot.
+  An exception while the ending is recorded releases the slot in
+  `_finalize_task`'s `finally` (the id is recorded in `_endings_recorded`
+  before the checkpoint close, the history, the chat delivery and the
+  snapshot). `reject_checkpoint` does not pop the slot on its own. Its
+  `finally` releases only when the ending is recorded and no store write is
+  in flight, so a raise before the write was scheduled cannot hold the slot
+  until restart, and a write that is still running is not cut short. Gate:
+  `tests/test_swarm_slot_matches_store.py` (the old pop beside the end stamp,
+  a reader that returns the raw table, and a removal through an alias, as
+  the controls).
 - **A shared breaker never takes an older state** (SQ01 soak, 2026-10-15):
   an outcome changes the breaker under its lock and shares it in a second
   step, so a refresh between the two read the generation before;
@@ -240,6 +257,6 @@ compatibility. **All public API methods and constructors are unchanged.**
   added (one that waits out the stop grace for a task ignoring its stop took
   12 s of the test's 24 s run and left the breaker no window to recover in).
 - `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
-- The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
+- The de-facto public attrs (`_workers`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`. `_active_tasks` is the admission table, not the list of active work: callers ask `list_active_tasks` and `get_active_task`.
 - Constructor signature is unchanged — test fixtures work without modification.
 
