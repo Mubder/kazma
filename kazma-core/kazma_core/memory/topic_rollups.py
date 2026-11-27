@@ -542,8 +542,13 @@ def plan_rollups(conn: sqlite3.Connection, *, now: float | None = None) -> dict[
     if not _BACKFILLED[0]:
         from kazma_core.memory.forget_journal import backfill_project_parts
 
-        backfill_project_parts(conn)
-        _BACKFILLED[0] = True
+        try:
+            backfill_project_parts(conn)
+            _BACKFILLED[0] = True
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            # The pass plans its roll-ups all the same; tried again next pass.
+            logger.warning("[summaries] older forget entries could not be filled with their projects' parts",
+                           exc_info=True)
     out = {"months": 0, "projects": 0, "held_by_forget": 0}
     held = [0]
     budget = [_PLANNED_PER_PASS]
