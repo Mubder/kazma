@@ -254,7 +254,18 @@ an install with one account behaves as before.
   with its class: a closed shared pool made a space half at its next space
   checkout and wrote through it (`PostgresPool._space_half` raises
   `PoolClosed`, as the checkpointer's does; a gate reads every
-  `_space_half`, `tests/test_checkpoint_doors.py`).
+  `_space_half`, `tests/test_checkpoint_doors.py`), and a catalog read lost
+  a column through a store's dict-row cursor (`row_security._rows` refuses a
+  short row; a gate: each query names its columns once). The proof that
+  nothing is blinded: the space matrix runs on Postgres armed (every route
+  and tool in its own space; a Documents case speaks of the documents it
+  seeded, the shared tables holding the cases before), and every
+  maintenance sweep does the same armed as not
+  (`tests/test_pg_sweeps_armed.py`: one database seeded in three spaces,
+  copied, each copy's sweeps in a process of their own as the cadence runs
+  them; the same outcomes, warnings and rows, while the sweeps changed rows
+  of every space; the control, a sweep with its install declaration taken
+  away, is seen).
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner
