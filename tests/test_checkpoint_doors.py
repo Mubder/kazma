@@ -410,10 +410,37 @@ def test_a_closed_shared_pool_makes_no_space_half() -> None:
     assert pool._space_pool is None, "no half was made"
 
 
+def test_a_shared_pool_closed_while_its_half_waits_for_the_lock_makes_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The checkpointer's N2 (step 4 delta review) in the shared pool: open at
+    the first look, closed by the time the lock was had, and a half was made
+    that nothing closed."""
+    PoolClosed = pytest.importorskip("psycopg_pool").PoolClosed  # noqa: N806 - see the test above
+    from kazma_core.db.postgres_pool import PostgresPool
+
+    class _ClosedMeanwhile:
+        def __init__(self) -> None:
+            self.looks = [False, True]
+
+        @property
+        def closed(self) -> bool:
+            return self.looks.pop(0) if self.looks else True
+
+    pool = PostgresPool("postgresql://x@127.0.0.1:1/x", min_size=0, max_size=1)
+    real = pool._pool
+    monkeypatch.setattr(pool, "_pool", _ClosedMeanwhile())
+    try:
+        with pytest.raises(PoolClosed):
+            pool._space_half()
+        assert pool._space_pool is None, "no half was made"
+    finally:
+        real.close()
+
+
 def _halves_that_open_when_closed(sources: dict[str, str]) -> list[str]:
-    """Every ``_space_half`` of the product that does not first refuse a
-    closed pool: each pool with a space half asks ``.closed`` and raises
-    ``PoolClosed`` before it makes one."""
+    """Every ``_space_half`` of the product that does not refuse a closed
+    pool: each pool with a space half asks ``.closed`` and raises
+    ``PoolClosed`` before it makes one, and asks again inside the lock it
+    makes it under (step 4 delta review N2: a close may come in between)."""
     found: list[str] = []
     for rel, source in sources.items():
         for node in ast.walk(ast.parse(source)):
@@ -422,7 +449,11 @@ def _halves_that_open_when_closed(sources: dict[str, str]) -> list[str]:
             own = _own_nodes(node)
             asks = any(isinstance(n, ast.Attribute) and n.attr == "closed" for n in own)
             raises = any(isinstance(n, ast.Raise) and "PoolClosed" in ast.unparse(n) for n in own)
-            if not (asks and raises):
+            locks = [n for n in own if isinstance(n, (ast.With, ast.AsyncWith))
+                     and any("lock" in ast.unparse(item.context_expr).lower() for item in n.items)]
+            again = all(any(isinstance(m, ast.Attribute) and m.attr == "closed" for m in ast.walk(lock))
+                        for lock in locks)
+            if not (asks and raises and again):
                 found.append(f"{rel}:{node.lineno}")
     return found
 
@@ -448,3 +479,13 @@ def test_the_closed_pool_gate_sees_a_half_that_opens() -> None:
         "            raise PoolClosed('closed')\n"
         "        return make()\n")}
     assert _halves_that_open_when_closed(guarded) == []
+    # Asked before its lock only: a close in between still makes a half (N2).
+    before_only = {"kazma-core/kazma_core/racy.py": (
+        "class P:\n"
+        "    def _space_half(self):\n"
+        "        if self._pool.closed:\n"
+        "            raise PoolClosed('closed')\n"
+        "        with self._space_lock:\n"
+        "            self._half = make()\n"
+        "        return self._half\n")}
+    assert _halves_that_open_when_closed(before_only) == ["kazma-core/kazma_core/racy.py:2"]
