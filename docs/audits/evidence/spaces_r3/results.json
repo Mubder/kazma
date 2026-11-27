@@ -8420,10 +8420,10 @@
     "multi.precision": 0.7937,
     "noise.hit_rate": 1.0,
     "noise.mrr": 1.0,
-    "noise.precision": 0.6111,
+    "noise.precision": 0.6667,
     "overall.hit_rate": 0.9253,
     "overall.mrr": 0.8444,
-    "overall.precision": 0.6443,
+    "overall.precision": 0.6467,
     "overview.hit_rate": 0.9,
     "overview.mrr": 0.6667,
     "overview.order": 1.0,
@@ -8479,8 +8479,17 @@
     "update.order": 1.0,
     "update.precision": 0.5738
    },
-   "equal_to_locked": true,
-   "different_from_locked": {}
+   "equal_to_locked": false,
+   "different_from_locked": {
+    "noise.precision": [
+     0.6111,
+     0.6667
+    ],
+    "overall.precision": [
+     0.6443,
+     0.6467
+    ]
+   }
   },
   "name": {
    "scores": {

@@ -32,8 +32,8 @@ import re
 from collections.abc import Iterable
 from functools import lru_cache
 
-__all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "own_text", "puts_right",
-           "says_once_more", "stands_elsewhere", "value_words", "words_said"]
+__all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "no_then",
+           "own_text", "puts_right", "says_once_more", "stands_elsewhere", "value_words", "words_said"]
 
 #: The share of an event's content words one text holds, at least, for the
 #: event to stand in it; measured on the two pilots' replies (2026-11-24).
@@ -252,6 +252,9 @@ _CORRECTING_AR_RAW = ("غلط", "أقصد", "قصدي", "آسف", "آسفة", "�
 _CORRECTING_PHRASES = re.compile(
     r"\b(?:my bad|i apologi[sz]e|scratch that|forgive me|let me rephrase|change (?:it|that) to|mixed (?:it|that|them|him|her) up"
     r"|confused (?:it|that|them|him|her) with)\b|\bi said\b[^.!?\n]{1,60}\bbut (?:it|that) (?:was|is)\b"
+    # "خطأ" as an answer only: "لا خطأ، كان عمر"; "وكان خطأ اني ما عزمت علي"
+    # says something else was a mistake (step 4's fifth review).
+    r"|^(?:لا|كلا)[ ،,]+خطا(?!\w)"
     r"|^سوري(?!\w)|(?<!\w)(?:بالغلط قلت|خلطت بين\w{0,4})(?!\w)")
 _NO_IT_WAS = re.compile(
     r"^(?:(?:oh|well|ah|hmm|wait|actually|اوه|اه|لحظه|والله)[ ,،.]+)?(?:(?:no|nope|لا)[ ,،.!]+){1,3}"
@@ -299,11 +302,21 @@ def _own_folded(user_text: str) -> str:
     return fold_for_search(own_text(user_text).replace("’", "'")).lower().strip()
 
 
+#: "Nothing is wrong", "ما في شي غلط": a word of putting right, said of nothing
+#: (W4's left list, L1; the memory plan's W6, step 4).
+_NOTHING_WRONG = re.compile(r"\b(?:nothing|no ?one|nobody|none|no ?thing)(?:'s| is| was)? (?:wrong|a mistake)\b"
+                            r"|(?<!\w)(?:ما ?(?:في|فيه|فيها)|مافي|مافيه|لا ?يوجد|ليس هناك) (?:شي |شيء |اي )?(?:غلط|خطا)(?!\w)"
+                            # Never a bare "لا": "لا غلط، عمر" is the commonest
+                            # Gulf correction (step 4's review, H2).
+                            r"|(?<!\w)لا (?:شي|شيء|اي) (?:غلط|خطا)(?!\w)")
+
+
 def corrects(user_text: str) -> bool:
     """Whether the user says they put something right: "sorry, I meant Omar",
     "آسف أقصد عمر", "No, it was Omar". Enough by itself with the fact it
-    replaces named; a denial (:func:`denies`) is not."""
-    folded = _own_folded(user_text)
+    replaces named; a denial (:func:`denies`) is not. "Nothing is wrong" puts
+    nothing right."""
+    folded = _NOTHING_WRONG.sub(" ", _own_folded(user_text))
     return (_says_one_of(folded, _CORRECTING_EN, _folded_words(_CORRECTING_AR_RAW))
             or bool(_CORRECTING_PHRASES.search(folded) or _NO_IT_WAS.search(folded)))
 
@@ -336,6 +349,53 @@ def puts_right(user_text: str, value: str) -> bool:
     (:func:`corrects`) or denies it by name ("Not Paris, it was Lyon again":
     "again" and "too" take nothing back of that)."""
     return corrects(user_text) or _denies_value(_own_folded(user_text), value)
+
+
+#: A whole message that is "no" and a value: "No, Omar", "Nope, Omar", "No!
+#: Omar, I told you", "No - Omar", "لا، عمر", "لأ، عمر", "لا يا كازما، عمر"
+#: (W4's left list, L3). Folded. One mark, then ``\W*``: a run of marks is
+#: read once (linear, step 4's review M2).
+_NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
+                      # Possessive: the marks after "no" are read once, never
+                      # handed back to the value ("No," + "-" * 6000 + "x.y"
+                      # took 28 s, step 4's delta review N2).
+                      r"\W*+(?:يا [^\W\d_]+\W++)?"
+                      r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                      r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def no_then(user_text: str, value: str) -> bool:
+    """Whether the user's whole message is "no" and *value*, nothing else: the
+    value the reply says replaces a held one ("No, Omar" after "I met Ali").
+    Bare, it says no more than that, so it is read only beside a reply that
+    names the fact replaced (``belief_extractor._same_event``)."""
+    found = _NO_THEN.match(_own_folded(user_text))
+    wanted = value_words(value)
+    if not found or not wanted:
+        return False
+    # Every word said is the value's or "it was": "No, not Omar", "No, Omar
+    # too", "No, and Omar", "لا، عمر بعد" deny or add (step 4's review, M1),
+    # and "لا يا عمر" speaks to Omar.
+    said = re.findall(r"[\w'-]+", found["value"])
+    if not said or said[0] == "يا":
+        return False
+    named = [w for w in said if w not in _NO_THEN_FILLERS]
+    return bool(named) and all(words_said(wanted, w) and not _and_then(w, wanted) for w in named)
+
+
+def _and_then(word: str, wanted: list[str]) -> bool:
+    """Whether *word* is the value with "and" or "so" written on its front:
+    "لا، وعمر" adds as "No, and Omar" does (step 4's delta review, N3). A
+    value that begins with the letter ("وليد") is itself."""
+    return len(word) > 2 and word[0] in "وف" and word not in wanted and bool(words_said(wanted, word[1:]))
+
+
+#: What "No, it was Omar", "No, just Omar", "No, the gym", "No, with Omar",
+#: "لا، في دبي", "لا، بل عمر" say beside the value (step 4's delta review, N3:
+#: articles and prepositions).
+_NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل", "the", "a", "an",
+                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي", "يوم", "الصحيح",
+                              "only", "just", "merely", "simply", "فقط", "بس"})
 
 
 def says_once_more(user_text: str) -> bool:

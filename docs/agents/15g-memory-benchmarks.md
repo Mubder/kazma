@@ -358,6 +358,50 @@
   cut memory read whole, three tool rounds and no fourth with five as the
   control, the question's clock in recall with the real clock as the
   control, a refused call never judged).
+- **Dataset v9: the facts under the names the product holds** (2026-11-26,
+  the memory plan's W6, the framework audit's F-C (5)). v8 seeded the user's
+  role as `job_title` and name as `name`, names no writer of the product keeps
+  (`users_names`, `name_to_file` file them as `current_role` and `name_is`), so
+  the benchmark measured a store no user has and hid a miss. From v9
+  (`benchmark.NAMED_AS_THE_PRODUCT_FROM`) `_seed` files each fact as the
+  extraction pass does. No memory changes, so the fingerprint and the sealed
+  set's `ids_hold_since` hold, and v5 to v8 replay exactly (they seed as
+  before). Three facts move (f01, f04, f34); `memory_bench.py vectors`
+  embedded three texts.
+  - **The miss it showed:** q601 "what is it that I do for a living?" was lost
+    under the product's names. The role phrase asked only "do I do for a
+    living". It now takes "what (is it that) I do for a living", and "ما الذي
+    أعمله لكسب عيشي؟", "شنو أسوي لكسب رزقي؟" (`fact_names.ASKED_AS_MINE`);
+    never with a modal or "how" ("What should I do for a living?", "ماذا يجب
+    أن أفعل لكسب رزقي؟" ask advice: step 4's review, M3, its controls in
+    `tests/test_memory_benchmark_v9.py`). Kept, and said (the delta review's
+    N5): "ماذا أفعل لكسب رزقي؟" and "شنو أسوي لكسب رزقي؟" are often advice too,
+    and "ما أعمل لكسب رزقي" ("I don't work for my living") matches; each names
+    the job, which harms little (a fact shown beside the question). With
+    that, v9 against v8 loses no
+    question of the benchmark (183), the small store (164) or the scale run
+    (183).
+  - **What moves:** h022 ("شنو فصيلة دمي؟") and h024 ("What's my brother's
+    name?") still find their answer, second where it was first; both are
+    near-ties, and the second set's MRR drop rests on them (step 4's review,
+    L1). h022: the renamed name fact's evidence rose 0.0953 to 0.1049, and it
+    now outscores the blood type by 0.0012 (0.1145 against 0.1133). h024: the
+    name fact's evidence fell 0.0916 to 0.0869, exactly the cut, so it left
+    the block, and the recency tie-break put x07 (0.1895) ahead of g01
+    (0.1869). q006
+    precision is a little lower, q1008 (small store) ranks higher. Locked
+    again with `--rebaseline`: overall precision 0.4872 to 0.4868, second set
+    MRR 0.7574 to 0.7347 (mixed 0.9048 to 0.7619, its two questions h022 and
+    h024 of seven), small-store precision 0.6752 to 0.6771, scale second-set
+    MRR 0.7305 to 0.7078, the speakers' scores up (the steps before, first
+    measured here).
+  - **The edge list is empty.** q601, the audit's witness at 0.0004, is found
+    by its words now, far from the cut, and no hit flips inside the rounding.
+    The edge gate's controls plant a flip on the hit nearest the cut
+    (`tests/test_memory_benchmark_edges.py`).
+  - Gate: `tests/test_memory_benchmark_v9.py` (the product's names from v9,
+    v8 seeding as before as the control; every user fact of the dataset held
+    under the name a product writer gives it; q601's phrase in EN, Gulf, MSA).
 - **The product measures and the real-use suite** (2026-11-22, the memory
   plan's W0 and section 2.1: every memory change is gated on these before
   an outside score counts). `scripts/memory_product_measures.py`, on the

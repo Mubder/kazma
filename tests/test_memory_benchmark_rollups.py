@@ -50,7 +50,7 @@ def test_the_datasets_roll_ups_are_the_ones_the_planner_makes(replay, tmp_path, 
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     data = benchmark.load_dataset()
-    assert data["version"] == 8
+    assert data["version"] == 9
     # The store the planner sees: every memory but the roll-ups it plans.
     without = {**data, "rollups": []}
     conn = sqlite3.connect(str(tmp_path / "bench.db"))

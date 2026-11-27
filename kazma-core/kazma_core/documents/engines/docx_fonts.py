@@ -109,7 +109,10 @@ def _font_entry(xml: str, family: str, embeds: str) -> str:
     if match is None:
         entry = f"<w:font w:name={quoteattr(family)}><w:charset w:val=\"00\"/>{embeds}</w:font>"
         return xml.replace("</w:fonts>", entry + "</w:fonts>", 1)
-    inner = re.sub(r"<w:embed(Regular|Bold|Italic|BoldItalic)\b[^>]*/>", "", match.group(2) or "")
+    # ``[^<>]``: a tag's attributes hold no raw "<", so the scan stops at the
+    # next tag. ``[^>]`` read to the end of the text from every "<w:embed"
+    # when no ">" followed, which is quadratic (the regex sweep, 2026-11-27).
+    inner = re.sub(r"<w:embed(Regular|Bold|Italic|BoldItalic)\b[^<>]*/>", "", match.group(2) or "")
     return xml[: match.start()] + f"<w:font w:name={quoteattr(family)}>{inner}{embeds}</w:font>" + xml[match.end():]
 
 
