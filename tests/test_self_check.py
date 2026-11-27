@@ -766,6 +766,8 @@ def _child_collect(env: dict[str, str], cwd: Path) -> str:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # the CLI prints Arabic in UTF-8; Windows' default codec cannot read it
+        errors="replace",
         timeout=180,
         check=False,
     )
@@ -820,6 +822,8 @@ def _cli_self_check(env: dict[str, str], cwd: Path) -> subprocess.CompletedProce
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # the CLI prints Arabic in UTF-8; Windows' default codec cannot read it
+        errors="replace",
         timeout=180,
         check=False,
     )
@@ -847,16 +851,19 @@ def test_the_cli_entry_creates_nothing_on_an_unreadable_install(tmp_path) -> Non
 
 
 def test_negative_control_user_home_outside_self_check_creates_the_folder(tmp_path) -> None:
-    """The same home path is created when the command is not self-check."""
+    """The same CLI entry creates the home when the command is not self-check:
+    it is self-check's read-only scope in ``main`` that keeps it uncreated."""
     project = tmp_path / "project"
     project.mkdir()
     env = _isolated_env(tmp_path)
     done = subprocess.run(
-        [sys.executable, "-c", "from kazma_core.paths import user_home; user_home()"],
+        [sys.executable, "-m", "kazma_cli.main", "migrate", "--help"],
         cwd=project,
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # the CLI prints Arabic in UTF-8; Windows' default codec cannot read it
+        errors="replace",
         timeout=180,
         check=False,
     )
@@ -906,6 +913,8 @@ def test_a_seeded_data_folder_is_left_byte_for_byte(tmp_path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # the CLI prints Arabic in UTF-8; Windows' default codec cannot read it
+        errors="replace",
         timeout=180,
         check=False,
     )
