@@ -333,6 +333,52 @@ def test_the_script_reads_its_address_from_a_named_variable(monkeypatch: pytest.
         script.main(["check", "--url", "postgresql://kazma:secret@db/kazma"])
 
 
+def test_a_named_address_still_knows_this_installs_own_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Step 4 delta review N3: with ``--url-from``, this install's files were
+    not read, so ``is_kazma_database`` took its own database for another and
+    the backfill was skipped. The files hold its address; here a stand-in
+    loads them (the test session's dotenv reads nothing, and its shield takes
+    a database address back out of the environment)."""
+    pytest.importorskip("psycopg")  # an address is read with psycopg's conninfo
+    from kazma_core import env_files
+    from kazma_core.db import backend
+    from kazma_core.db.availability import is_kazma_database
+
+    script = _script()
+    own = "postgresql://kazma@db.example:5432/kazma"
+    monkeypatch.setattr(backend, "get_database_url", lambda: None)  # nothing read yet
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", own)
+    loaded: list[bool] = []
+
+    def load(**_kw: Any) -> list[str]:
+        loaded.append(True)
+        monkeypatch.setattr(backend, "get_database_url", lambda: own)  # as this install's .env holds it
+        return [".env"]
+
+    monkeypatch.setattr(env_files, "load_env_files", load)
+    assert not is_kazma_database(own), "the control: unread, the address is no install's"
+    assert script._url("KAZMA_SCRATCH_URL") == own and loaded
+    assert is_kazma_database(own), "read, it is this install's own"
+
+
+@pytest.mark.parametrize("skipped", [True, False], ids=["not backfilled", "the control: backfilled"])
+def test_a_backfill_that_did_not_run_is_said_loudly(monkeypatch: pytest.MonkeyPatch,
+                                                    capsys: pytest.CaptureFixture[str], skipped: bool) -> None:
+    """N3: a skipped backfill was one ``[NOTE]`` under "The rules are in
+    place.", and arming on that database would leave old threads the owner's."""
+    pytest.importorskip("psycopg")  # the script's apply reads Postgres
+    script = _script()
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", "postgresql://kazma@elsewhere.example/kazma")
+    done = row_security.Applied()
+    if skipped:
+        done.not_backfilled = "checkpoints: not this install's own database"
+        done.notes.append(done.not_backfilled)
+    monkeypatch.setattr(row_security, "apply", lambda url, **_kw: done)
+    assert script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert ("NOT BACKFILLED" in out and "do not arm" in out and "[NOTE]" not in out) == skipped, out
+
+
 @pytest.mark.parametrize("argv", [
     ["check", "--url", "postgresql://kazma:s3cret-pw@db/kazma"],
     ["check", "--url-from", "X", "postgresql://kazma:s3cret-pw@db/kazma"],

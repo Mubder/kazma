@@ -35,6 +35,30 @@ def _conninfo(dsn: str) -> str:
 _REPORTED: dict[type, type] = {}
 
 
+async def _check_kept_cancel(conn: Any) -> None:
+    """psycopg_pool's connection check, a cancel kept a cancel (S4-01 step 4
+    review L1, §69): psycopg_pool 3.3.1 counts ``asyncio.CancelledError``
+    among a client's errors, takes another connection and answers as if
+    nothing happened, so a turn cancelled at that moment went on. The cancel
+    the pool is about to swallow is given back -- taken off the task's count
+    and asked for again, with its message -- and lands at the pool's next
+    wait. Never a second one (step 4 delta review N1): ``asyncio.timeout`` and
+    ``wait_for`` take back their own cancel once, and with one more left they
+    let ``CancelledError`` out instead of ``TimeoutError`` (the turn's
+    30-minute window among them). To be reported upstream (psycopg_pool's
+    ``CLIENT_EXCEPTIONS``)."""
+    from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+    try:
+        await AsyncConnectionPool.check_connection(conn)
+    except asyncio.CancelledError as exc:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            task.uncancel()
+            task.cancel(*exc.args[:1])
+        raise
+
+
 def _reported_pool_class() -> type:
     """psycopg's ``AsyncConnectionPool`` whose every checkout is counted by
     the door it goes through (``db.space_doors``, Spaces S4-01 step 1: report
@@ -88,11 +112,19 @@ def _reported_pool_class() -> type:
         async def _space_half(self) -> Any:
             """The pool that signs in as the space role (the address's own
             options kept, the role last), as large as this one, opened on the
-            loop where the saver runs."""
+            loop where the saver runs. Closed, it makes no half of its own
+            (step 4 review L3): asked again under the lock and once the half
+            is open, as a ``close()`` may come between (delta review N2)."""
+            from psycopg_pool import PoolClosed  # type: ignore
+
+            if self.closed:
+                raise PoolClosed("the checkpointer's pool is closed")
             if self._kazma_space_half is None:
                 if self._kazma_space_lock is None:
                     self._kazma_space_lock = asyncio.Lock()
                 async with self._kazma_space_lock:
+                    if self.closed:  # closed while this task waited for the lock
+                        raise PoolClosed("the checkpointer's pool is closed")
                     if self._kazma_space_half is None:
                         from psycopg.rows import dict_row  # type: ignore
 
@@ -108,10 +140,13 @@ def _reported_pool_class() -> type:
                             ),
                             configure=row_security.check_space_role_async,
                             reset=row_security.end_space_async,
-                            check=AsyncConnectionPool.check_connection,
+                            check=_check_kept_cancel,
                             open=False,
                         )
                         await half.open()
+                        if self.closed:  # closed while the half opened: nothing would close it
+                            await half.close()
+                            raise PoolClosed("the checkpointer's pool is closed")
                         self._kazma_space_half = half
             return self._kazma_space_half
 
@@ -168,7 +203,6 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     refusal (``pg_helpers.no_other_store_on_refusal``): that one goes up.
     """
     from psycopg.rows import dict_row  # type: ignore
-    from psycopg_pool import AsyncConnectionPool  # type: ignore
 
     from kazma_core.checkpoint_serde import kazma_checkpoint_serde
     from kazma_core.db.postgres_pool import pool_connection_kwargs
@@ -182,8 +216,9 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
             conninfo, autocommit=True, prepare_threshold=0, row_factory=dict_row,
         ),
         # A connection the server closed (a database restart) is replaced
-        # at checkout instead of failing the turn that drew it.
-        check=AsyncConnectionPool.check_connection,
+        # at checkout instead of failing the turn that drew it; a cancel there
+        # stays a cancel (step 4 review L1).
+        check=_check_kept_cancel,
         open=False,
     )
     from kazma_core.db import availability

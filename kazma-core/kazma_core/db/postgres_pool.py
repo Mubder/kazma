@@ -318,7 +318,7 @@ class _HeldConnection:
     def __init__(self, door: Any) -> None:
         from psycopg.rows import tuple_row
 
-        self._door = door
+        self._checkout = door
         self._conn = door.__enter__()
         self._rows = self._conn.row_factory
         self._conn.row_factory = tuple_row
@@ -327,8 +327,8 @@ class _HeldConnection:
         return getattr(self._conn, name)
 
     def close(self) -> None:
-        door, self._door = self._door, None
-        if door is None:
+        checkout, self._checkout = self._checkout, None
+        if checkout is None:
             return
         import psycopg
         from psycopg.pq import TransactionStatus
@@ -341,7 +341,7 @@ class _HeldConnection:
             logger.debug("[PostgresPool] rollback before giving back a held connection failed: %s",
                          type(exc).__name__)
         self._conn.row_factory = self._rows
-        door.__exit__(None, None, None)
+        checkout.__exit__(None, None, None)
 
 
 class PostgresUnreachable(RuntimeError):

@@ -401,9 +401,19 @@ def space_threads(space_id: str) -> tuple[bool, list[str]]:
 def thread_spaces() -> dict[str, str]:
     """Every recorded thread and its space, in one read of the record store:
     the checkpoints' backfill (Spaces S4-01 step 4) gives each thread's rows
-    its space. A thread with no record is from before Spaces: the owner's."""
-    with _connection() as conn:
+    its space. A thread with no record is from before Spaces: the owner's.
+
+    Read-only, and only where it is: a missing store raises
+    ``FileNotFoundError`` instead of being made empty, which the backfill
+    read as "no threads" and reset every space's stamps (step 4 review M1)."""
+    path = Path(thread_scopes_db())
+    if not path.is_file():
+        raise FileNotFoundError("the thread record store is not there")
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5.0)
+    try:
         rows = conn.execute("SELECT thread_id, space_id FROM thread_scopes").fetchall()
+    finally:
+        conn.close()
     return {str(r[0]): str(r[1] or "") for r in rows}
 
 

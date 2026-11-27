@@ -105,12 +105,20 @@
 
 ## Spaces: a chat's saved state is marked with its own space (2026-11-26)
 
-- With Spaces on, each chat's saved state in Postgres is now marked with the
-  space the chat belongs to, whoever is asking, so the database's own lock
-  will show a space only its own chats' state once it is switched on.
-  Nothing switches the lock on yet, and with Spaces off nothing changes.
-- Putting the lock's rules in place also gives the state saved by older
-  versions its chat's space.
+- Once the second lock's rules are in place (nothing puts them in place
+  yet), each chat's saved state in Postgres is marked with the space the
+  chat belongs to, with Spaces on, whoever is asking, so the database's own
+  lock will show a space only its own chats' state when it is switched on.
+  With Spaces off nothing changes.
+- Putting the rules in place also gives the state saved by older versions
+  its chat's space, from this install's own records and only on its own
+  database; if those records are missing, nothing is changed and the rules
+  are not counted as in place. When the database is not this install's own,
+  the rules script now says plainly that no saved state was given its space.
+- Stop now stops a reply that was pressed while Kazma checked its database
+  connection for the chat's saved state (it used to go on), and a reply that
+  reaches its 30-minute limit at that moment still ends as having reached
+  its limit, not as stopped.
 
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 

@@ -271,6 +271,7 @@ def test_the_backfill_gives_old_rows_their_threads_space(db: dict[str, str], loc
     from kazma_core.spaces import scope, threads
     from kazma_core.spaces.row_work import statements_of
 
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own database (step 4 review M2)
     old, moved = f"t-{uuid.uuid4().hex[:8]}", f"t-{uuid.uuid4().hex[:8]}"
     threads.record_thread(old, "sa", scope.OWNER_ACCOUNT_ID)
 
@@ -333,3 +334,126 @@ def test_pruning_to_the_latest_is_refused_in_a_space(db: dict[str, str], lock: A
     _saver_on(db["app"], _work)
     count = _sql(db["app"], "SELECT count(*) FROM checkpoints WHERE thread_id = %s", (a,))[0][0]
     assert count == (0 if enforced else 1)
+
+
+# ── the step 4 review: what the backfill trusts (M1, M2) ─────────────────
+
+
+def _stamped_row(db: dict[str, str], space: str) -> str:
+    """A checkpoint row stamped with *space*, written as the owner."""
+    thread = f"t-{uuid.uuid4().hex[:8]}"
+    _sql(db["app"], "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata, space_id) "
+                    "VALUES (%s, '', 'k1', '{}', '{}', %s)", (thread, space))
+    return thread
+
+
+def test_a_missing_record_store_is_no_list_of_no_threads(db: dict[str, str], lock: Any, tmp_path: Any,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """M1: sqlite3.connect made the missing store, empty; the backfill read
+    "no threads" and gave every space's rows to the owner, complete."""
+    from kazma_core.spaces import threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    theirs = _stamped_row(db, "sa")
+    gone = tmp_path / "thread_scopes.db"
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(gone))
+    done = lock.apply(db["app"], vector_table="")
+    assert not done.complete and any("not there" in u for u in done.unresolved), done
+    assert _stamps(db, theirs) == {"sa"}, "nothing was reset"
+    assert not gone.exists(), "the store is not made by reading it"
+
+
+def test_an_empty_record_store_with_stamped_rows_changes_nothing(db: dict[str, str], lock: Any, tmp_path: Any,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+
+    from kazma_core.spaces import threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    theirs = _stamped_row(db, "sb")
+    empty = tmp_path / "thread_scopes.db"
+    with sqlite3.connect(empty) as made:
+        made.executescript(threads._SCHEMA)
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(empty))
+    done = lock.apply(db["app"], vector_table="")
+    assert not done.complete and any("list no thread" in u for u in done.unresolved), done
+    assert _stamps(db, theirs) == {"sb"}
+    _sql(db["app"], "DELETE FROM checkpoints WHERE thread_id = %s", (theirs,))
+
+
+def test_another_databases_stamps_are_not_this_installs_to_change(db: dict[str, str], lock: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: on a replica, or a database --url-from named, this install's
+    records reset the stamps of threads it never knew."""
+    theirs = _stamped_row(db, "sc")  # a thread another install recorded
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["su"].rsplit("/", 1)[0] + "/postgres")  # Kazma's is elsewhere
+    done = lock.apply(db["app"], vector_table="")
+    assert _stamps(db, theirs) == {"sc"}, "kept"  # first: what the review measures (delta review N4)
+    assert done.complete and any("not this install's own database" in n for n in done.notes), done
+    assert done.not_backfilled, "said, for the script to say loudly (delta review N3)"
+    # The control: as this install's own database, the record store answers for it.
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    done = lock.apply(db["app"], vector_table="")
+    assert done.backfilled >= 1 and not done.not_backfilled
+    assert _stamps(db, theirs) == {None}
+
+
+# ── the step 4 delta review: where the backfill runs, and its timeout (N4) ──
+
+
+def test_a_tables_rule_at_the_checkpointers_open_backfills_nothing(db: dict[str, str], lock: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """The checkpointer's open (``after_checkpointer_setup``, at every model
+    switch) puts rules on its tables and no more: the backfill is a whole
+    pass's (step 4 review L6)."""
+    from kazma_core.spaces import scope, threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own database
+    threads.record_thread(f"t-{uuid.uuid4().hex[:8]}", "sa", scope.OWNER_ACCOUNT_ID)  # records there are
+    stray = _stamped_row(db, "sd")  # a space no record names: a whole pass gives it back to the owner
+    monkeypatch.setattr(lock, "_in_place", True)
+    lock.after_checkpointer_setup(db["app"])
+    assert _stamps(db, stray) == {"sd"}, "the open backfilled nothing"
+    assert lock.apply(db["app"], vector_table="").backfilled >= 1  # the control: a whole pass does
+    assert _stamps(db, stray) == {None}
+
+
+@pytest.mark.parametrize("timeout_ms", [50, 0], ids=["its statement timeout", "none (the control)"])
+def test_a_backfill_statement_past_its_timeout_leaves_its_table(db: dict[str, str], lock: Any,
+                                                                monkeypatch: pytest.MonkeyPatch, timeout_ms: int) -> None:
+    """A backfill statement waiting on a row another session holds is stopped
+    at its statement timeout, and its table is left for the next pass,
+    unchanged (step 4 review L6). With none (the control) it waits the row
+    out and changes it."""
+    import threading
+    import time
+
+    from kazma_core.spaces import scope, threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
+    monkeypatch.setattr(lock, "_BACKFILL_STATEMENT_MS", timeout_ms)
+    threads.record_thread(f"t-{uuid.uuid4().hex[:8]}", "sa", scope.OWNER_ACCOUNT_ID)
+    stray = _stamped_row(db, "sd")
+    held = threading.Event()
+
+    def hold() -> None:  # another session holds the row for 1.5 s
+        with psycopg.connect(db["su"]) as conn:
+            conn.execute("SELECT 1 FROM checkpoints WHERE thread_id = %s FOR UPDATE", (stray,))
+            held.set()
+            time.sleep(1.5)
+            conn.rollback()
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    assert held.wait(10)
+    try:
+        done = lock.apply(db["app"], vector_table="", lock_timeout_ms=5000)
+    finally:
+        holder.join(10)
+    if timeout_ms:
+        assert any(t.startswith("checkpoints") for t in done.left) and not done.complete, done
+        assert _stamps(db, stray) == {"sd"}, "left as it was, for the next pass"
+    else:
+        assert done.complete and done.backfilled >= 1, done
+        assert _stamps(db, stray) == {None}
+    _sql(db["app"], "DELETE FROM checkpoints WHERE thread_id = %s", (stray,))

@@ -207,15 +207,39 @@ an install with one account behaves as before.
   call that names no thread); its listing takes each step in the door and
   hands the row on outside it (M5: a door held across a `yield` stays in the
   consumer). `aprune` keeping the latest is refused in a space's checkout
-  (L1). `apply` ends with the backfill (design 7.3, at every pass): every
-  checkpoint row gets its thread's space from `thread_scopes.db`, NULL for
-  the owner's, a wrong stamp back; a record store that cannot be read keeps
-  `apply` from being complete. Gates: `tests/test_pg_checkpoint_spaces.py`
-  (real Postgres, the saver called directly: wire, stamp, a space's own
-  threads, refused, backfill, prune; each with its control) and
+  (L1). A whole `apply` ends with the backfill (design 7.3, at every whole
+  pass, not at each checkpointer open): every checkpoint row gets its
+  thread's space from `thread_scopes.db`, NULL for the owner's, a wrong
+  stamp back -- set-based, the records loaded once into a temporary table,
+  two statements per table under the schema lock with a statement timeout
+  (step 4 review L6). It trusts this install's records only on this
+  install's own database (`availability.is_kazma_database`; elsewhere
+  `Applied.not_backfilled`, which `scripts/row_security.py` says loudly, and
+  the script reads this install's files even with `--url-from` so its own
+  database is known as its own: Spaces on replicas is not covered, review M2,
+  delta review N3), reads them read-only,
+  and a missing record store, an empty one while rows carry a space, or one
+  that cannot be read keeps `apply` from being complete, changing nothing
+  (M1: a missing store used to be made empty and read as "no threads").
+  The checkpointer's space checkout does not mark `holding(space)` as the
+  shared pool's does: a context variable held across LangGraph's yields
+  would leak into the consumer (M5), so step 3's nested refusals do not
+  cover it (L2). Its pools' connection check gives back the cancel
+  psycopg_pool swallows (`checkpoints_pg._check_kept_cancel`: 3.3.1 counts
+  `CancelledError` among a client's errors and goes on; the check takes the
+  cancel off the task's count and asks for it again, so it lands at the
+  pool's next wait and a timeout or `wait_for` ending there is still a
+  `TimeoutError` -- never a second cancel, delta review N1; for upstream,
+  L1); a closed pool makes no space half, asked again under its lock and
+  once the half is open (L3, delta review N2). Gates:
+  `tests/test_pg_checkpoint_spaces.py` (real Postgres, the saver called
+  directly: wire, stamp, a space's own threads, refused, backfill, the
+  backfill's trust, prune; each with its control) and
   `tests/test_checkpoint_doors.py` (the door's answers, the manager, M5 and
-  its control, the H4 gate). A moved thread's checkpoints are restamped by
-  the next backfill; at the move itself is step 5's.
+  its control, the H4 gate over `exec_` and the sync senders, a Stop and
+  a window ending in the check, a pool closed before or while its half is
+  made). No flow moves a thread between spaces: the chat
+  move forks, its copy written under the target's scope.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner
