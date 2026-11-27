@@ -762,6 +762,28 @@ def test_the_proof_says_what_stopped_it(rs: Any, db: dict[str, Any]) -> None:
         _sql(app, "ALTER FUNCTION public.kazma_space_id_away() RENAME TO kazma_space_id")
 
 
+# ── a store's cursor (S4-01 step 5) ─────────────────────────────────────
+
+
+def test_a_tables_policy_reads_whole_through_a_dict_row_cursor(rs: Any, db: dict[str, str]) -> None:
+    """``apply_made_tables`` reads with the store's own cursor, whose rows are
+    dicts: the two ``pg_get_expr`` columns of ``_policies`` came back as one,
+    and a table that already held its policy raised IndexError (found by the
+    armed suite, a store made in a schema of its own)."""
+    from psycopg.rows import dict_row
+
+    table = "kazma_chat_sessions"
+    with psycopg.connect(db["app"], autocommit=True) as conn:
+        plain = rs._policies(conn.cursor(), table)
+        assert plain and len(plain[0]) == 6
+        assert rs._policies(conn.cursor(row_factory=dict_row), table) == plain
+        with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+            assert rs._apply_table(cur, table, rs.RULES[table]) == [], "in place: nothing to change"
+        # The control: a read that names two columns alike is refused, never read short.
+        with pytest.raises(ValueError, match="two columns alike"):
+            rs._rows(conn.cursor(row_factory=dict_row), "SELECT 1 AS a, 2 AS a")
+
+
 # ── the way out (last: it drops the role) ───────────────────────────────
 
 

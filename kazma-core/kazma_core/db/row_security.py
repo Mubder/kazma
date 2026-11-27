@@ -244,8 +244,17 @@ def _one(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
 
 
 def _rows(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """*sql*'s rows as tuples, whatever rows the caller's cursor gives: a
+    store's dict-row cursor reaches here through ``apply_made_tables``. A
+    dict row keeps one column of two of one name, so a read whose row came
+    back short is refused, never read with a column missing (S4-01 step 5:
+    the two ``pg_get_expr`` of ``_policies``); every query here names each
+    column once."""
     cur.execute(sql, params or None)
-    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in cur.fetchall()]
+    rows = cur.fetchall()
+    if rows and isinstance(rows[0], dict) and len(rows[0]) != len(cur.description or ()):
+        raise ValueError(f"a catalog read names two columns alike, and a dict row keeps one: {sql[:80]}")
+    return [tuple(r.values()) if isinstance(r, dict) else tuple(r) for r in rows]
 
 
 def _quoted(table: str) -> str:
@@ -398,8 +407,8 @@ def _direct_rights(cur: Any, table: str) -> set[str]:
 
 
 def _policies(cur: Any, table: str) -> list[tuple[Any, ...]]:
-    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[], "
-                      "pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) "
+    return _rows(cur, "SELECT polname, polcmd, polpermissive, polroles = '{0}'::oid[] AS to_public, "
+                      "pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS checked "
                       "FROM pg_policy WHERE polrelid = to_regclass(%s) ORDER BY polname", (_quoted(table),))
 
 
