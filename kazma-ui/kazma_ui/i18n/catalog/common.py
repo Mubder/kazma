@@ -1493,6 +1493,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يُرفض تفعيلها",
         "en": "Refused at activation",
     },
+    "skills.integrity_unchecked": {
+        "ar": "لم يُفحص: يُحمَّل مع تحذير",
+        "en": "Not checked: loads with a warning",
+    },
     "ide.new_file_title": {
         "ar": "إنشاء ملف جديد",
         "en": "Create a new file",

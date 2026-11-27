@@ -91,7 +91,7 @@ def test_a_check_that_cannot_run_is_a_failure_not_a_missing_report(
     monkeypatch.setattr(SecurityHardeningRunner, "check_audit_logging", broken)
     report = asyncio.run(SecurityHardeningRunner(tmp_path).run_all_checks())
     audit = next(c for c in report.checks if c.name == "check_audit_logging")
-    assert audit.passed is False and "the registry is on fire" in audit.message
+    assert audit.passed is False and audit.ran is False and "the registry is on fire" in audit.message
     assert report.total == len(SecurityHardeningRunner.CHECKS)
 
 

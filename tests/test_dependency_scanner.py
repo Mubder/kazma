@@ -160,8 +160,9 @@ def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(ds, "audit_installed", lambda **_: down())
     check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
-    assert check.passed is False
+    assert check.passed is False and check.ran is False
     assert "could not be checked" in check.message
+    assert "OSV was asked about the installed versions." not in check.message
 
     # Negative control: the old scanner returned [] on any network error,
     # and the same check then passed over a scan that never ran.
@@ -170,7 +171,8 @@ def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(ds, "audit_installed", lambda **_: silently_clean())
     check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
-    assert check.passed is True
+    assert check.passed is True and check.ran is True
+    assert "OSV was asked about the installed versions." in check.message
 
 
 def test_the_report_names_the_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -187,7 +189,9 @@ def test_the_report_names_the_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ds, "audit_installed", lambda **_: found())
     check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
     assert check.passed is False and check.severity == "critical"
-    assert check.message == "2 of 3 installed packages have 3 known advisories"
+    assert check.message == (
+        "2 of 3 installed packages have 3 known advisories OSV was asked about the installed versions."
+    )
     assert "pyjwt 2.13.0 (fixed in 2.15.0)" in check.recommendation
     assert "chromadb 1.5.9 (no fixed release yet)" in check.recommendation
 

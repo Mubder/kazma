@@ -112,6 +112,7 @@ _NOT_WRITE_LOCATIONS = {
     "space_checkpoints_db": "takes a space (its file is in the data folder itself)",
     "migrate_legacy_user_home": "moves a folder, never at a container's boot (KAZMA_USER_HOME is set)",
     "merge_legacy_hub_if_empty": "copies from the legacy home, same",
+    "data_dir_is_relocated": "answers whether the data folder was moved; it is not a place Kazma writes",
 }
 
 #: Written by the image's entrypoint (freshclam --daemon), not by Kazma's code.

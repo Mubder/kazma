@@ -272,6 +272,12 @@ def _p_pg_argv(text):
     return _redact_cmd(["pg_dump", text, *words])
 
 
+def _p_self_check_mask(text):
+    from kazma_cli.self_check import _mask
+
+    return _mask(text)
+
+
 PROBES = {
     "kazma-core/kazma_core/errors.py::redact_secrets": _p_redact_secrets,
     "kazma-core/kazma_core/support/problem_report.py::redacted": _p_problem_report,
@@ -292,6 +298,7 @@ PROBES = {
     "kazma-ui/kazma_ui/settings.py::_mask_sensitive_values": _p_settings_page,
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact_cmd": _p_pg_argv,
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact": _p_pg_argv,
+    "kazma-cli/kazma_cli/self_check.py::_mask": _p_self_check_mask,
 }
 
 #: Found by the census and not fed free text -- each with its reason.

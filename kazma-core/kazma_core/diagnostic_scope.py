@@ -42,6 +42,7 @@ __all__ = [
     "active_diagnostic",
     "read_only_diagnostic",
     "refuse_write",
+    "self_check_reading",
     "writes_suppressed",
 ]
 
@@ -100,6 +101,17 @@ def active_diagnostic() -> str | None:
 def writes_suppressed() -> bool:
     """True inside a diagnostic: skip the bookkeeping writes a read would make."""
     return _current.get() is not None
+
+
+def self_check_reading() -> bool:
+    """True while ``kazma self-check`` is the diagnostic in progress.
+
+    Nested checks keep the outer name (``kazma self-check > kazma doctor``).
+    A read on that path must not create a data folder, a home directory, or a
+    database file.
+    """
+    name = active_diagnostic() or ""
+    return name == "kazma self-check" or name.startswith("kazma self-check ")
 
 
 def refuse_write(kind: str, target: str) -> None:

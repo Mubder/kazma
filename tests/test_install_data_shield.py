@@ -35,6 +35,7 @@ _NOT_A_STORE = {
     "installed_project_root": "the install folder, read-only",
     "migrate_legacy_user_home": "a boot-time move, guarded on its own (test_user_home_migration.py)",
     "log_file": "pinned separately, by the log shield above it in the conftest",
+    "data_dir_is_relocated": "answers whether the data folder was moved; it is not a location",
 }
 
 

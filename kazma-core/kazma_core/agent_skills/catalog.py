@@ -29,8 +29,8 @@ def list_skill_summaries(
 ) -> list[dict[str, Any]]:
     """Return summary dicts for all enabled skills (for UI / tools).
 
-    Each carries ``integrity`` -- verified, unsigned or refused, the answer
-    activation gives -- and ``integrity_reason``.
+    Each carries ``integrity`` -- verified, unsigned, refused or unchecked, the
+    answer activation gives -- and ``integrity_reason``.
     """
     skills = discover_skills(
         project_root=project_root,
@@ -44,19 +44,21 @@ def list_skill_summaries(
 
 
 def skill_integrity(skill: AgentSkill) -> tuple[str, str]:
-    """``("verified" | "unsigned" | "refused", reason)``: what activation would do.
+    """``("verified" | "unsigned" | "refused" | "unchecked", reason)``.
 
     The catalog, the list tool, ``kazma agent-skills list`` and the Skills
     page show this. They showed "verified" whenever a checksum was recorded,
     so nine live skills activation refused (another key had signed them)
     were offered to the model as verified (2026-10-02). An error inside the
-    check is "unsigned", because activation then loads the body with the
-    unsigned note.
+    check is ``unchecked``: the check did not finish, and the reason does not
+    carry the exception's text. Activation has its own handler and still
+    loads the body with the unsigned note.
     """
     try:
         verdict = activation_integrity(skill, warn=False)
-    except Exception as exc:  # activation degrades the same way (format_skill_activation)
-        return "unsigned", f"the integrity check failed: {exc}"
+    except Exception:
+        logger.warning("[skills] the integrity check did not finish", exc_info=True)
+        return "unchecked", "the integrity check did not finish"
     if not verdict.ok:
         return "refused", verdict.reason
     return ("verified" if verdict.signed else "unsigned"), verdict.reason

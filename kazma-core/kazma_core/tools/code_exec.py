@@ -309,6 +309,16 @@ def _outside_the_owners_space() -> bool:
     return bound is None or bound.space_id != OWNER_SPACE_ID
 
 
+def docker_exec_forced() -> bool:
+    """True when ``KAZMA_CODE_EXEC_DOCKER`` forces ``python_exec`` into a container.
+
+    The tokens are the ones :func:`local_exec_forbidden` uses. There is no
+    second list.
+    """
+    raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
+    return raw in {"force", "required", "1", "true", "on", "yes", "docker"}
+
+
 def local_exec_forbidden() -> bool:
     """True when host-local python_exec fallback is banned.
 
@@ -349,8 +359,7 @@ def local_exec_forbidden() -> bool:
     except policy_read_failures():
         logger.warning("[code_exec] execution profile unavailable; refusing host fallback", exc_info=True)
         return True
-    raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
-    if raw in ("force", "required", "1", "true", "on", "yes", "docker"):
+    if docker_exec_forced():
         return True
     if (os.environ.get("KAZMA_CODE_EXEC_ALLOW_LOCAL") or "").strip().lower() in (
         "1", "true", "on", "yes",

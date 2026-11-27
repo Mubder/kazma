@@ -73,6 +73,25 @@ def test_every_discovered_skill_passes(client, seeded):
             assert "score" not in body
 
 
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [
+        ("unchecked", "the integrity check did not finish"),
+        ("unsigned", "no integrity checksum is stored"),
+    ],
+)
+def test_an_unconfirmed_skill_warns(client, seeded, monkeypatch, state, reason):
+    """Validate warns when the integrity check did not finish, as it does when unsigned."""
+    from kazma_core.agent_skills import catalog
+
+    monkeypatch.setattr(catalog, "skill_integrity", lambda skill: (state, reason))
+    body = _validate(client, "fa249-demo").json()
+    assert body["state"] == state
+    assert body["passed"] is True
+    assert reason in body["warnings"]
+    assert body["errors"] == []
+
+
 def test_a_relative_folder_is_read_in_the_skill_folders(client, seeded):
     body = _validate(client, "fa249-demo").json()
     assert body["location"] == str(seeded.resolve())

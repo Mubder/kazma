@@ -148,9 +148,31 @@ def data_dir(*, create: bool = True) -> Path:
         d = Path(env).expanduser().resolve()
     else:
         d = get_project_root() / "kazma-data"
-    if create:
+    if create and not _self_check_reading():
         d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def data_dir_is_relocated() -> bool:
+    """True when ``KAZMA_DATA_DIR`` points somewhere other than this install's ``kazma-data``.
+
+    The one answer for the boot warning and the known gap: a data folder that
+    was not moved does not meet that gap. An empty variable is the default
+    folder, so it is not relocated.
+    """
+    raw = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
+    if not raw:
+        return False
+    relocated = Path(raw).expanduser().resolve()
+    default = (get_project_root() / "kazma-data").resolve()
+    return relocated != default
+
+
+def _self_check_reading() -> bool:
+    """Local import: paths is loaded before the diagnostic scope."""
+    from kazma_core.diagnostic_scope import self_check_reading
+
+    return self_check_reading()
 
 
 def vector_memory_path() -> str:
@@ -232,16 +254,19 @@ def vector_db() -> str:
 
 
 def backups_dir() -> Path:
-    """Backups directory."""
+    """Backups directory.
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     env = os.environ.get("KAZMA_BACKUPS_DIR")
     if env:
         # Made like the default one: a folder named here and not there yet
         # failed every native memory backup ("unable to open database file").
         d = Path(env).expanduser().resolve()
+    else:
+        d = data_dir() / "backups"
+    if not _self_check_reading():
         d.mkdir(parents=True, exist_ok=True)
-        return d
-    d = data_dir() / "backups"
-    d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -255,7 +280,8 @@ def exports_dir() -> Path:
     if env:
         return Path(env).expanduser().resolve()
     d = data_dir() / "exports"
-    d.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -363,7 +389,7 @@ def user_home() -> Path:
 
     The directory is created if missing.  Callers should also invoke
     :func:`migrate_legacy_user_home` once at boot to move any pre-existing
-    ``~/.kazma`` into the new location.
+    ``~/.kazma`` into the new location. ``kazma self-check`` does not create it.
     """
     env = (os.environ.get("KAZMA_USER_HOME") or "").strip()
     if env:
@@ -371,7 +397,8 @@ def user_home() -> Path:
     else:
         # Project-local: sibling of kazma-data/, at the repo root.
         h = get_project_root() / ".kazma"
-    h.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        h.mkdir(parents=True, exist_ok=True)
     return h
 
 
@@ -412,8 +439,11 @@ def migrate_legacy_user_home() -> bool:
       - Only moves when legacy exists AND target doesn't — the clean
         first-boot case.
 
-    Returns ``True`` if a migration was performed.
+    Returns ``True`` if a migration was performed. ``kazma self-check`` does
+    not move or create a home.
     """
+    if _self_check_reading():
+        return False
     import logging
 
     _log = logging.getLogger(__name__)
@@ -487,30 +517,46 @@ def hub_registry_db() -> str:
 
 
 def installed_skills_dir() -> Path:
-    """Directory for user-installed skills (user-level)."""
+    """Directory for user-installed skills (user-level).
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     d = user_home() / "skills"
-    d.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def tui_themes_dir() -> Path:
-    """TUI theme configuration directory (user-level)."""
+    """TUI theme configuration directory (user-level).
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     d = user_home() / "themes"
-    d.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def tui_state_dir() -> Path:
-    """TUI state directory (tutorial progress, etc.)."""
+    """TUI state directory (tutorial progress, etc.).
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     d = user_home() / "tui"
-    d.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def agent_skills_dir() -> Path:
-    """Kazma-owned Agent Skills install directory under project home."""
+    """Kazma-owned Agent Skills install directory under project home.
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     d = user_home() / "agent-skills"
-    d.mkdir(parents=True, exist_ok=True)
+    if not _self_check_reading():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -536,8 +582,11 @@ def merge_legacy_hub_if_empty() -> bool:
     """If dual homes exist and project hub is empty, copy legacy hub registry.
 
     Non-destructive: never overwrites a non-empty project hub DB.
-    Returns True if a copy was performed.
+    Returns True if a copy was performed. ``kazma self-check`` does not copy
+    or create a home.
     """
+    if _self_check_reading():
+        return False
     import logging
     import shutil
 

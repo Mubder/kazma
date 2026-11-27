@@ -28,8 +28,10 @@ scope is `kazma_core/agent_skills/bundled/` — 3 Kazma-native starter skills.
   `checksums.json` (see the generator at the bottom of the bundled dir's git
   history) or it won't activate.
 - **Every surface shows activation's verdict** (`catalog.skill_integrity`,
-  2026-10-02): `verified`, `unsigned` (loads with a warning) or `refused`
-  (with the reason, which names `kazma agent-skills sign <folder>`). The
+  2026-10-02): `verified`, `unsigned` (loads with a warning), `refused`
+  (with the reason, which names `kazma agent-skills sign <folder>`), or
+  `unchecked` when the check itself did not finish (the Skills page warns;
+  the words are `skills.integrity_unchecked`). The
   model's catalog leaves a refused skill out and says so; the list tool, the
   CLI's `list` and the Skills page show the state. They used to call any
   recorded checksum "verified": live, nine skills another key had signed were

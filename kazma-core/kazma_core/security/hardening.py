@@ -61,6 +61,8 @@ class HardeningCheck:
     severity: str  # critical, high, medium, low, info
     message: str
     recommendation: str
+    #: False when this check did not run. Never read a failed-to-run check as a pass.
+    ran: bool = True
 
 
 @dataclass
@@ -282,6 +284,7 @@ class SecurityHardeningRunner:
                 severity="high",
                 message=f"This check could not run: {type(exc).__name__}: {exc}",
                 recommendation="Read the server log for the traceback.",
+                ran=False,
             )
 
     def generate_report(self) -> str:
@@ -516,8 +519,10 @@ class SecurityHardeningRunner:
                 message=f"The installed packages could not be checked against OSV: {exc}",
                 recommendation=behind + (update if unmet else "")
                 + "Run the report again when api.osv.dev is reachable.",
+                ran=False,
             )
         reviewed = _reviewed_note(report)
+        asked = " OSV was asked about the installed versions."
         open_vulns = report.open_vulnerabilities
         if open_vulns:
             upgrades = report.upgrades()
@@ -528,7 +533,7 @@ class SecurityHardeningRunner:
                 severity="critical",
                 message=(
                     f"{len(packages)} of {report.total} installed packages have "
-                    f"{len(open_vulns)} known advisories" + reviewed
+                    f"{len(open_vulns)} known advisories" + reviewed + asked
                 ),
                 recommendation=behind + update + "Fixed releases: " + ", ".join(
                     _upgrade_note(pkg, *upgrades[pkg]) for pkg in packages
@@ -539,7 +544,7 @@ class SecurityHardeningRunner:
                 name="check_dependency_vulnerabilities",
                 passed=False,
                 severity="high",
-                message=behind.strip() + reviewed,
+                message=behind.strip() + reviewed + asked,
                 recommendation=update.strip(),
             )
         return HardeningCheck(
@@ -548,7 +553,7 @@ class SecurityHardeningRunner:
             severity="critical",
             message=(
                 f"No open advisory affects the {report.total} installed packages, and they "
-                f"meet this build's minimums" + reviewed
+                f"meet this build's minimums" + reviewed + asked
             ),
             recommendation="Run the report after each upgrade",
         )
@@ -664,13 +669,15 @@ class SecurityHardeningRunner:
             )
         try:
             decisions = hitl_gates.recorded_decision_count()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, OSError):
+            logger.warning("[hardening] the approval registry could not be read", exc_info=True)
             return HardeningCheck(
                 name="check_audit_logging",
                 passed=False,
                 severity="high",
-                message=f"The approval registry cannot be read: {exc}",
+                message="The approval registry could not be read.",
                 recommendation="Check hitl_gates.db in the data folder (disk space, permissions).",
+                ran=False,
             )
         return HardeningCheck(
             name="check_audit_logging",
@@ -700,6 +707,7 @@ class SecurityHardeningRunner:
                     "Publish container ports on 127.0.0.1 (\"127.0.0.1:5433:5432\"; the compose "
                     "files do), and sign Kazma in with a database role that is not a superuser."
                 ),
+                ran=not unchecked,
             )
         return HardeningCheck(
             name="check_service_exposure",
@@ -707,6 +715,7 @@ class SecurityHardeningRunner:
             severity="critical",
             message="No service of Kazma's is published beyond this machine" + note,
             recommendation="Keep container ports on 127.0.0.1",
+            ran=not unchecked,
         )
 
     async def check_searxng_secret(self) -> HardeningCheck:
@@ -728,6 +737,7 @@ class SecurityHardeningRunner:
                 message="; ".join(problems) + note,
                 recommendation=("Run `kazma setup install --with private_search`: it keeps a generated "
                                 "SEARXNG_SECRET in .env and starts SearXNG again with it."),
+                ran=not unchecked,
             )
         return HardeningCheck(
             name="check_searxng_secret",
@@ -735,6 +745,7 @@ class SecurityHardeningRunner:
             severity="medium",
             message="No SearXNG of Kazma's runs on the placeholder secret key" + note,
             recommendation="Keep SEARXNG_SECRET in .env (setup writes one)",
+            ran=not unchecked,
         )
 
     async def check_windows_file_check(self) -> HardeningCheck:

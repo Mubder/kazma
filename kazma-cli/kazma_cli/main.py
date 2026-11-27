@@ -71,7 +71,16 @@ def main() -> None:
     # they have open, and `kazma ask` runs inside a workspace: a .env there is
     # the folder's, not the operator's (audit 2026-10-26 AUD-084).
     _sub = next((a for a in sys.argv[1:] if not a.startswith("-")), "")
-    load_env_files(include_cwd=_sub not in ("mcp", "ask"))
+    # user_home() runs inside load_env_files, before the subcommand. On
+    # self-check that call must not create the home folder: the command
+    # reports a missing, empty, or mistyped install and leaves it untouched.
+    from contextlib import nullcontext
+
+    from kazma_core.diagnostic_scope import read_only_diagnostic
+
+    _diag = read_only_diagnostic("kazma self-check") if _sub == "self-check" else nullcontext()
+    with _diag:
+        load_env_files(include_cwd=_sub not in ("mcp", "ask"))
 
     from kazma_core.spaces.scope import OWNER_SPACE_ID
     from kazma_core.tenant_context import set_current_tenant_id
@@ -114,6 +123,11 @@ def main() -> None:
         from kazma_cli.doctor import run as _run_doctor
 
         sys.exit(_run_doctor(sys.argv[2:]))
+
+    elif cmd == "self-check":
+        from kazma_cli.self_check import run as _run_self_check
+
+        sys.exit(_run_self_check(sys.argv[2:]))
 
     elif cmd == "acquisition":
         from kazma_cli.acquisition import run as _run_acquisition
@@ -222,6 +236,7 @@ def main() -> None:
         print("  version    Print Kazma's version (also --version, -V)")
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
+        print("  self-check Read-only report of health, security, backup, signatures and known gaps (--json)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  observer   Kazma Watch, the outside observer (setup, pair, status, unpair)")
         print("  spaces     Several people on one Kazma (spaces migrate --check: what is missing)")

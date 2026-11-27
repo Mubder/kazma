@@ -111,9 +111,15 @@ def _cross_client_dir() -> Path:
 
 def user_agent_skills_dir() -> Path:
     """Primary install target for Agent Skills (``.agents/skills``, shared
-    with other agentskills.io clients), created on first use."""
+    with other agentskills.io clients), created on first use.
+
+    ``kazma self-check`` returns the path and does not create it.
+    """
     agents = _cross_client_dir()
-    agents.mkdir(parents=True, exist_ok=True)
+    from kazma_core.diagnostic_scope import self_check_reading
+
+    if not self_check_reading():
+        agents.mkdir(parents=True, exist_ok=True)
     return agents
 
 
