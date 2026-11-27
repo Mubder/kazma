@@ -28,6 +28,7 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from kazma_core.english_count import count_noun
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def _effect_empty() -> tuple[str, str]:
     days = COMPLETED_RETENTION_DAYS
     return (
         "not recorded. No effect receipt is stored for this turn. "
-        f"Completed receipts are kept {days} days and then removed.",
+        f"Completed receipts are kept {count_noun(days, 'day')} and then removed.",
         "غير مسجّل. لا إيصال أثر مخزّن لهذه الدورة. "
         f"تُحفظ الإيصالات المكتملة {days} يوماً ثم تُحذف.",
     )
@@ -178,7 +179,7 @@ def _approval_empty() -> tuple[str, str]:
     days = DECIDED_RETENTION_DAYS
     return (
         "not recorded. No approval is stored for this turn. "
-        f"Settled approvals are kept {days} days and then removed.",
+        f"Settled approvals are kept {count_noun(days, 'day')} and then removed.",
         "غير مسجّل. لا موافقة مخزّنة لهذه الدورة. "
         f"تُحفظ الموافقات المحسومة {days} يوماً ثم تُحذف.",
     )
@@ -190,7 +191,8 @@ def _commitment_empty() -> tuple[str, str]:
     short, long = RETENTION_EPHEMERAL_DAYS, RETENTION_CRITICAL_DAYS
     return (
         "not recorded. No commitment check is stored for this turn. "
-        f"Ephemeral checks are kept {short} days and critical ones {long} days, then removed.",
+        f"Ephemeral checks are kept {count_noun(short, 'day')}, and critical checks are kept "
+        f"{count_noun(long, 'day')}, then removed.",
         "غير مسجّل. لا فحص التزام مخزّن لهذه الدورة. "
         f"تُحفظ الفحوص العابرة {short} يوماً والحرجة {long} يوماً ثم تُحذف.",
     )
@@ -202,7 +204,7 @@ def _ledger_zero() -> tuple[str, str]:
     days = CALL_RETENTION_DAYS
     return (
         "not recorded. A count of zero is not a record: "
-        f"rows are kept {days} days and then removed.",
+        f"rows are kept {count_noun(days, 'day')} and then removed.",
         "غير مسجّل. العدد صفر ليس سجلاً: "
         f"تُحفظ الصفوف {days} يوماً ثم تُحذف.",
     )

@@ -154,7 +154,8 @@ def test_the_done_frame_reports_the_whole_turn(ledger, tmp_path, monkeypatch):
     """Segment 2 of a turn that paused once: the done frame carries all three
     calls and the clock since the question; the session is charged only the
     segment's call, because segment 1 was charged when it ended."""
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    # data_dir takes create=: a turn opens thread_scopes.db through it.
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda *, create=True: tmp_path)
     from kazma_ui.session_manager import get_session_manager, reset_session_manager
     from kazma_ui.sse_chat import _stream_langgraph_events
 
@@ -220,7 +221,8 @@ def test_negative_control_without_the_ledger_the_last_call_is_all_there_is(
 ):
     """With the ledger off (no rows), the frame keeps what the stream saw --
     the behaviour the totals replace, shown so the test above means something."""
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    # data_dir takes create=: a turn opens thread_scopes.db through it.
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda *, create=True: tmp_path)
     monkeypatch.setattr(llm_ledger, "turn_usage",
                         lambda turn_id, since="": {"calls": 0, "tokens": 0, "cost": 0.0})
     from kazma_ui.session_manager import reset_session_manager
