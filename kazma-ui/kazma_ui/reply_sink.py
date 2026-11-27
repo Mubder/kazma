@@ -68,6 +68,7 @@ __all__ = [
     "reset_reply_turns",
     "resolve_reply_text",
     "resolve_reply_turn",
+    "take_reply_turn",
     "upsert_reply",
 ]
 
@@ -364,6 +365,16 @@ def current_reply_turn(thread_id: str) -> str:
         return ""
     with _lock:
         return _open_turns.get(thread_id, "")
+
+
+def take_reply_turn(thread_id: str) -> str:
+    """The open reply turn of *thread_id*, taken out of the open turns in one
+    step: of two callers at once, one gets it and the other "". For a chat
+    that goes away (``chat_runs_end``): one of two ends at once reports it."""
+    if not thread_id:
+        return ""
+    with _lock:
+        return _open_turns.pop(thread_id, "")
 
 
 def close_reply_turn(thread_id: str, session_id: str = "", turn_id: str = "") -> None:

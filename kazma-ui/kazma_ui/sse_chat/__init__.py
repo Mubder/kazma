@@ -1934,9 +1934,11 @@ def create_sse_chat_router(
     async def archive_session(session_id: str) -> Any:
         """Archive a chat session (hide from sidebar without deleting).
 
-        What the chat had running or waiting ends (``chat_runs_end``): an
-        archived chat is one the person put away, and its turn stuck open
-        paged an incident. A thread another chat shows goes on there."""
+        What the chat has waiting ends (``chat_runs_end``, waiting only): a
+        card nobody will see in an archived chat held its turn open, and it
+        was paged stuck. A turn still running finishes and saves its answer
+        in the archived chat, as before. A thread another chat shows goes on
+        there."""
         try:
             if (refused := await asyncio.to_thread(_whole_chat_refusal_sync, session_id)) is not None:
                 return refused
@@ -1948,7 +1950,7 @@ def create_sse_chat_router(
                 from kazma_ui.chat_runs_end import end_chat_runs
 
                 await end_chat_runs(thread_id, reason="chat_archived", session_id=session_id,
-                                    title=str(session.title or ""), graph=_get_graph())
+                                    title=str(session.title or ""), graph=_get_graph(), waiting_only=True)
             return {"status": "ok", "archived": True}
         except ChatDeleted:
             return _chat_deleted_answer()

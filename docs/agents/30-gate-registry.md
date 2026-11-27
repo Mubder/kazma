@@ -129,6 +129,15 @@ loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
 `kazma_hitl_gate_parity_mismatch_total{site}` (must trend to zero),
 `kazma_hitl_gate_reconciled_total{action}`.
 
+**A chat that goes away ends its gates through `end_gate`** (2026-11-27,
+§52): ONE compare-and-set from exactly the state it read -- `pending` ->
+`settled` `not_needed`, `claimed` -> `settled` keeping the person's decision,
+`resuming` -> `error` keeping it (the drive was cut; the call may have run).
+`settle_gate` tries every live state, so it rewrote an Approve that landed
+between the read and the write. Only the chat's own mechanisms (`graph`,
+`semantic`). Gate: `tests/test_chat_gone_ends_runs.py` (claimed and resuming
+through the delete route; the race; two ends at once).
+
 **E2. An approval that expires is said for what it is, in the chat it was
 asked in** (2026-10-18). Live on Telegram: the watchdog auto-denied a
 `file_apply_patch` card nobody had answered in 300 s; the model read "denied by

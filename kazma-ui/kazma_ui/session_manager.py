@@ -1073,11 +1073,11 @@ class SessionManager:
     def space_erased(self, space: str) -> None:
         """*space* was erased (``spaces_api``): from here on nothing writes a
         chat of it, and what was written while it was erased goes -- a copy
-        held since before brought an erased chat back. What its chats had
-        running or waiting ends (``chat_runs_end``). Raises when the store
-        cannot remove it."""
+        held since before brought an erased chat back. What its chats ran or
+        waited for ended before any of its rows went (``erase_space`` ->
+        ``chat_runs_end.end_space_runs``). Raises when the store cannot
+        remove it."""
         with self._lock:
-            its_threads = self._threads_of_space(space)
             with self._deleted_lock:
                 self._erased.add(space)
             threads.end_space(space)
@@ -1095,27 +1095,6 @@ class SessionManager:
             for owner, session_id in self._spool.keys() if self._spool is not None else ():
                 if owner == space:
                     self._spool.discard(owner, session_id)
-        from kazma_ui.chat_runs_end import chats_went_away
-
-        chats_went_away(its_threads, reason="space_erased")  # each step says its own failure
-
-    def _threads_of_space(self, space: str) -> set[str]:
-        """The threads of every chat *space* holds: cached, stored, spooled.
-        The caller holds the lock. Raises when the store cannot be read."""
-        found = {s.thread_id or s.session_id for key, s in self._sessions.items() if key.startswith(f"{space}:")}
-        if self._pg:
-            from kazma_core.db.pg_helpers import get_pool
-
-            rows = [(r["session_id"], r["thread_id"]) for r in get_pool().execute(
-                "SELECT session_id, thread_id FROM kazma_chat_sessions WHERE tenant_id = %s", (space,))]
-        else:
-            assert self._conn is not None
-            rows = self._conn.execute(
-                "SELECT session_id, thread_id FROM sessions WHERE tenant_id = ?", (space,)).fetchall()
-        found |= {str(thread_id or session_id) for session_id, thread_id in rows}
-        found |= {session_id for owner, session_id in (self._spool.keys() if self._spool is not None else ())
-                  if owner == space}
-        return {t for t in found if t}
 
     def _chat_went_away(self, held: ChatSession | None, session_id: str, reason: str) -> None:
         """What the chat *session_id* (row *held*) had running or waiting

@@ -1136,7 +1136,7 @@ _LOOP_STALL_HELPERS = frozenset({
     # live-voice socket's session lookup is a chat-store read.
     "register_gate", "claim_gate", "mark_resuming", "settle_gate", "fail_gate",
     "supersede_gate", "gate_for", "live_gates", "display_gates", "pending_gates",
-    "timeout_gate", "boot_sweep", "ensure_gate_schema", "resolve_voice_session",
+    "timeout_gate", "boot_sweep", "ensure_gate_schema", "resolve_voice_session", "end_gate",
     # The chat upload's write (up to 20 MB) and the documents settings
     # snapshot the maintenance loop read every pass (AUD-111): a file write
     # and ConfigStore.snapshot, which the names above cannot infer.

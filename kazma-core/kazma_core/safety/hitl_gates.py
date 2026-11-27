@@ -75,6 +75,7 @@ __all__ = [
     "settle_gate",
     "fail_gate",
     "supersede_gate",
+    "end_gate",
     "set_db_path_for_tests",
     "gate_for",
     "live_gates",
@@ -874,6 +875,38 @@ def supersede_gate(gate_id: str, new_gate_id: str) -> GateRow | None:
             {"settled_at": time.time(), "supersedes": new_gate_id},
         )
         row = _get(conn, gate_id) if ok else None
+    finally:
+        conn.close()
+    if row is not None:
+        gate_events.publish("gate_settled", row)
+    return row
+
+
+def end_gate(gate_id: str, from_state: str, *, outcome: str = "", message: str = "") -> GateRow | None:
+    """End a live gate whose chat went away (``kazma_ui.chat_runs_end``), in
+    ONE compare-and-set from exactly *from_state*, so a decision a person
+    records meanwhile is never overwritten (D2):
+
+    * ``pending`` -> ``settled`` with *outcome* as its decision (nobody
+      decided it);
+    * ``claimed`` -> ``settled``, keeping the decision a person recorded;
+    * ``resuming`` -> ``error``, keeping the decision: its call may have run
+      when the drive was cut (*message* says so).
+
+    None when the row was not in *from_state* -- another writer moved it
+    first, and what it wrote stands."""
+    to_state = {"pending": "settled", "claimed": "settled", "resuming": "error"}.get(from_state)
+    if to_state is None:
+        raise ValueError(f"end_gate: not a live state {from_state!r}")
+    ensure_gate_schema()
+    sets: dict[str, Any] = {"settled_at": time.time()}
+    if from_state == "pending" and outcome:
+        sets["decision"] = outcome
+    if to_state == "error" and message:
+        sets["message"] = _masked_message(message)
+    conn = _connect()
+    try:
+        row = _get(conn, gate_id) if _cas(conn, gate_id, from_state, to_state, sets) else None
     finally:
         conn.close()
     if row is not None:

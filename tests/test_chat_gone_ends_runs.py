@@ -56,8 +56,11 @@ STALE = 700.0  # past the chat turn's dead_after_s (600)
 
 
 def _clean() -> None:
+    from kazma_ui import turn_resume
+
     active_turns.reset_active_turns()
     reply_sink.reset_reply_turns()
+    turn_resume._left.clear()  # cut turns another test left: the supervisor would page them
     runs_chat_turn._abandoned_since.clear()
     with runs_chat_turn._ended_lock:
         runs_chat_turn._ended.clear()
@@ -185,7 +188,7 @@ class Waiting:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def _waiting_chat(store: SessionManager, *, thread: str = "", space: str = "") -> Waiting:
+def _waiting_chat(store: SessionManager, *, thread: str = "", space: str = "", gate: bool = True) -> Waiting:
     """A chat whose turn waits on an approval: the transcript's pending card,
     the open reply turn, the registry's pending gate -- as the stream leaves
     them at the pause."""
@@ -202,8 +205,9 @@ def _waiting_chat(store: SessionManager, *, thread: str = "", space: str = "") -
         held.title = chat.title
         store.put(held)
     reply_sink.open_reply_turn(chat.thread_id, chat.turn_id)
-    hitl_gates.register_gate(GateRow(gate_id=chat.gate_id, thread_id=chat.thread_id, tool="python_exec",
-                                     session_id=chat.session_id, turn_id=chat.turn_id))
+    if gate:
+        hitl_gates.register_gate(GateRow(gate_id=chat.gate_id, thread_id=chat.thread_id, tool="python_exec",
+                                         session_id=chat.session_id, turn_id=chat.turn_id))
     return chat
 
 
@@ -457,26 +461,270 @@ def test_the_stores_limit_ends_the_turn_of_the_chat_it_removes(tmp_path) -> None
         small.close()
 
 
-def test_a_space_erased_ends_its_chats_turns(store) -> None:
-    chat = _waiting_chat(store, space="space-x")
+def test_a_space_erased_ends_its_runs_before_its_rows_go(store, monkeypatch, tmp_path) -> None:
+    """Through the real erase: the run is ended while the space's rows and
+    thread records still say whose it is, and recorded in that space -- ended
+    after, it landed in the owner's Running work with no space and no title."""
+    from kazma_core.spaces import space_data, threads
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bind_scope
+
+    from tests._space_world import A, plant_world
+
+    world = plant_world(monkeypatch, tmp_path / "world")
+    next(world)
+    try:
+        thread = f"t-{uuid4().hex[:8]}"
+        with bind_scope(A, OWNER_ACCOUNT_ID):
+            threads.record_thread(thread, A, OWNER_ACCOUNT_ID)
+            hitl_gates.register_gate(GateRow(gate_id=f"intr-{uuid4().hex[:8]}", thread_id=thread,
+                                             tool="python_exec"))
+        reply_sink.open_reply_turn(thread, "turn-a")
+        space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+        assert thread not in reply_sink.open_turns_snapshot()
+        assert hitl_gates.live_gates(thread) == []
+        assert runs_chat_turn._ended_turns()[thread].space == A
+        assert runs_chat_turn._ended_turns()[thread].reason == "space_erased"
+    finally:
+        world.close()
+
+
+def test_a_space_erased_leaves_other_spaces_turns(store) -> None:
+    from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bind_scope
+    from kazma_ui.chat_runs_end import end_space_runs
+
+    with bind_scope("se0a5e00000x0", OWNER_ACCOUNT_ID):
+        chat = _waiting_chat(store, space="se0a5e00000x0")
+        threads.record_thread(chat.thread_id, "se0a5e00000x0", OWNER_ACCOUNT_ID)
     other = _waiting_chat(store)  # the owner's: it goes on
-    store.space_erased("space-x")
+    assert end_space_runs("se0a5e00000x0") == 1
     _ended_cleanly(chat, "space_erased")
+    assert runs_chat_turn._ended_turns()[chat.thread_id].space == "se0a5e00000x0"
     assert other.thread_id in reply_sink.open_turns_snapshot()
     assert [g.gate_id for g in hitl_gates.live_gates(other.thread_id)] == [other.gate_id]
+
+
+# ── the review of f9a455918 ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("resuming", [False, True], ids=["claimed", "resuming"])
+def test_a_delete_racing_an_approve_keeps_the_persons_decision(store, web, resuming) -> None:
+    """F1: a gate a person answered keeps their decision; one whose drive was
+    cut mid-resume is an error with it (its call may have run) -- never
+    "no longer needed" (D2)."""
+    chat = _waiting_chat(store)
+    hitl_gates.claim_gate(chat.gate_id, "approve", "owner")
+    if resuming:
+        hitl_gates.mark_resuming(chat.gate_id)
+    assert web.client.delete(f"/api/chat/sessions/{chat.session_id}").json() == {"status": "ok"}
+    gate = hitl_gates.gate_for(chat.gate_id)
+    assert gate is not None and gate.decision == "approve" and gate.actor == "owner", gate
+    assert gate.state == ("error" if resuming else "settled"), gate
+    assert hitl_gates.live_gates(chat.thread_id) == []
+
+
+def test_a_gate_answered_between_the_read_and_the_end_keeps_its_answer(store) -> None:
+    """F1, the race itself: a pending gate claimed just before its end is
+    not taken from the person."""
+    chat = _waiting_chat(store)
+    hitl_gates.claim_gate(chat.gate_id, "approve", "owner")
+    assert hitl_gates.end_gate(chat.gate_id, "pending", outcome="not_needed") is None
+    gate = hitl_gates.gate_for(chat.gate_id)
+    assert gate.state == "claimed" and gate.decision == "approve"
+
+
+def test_clear_all_leaves_gates_that_are_not_a_chats(store, web) -> None:
+    """F2: a ``kazma mcp`` bridge question and a swarm bus request are their
+    own work's: clear-all neither answers them nor lists them as chat runs."""
+    bridge = GateRow(gate_id=f"g-{uuid4().hex[:8]}", thread_id="mcp:watcher-1", tool="shell_exec",
+                     mechanism="bus_bridge")
+    swarm = GateRow(gate_id=f"g-{uuid4().hex[:8]}", thread_id="task-1", tool="file_write", mechanism="swarm_bus")
+    for row in (bridge, swarm):
+        hitl_gates.register_gate(row)
+    chat = _waiting_chat(store)
+    assert web.client.post("/api/sessions/clear-all").json()["deleted"] is True
+    _ended_cleanly(chat, "chat_cleared")
+    for row in (bridge, swarm):
+        assert hitl_gates.gate_for(row.gate_id).state == "pending", row
+        assert row.thread_id not in runs_chat_turn._ended_turns()
+
+
+def test_a_delete_ends_only_the_chats_own_gates(store, web) -> None:
+    """F2: a swarm request carried on the chat's thread is the swarm's."""
+    chat = _waiting_chat(store)
+    swarm = GateRow(gate_id=f"g-{uuid4().hex[:8]}", thread_id=chat.thread_id, tool="file_write",
+                    mechanism="swarm_bus")
+    hitl_gates.register_gate(swarm)
+    assert web.client.delete(f"/api/chat/sessions/{chat.session_id}").json() == {"status": "ok"}
+    assert hitl_gates.gate_for(chat.gate_id).decision == "not_needed"
+    assert hitl_gates.gate_for(swarm.gate_id).state == "pending"
+
+
+def test_archive_leaves_a_running_turn_to_finish(store, web) -> None:
+    """F3: an archived chat's running answer finishes and is saved, as before
+    the change; only what waits is ended."""
+    chat = _waiting_chat(store, gate=False)
+    loop = asyncio.new_event_loop()
+    runner = threading.Thread(target=loop.run_forever, daemon=True)
+    runner.start()
+    try:
+        async def turn() -> None:
+            await asyncio.sleep(3600)
+
+        task = asyncio.run_coroutine_threadsafe(_make_task(turn()), loop).result(5)
+        active_turns.register_turn(chat.thread_id, task)
+        answer = web.client.post(f"/api/chat/sessions/{chat.session_id}/archive").json()
+        assert answer == {"status": "ok", "archived": True}
+        for _ in range(3):  # whatever was handed to the turn's loop has run by now
+            asyncio.run_coroutine_threadsafe(asyncio.sleep(0), loop).result(5)
+        assert not task.done()
+        assert active_turns.is_turn_running(chat.thread_id)
+        assert chat.thread_id in reply_sink.open_turns_snapshot()
+        assert chat.thread_id not in runs_chat_turn._ended_turns()
+        assert web.graph.updates == []
+    finally:
+        loop.call_soon_threadsafe(task.cancel)
+        loop.call_soon_threadsafe(loop.stop)
+        runner.join(5)
+        loop.close()
+
+
+def _paused_graph() -> tuple[Any, Any]:
+    """A real LangGraph graph whose first node asks for an approval
+    (``interrupt``), on an in-memory checkpointer."""
+    from typing import TypedDict
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import interrupt
+
+    class State(TypedDict, total=False):
+        messages: list
+        task_status: str
+        auto_continue: bool
+
+    def ask(state: State) -> dict[str, Any]:
+        interrupt({"tool": "python_exec"})
+        return {}
+
+    def tools(state: State) -> dict[str, Any]:
+        return {}
+
+    builder = StateGraph(State)
+    builder.add_node("ask", ask)
+    builder.add_node("tools", tools)
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", "tools")
+    builder.add_edge("tools", END)
+    saver = InMemorySaver()
+    return builder.compile(checkpointer=saver), saver
+
+
+def test_an_archived_paused_turn_is_never_continued_at_a_start(store) -> None:
+    """F4: Stop's marker over a paused checkpoint leaves LangGraph a next
+    node and no interrupt -- what the start pass reads as a cut turn, and
+    continued, asking the approval again in the archived chat."""
+    from kazma_ui.turn_abort import mark_turn_abandoned
+    from kazma_ui.turn_resume import _find_cut_turns
+
+    graph, saver = _paused_graph()
+    thread = f"t-{uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
+
+    async def scenario() -> tuple[list[Any], list[Any], Any]:
+        await graph.ainvoke({"messages": [{"role": "user", "content": "run it"}]}, config)
+        paused = await _find_cut_turns(saver, graph)
+        assert await mark_turn_abandoned(thread, graph)
+        after = await _find_cut_turns(saver, graph)
+        return paused, after, await graph.aget_state(config)
+
+    paused, after, snapshot = asyncio.run(scenario())
+    assert paused == []                       # paused: its card is the action
+    assert snapshot.values.get("task_status") == "abandoned" and snapshot.next  # the shape the scan met
+    assert [t.thread_id for t in after] == []
+
+
+def test_an_archived_chats_cut_turn_is_never_continued(store) -> None:
+    """F4: a turn a restart cut in a chat since archived is left alone; the
+    same turn in a chat that shows is continued (the control)."""
+    from typing import TypedDict
+
+    from kazma_ui.turn_resume import _find_cut_turns
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    class State(TypedDict, total=False):
+        messages: list
+
+    builder = StateGraph(State)
+    builder.add_node("think", lambda state: {})
+    builder.add_node("tools", lambda state: {})
+    builder.add_edge(START, "think")
+    builder.add_edge("think", "tools")
+    builder.add_edge("tools", END)
+    saver = InMemorySaver()
+    graph = builder.compile(checkpointer=saver, interrupt_before=["tools"])
+    showing, archived = _waiting_chat(store, gate=False), _waiting_chat(store, gate=False)
+    with as_owner():
+        store.set_archived(archived.session_id, True)
+
+    async def scenario() -> list[str]:
+        for chat in (showing, archived):
+            await graph.ainvoke({"messages": [{"role": "user", "content": "go"}]},
+                                {"configurable": {"thread_id": chat.thread_id, "checkpoint_ns": ""}})
+        return sorted(t.thread_id for t in await _find_cut_turns(saver, graph))
+
+    with as_owner():
+        assert asyncio.run(scenario()) == [showing.thread_id]
+
+
+def test_two_ends_at_once_report_and_log_once(store, monkeypatch, caplog) -> None:
+    """F6: both ends read the waiting gate before either ends it; one moves
+    it, and only that one reports and logs."""
+    import logging
+
+    from kazma_ui.chat_runs_end import end_chat_runs
+
+    chat = _waiting_chat(store)
+    real = hitl_gates.live_gates
+    both = threading.Barrier(2)
+
+    def read_together(thread_id: str) -> list[Any]:
+        rows = real(thread_id)
+        try:
+            both.wait(timeout=3)
+        except threading.BrokenBarrierError:
+            pass
+        return rows
+
+    monkeypatch.setattr(hitl_gates, "live_gates", read_together)
+
+    async def scenario() -> list[Any]:
+        return list(await asyncio.gather(end_chat_runs(chat.thread_id, reason="chat_deleted"),
+                                         end_chat_runs(chat.thread_id, reason="chat_deleted")))
+
+    with caplog.at_level(logging.INFO, logger="kazma_ui.chat_runs_end"):
+        first, second = asyncio.run(scenario())
+    assert first.gates + second.gates == 1, (first, second)
+    assert [first.turn, second.turn].count(True) == 1
+    assert [first.recorded, second.recorded].count(True) == 1
+    assert sum("went away" in r.getMessage() for r in caplog.records) == 1, caplog.text
+    _ended_cleanly(chat, "chat_deleted")
 
 
 # ── the class gate ───────────────────────────────────────────────────────
 
 #: What ends a chat's runs (kazma_ui/chat_runs_end.py, and the chat store's
 #: own way to it).
-ENDERS = frozenset({"end_chat_runs", "chat_went_away", "chats_went_away", "end_every_chat_run",
+ENDERS = frozenset({"end_chat_runs", "chat_went_away", "end_space_runs", "end_every_chat_run",
                     "_chat_went_away"})
 #: Chat-store methods whose caller names the chat that goes (checked at the
 #: caller, below).
 ROW_REMOVERS = frozenset({"delete", "delete_if", "set_archived"})
-#: What removes a thread's whole state.
-STATE_REMOVERS = frozenset({"adelete_thread", "adelete_all_threads"})
+#: What removes a thread's whole state: the checkpointer's thread deletes,
+#: and a space's rows in every store (its chats, checkpoints, gates, thread
+#: records: ``space_data._erase_rows``).
+STATE_REMOVERS = frozenset({"adelete_thread", "adelete_all_threads", "_erase_rows"})
 #: Where a function gets the chat store from.
 STORE_GETTERS = frozenset({"get_session_manager", "peek_session_manager", "_get_store"})
 STORE_MODULE = "kazma-ui/kazma_ui/session_manager.py"
@@ -487,6 +735,9 @@ DECLARED: dict[tuple[str, str], str] = {
     ("kazma-ui/kazma_ui/chat_move.py", "_put_back"):
         "takes away a move's copy only while it is exactly the copy (_still_the_copy): nothing was "
         "written in it, so no turn ever ran on its new thread; the chat itself stays",
+    ("kazma-core/kazma_core/spaces/space_move.py", "_take_back"):
+        "takes back what a space import wrote before the import stood: nothing of that space was here "
+        "before it began, its threads are released (never ended), and none of its chats ran a turn",
     ("kazma-core/kazma_core/sessions/directory.py", "prune_twin_sessions"):
         "archives a chat app's auto-titled twin; the thread goes on in the named chat it keeps, and "
         "so does its turn",
@@ -497,6 +748,8 @@ STORE_DECLARED: dict[str, str] = {
     "prune_empty_web_sessions": "an empty web shell (no message, no custom title, not pinned), not "
                                 "marked deleted: a turn writes its question first, so none ran in it",
     "hand_over": "takes back only the copy it just wrote, which nobody has seen (the move did not commit)",
+    "space_erased": "the last step of erase_space, which ended the space's runs (end_space_runs) before any "
+                    "of its rows went; the gate checks that order there (_erase_rows)",
     "reset_session_manager": "the tests' reset of the store",
 }
 
@@ -728,11 +981,12 @@ def test_the_gate_sees_every_way_in_the_source() -> None:
         assert expected in removing, expected
     assert any(m == "kazma-gateway/kazma_gateway/agent_handler/graph.py" for m, _q in removing)
     assert any(m == "kazma-ui/kazma_ui/routes_direct/misc.py" for m, _q in removing)
+    assert ("kazma-core/kazma_core/spaces/space_data.py", "erase_space") in removing
     tree = ast.parse(sources[STORE_MODULE])
     manager = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionManager")
     ends_itself = {n.name for n in manager.body if isinstance(n, ast.FunctionDef)
                    and any(isinstance(s, ast.Call) and _called_name(s) in ENDERS for s in _own_nodes(n))}
-    assert {"_evict_if_needed", "space_erased"} <= ends_itself
+    assert "_evict_if_needed" in ends_itself
 
 
 def test_every_declaration_is_still_needed() -> None:
