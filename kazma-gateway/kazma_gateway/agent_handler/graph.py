@@ -1424,6 +1424,12 @@ def create_graph_handler(
         if msg.text and msg.text.strip().lower() == "/reset":
             if await _turn_control_refused(msg, thread_id, "reset"):
                 return
+            # What the chat had running or waiting ends first, outside the
+            # thread's lock a running turn holds (chat_runs_end: a turn
+            # waiting on an approval stayed open with nothing running it).
+            from kazma_ui.chat_runs_end import end_chat_runs
+
+            await end_chat_runs(thread_id, reason="chat_cleared")
             async with cmd_lock:
                 # 1. Delete checkpoints
                 if hasattr(graph, "checkpointer") and graph.checkpointer:

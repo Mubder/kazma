@@ -671,12 +671,15 @@ class SessionManager:
                 self._sessions[key] = sess
 
     def _evict_if_needed(self, tenant_id: str) -> None:
-        """Evict the oldest session for this tenant if we exceed max_sessions."""
+        """Evict the oldest session for this tenant if we exceed max_sessions.
+        What an evicted chat had running or waiting ends with it
+        (``chat_runs_end``), unless another chat is on its thread."""
         tenant_keys = [key for key in self._sessions.keys() if key.startswith(f"{tenant_id}:")]
         while len(tenant_keys) > self._max_sessions:
             oldest_key = tenant_keys.pop(0)
-            self._sessions.pop(oldest_key, None)
+            evicted = self._sessions.pop(oldest_key, None)
             _, session_id = oldest_key.split(":", 1)
+            self._chat_went_away(evicted, session_id, "chat_store_full")
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
@@ -1070,8 +1073,10 @@ class SessionManager:
     def space_erased(self, space: str) -> None:
         """*space* was erased (``spaces_api``): from here on nothing writes a
         chat of it, and what was written while it was erased goes -- a copy
-        held since before brought an erased chat back. Raises when the store
-        cannot remove it."""
+        held since before brought an erased chat back. What its chats ran or
+        waited for ended before any of its rows went (``erase_space`` ->
+        ``chat_runs_end.end_space_runs``). Raises when the store cannot
+        remove it."""
         with self._lock:
             with self._deleted_lock:
                 self._erased.add(space)
@@ -1090,6 +1095,24 @@ class SessionManager:
             for owner, session_id in self._spool.keys() if self._spool is not None else ():
                 if owner == space:
                     self._spool.discard(owner, session_id)
+
+    def _chat_went_away(self, held: ChatSession | None, session_id: str, reason: str) -> None:
+        """What the chat *session_id* (row *held*) had running or waiting
+        ends (``chat_runs_end``): its thread's turn, unless another chat of
+        the bound space is on the thread. Blocking; never raises."""
+        from kazma_core.db.pg_helpers import store_errors
+
+        thread_id = str(getattr(held, "thread_id", "") or session_id)
+        try:
+            if self.another_chat_on(thread_id, session_id):
+                return
+        except (*store_errors(), LookupError):  # the store's own removal stands; what still runs is said
+            logger.warning("[SessionManager] chat %s left the store (%s), but what it ran was not ended",
+                           session_id, reason, exc_info=True)
+            return
+        from kazma_ui.chat_runs_end import chat_went_away
+
+        chat_went_away(thread_id, reason=reason, title=str(getattr(held, "title", "") or ""))
 
     def space_arrived(self, space: str) -> None:
         """*space* was brought in from its bundle (``spaces_api``): what this

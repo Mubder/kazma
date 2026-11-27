@@ -181,6 +181,9 @@ _OUTCOME_WORDS = {
     "yolo": "approved by YOLO mode",
     "timeout": "expired unanswered",
     "orphaned": "left unanswered",
+    # Its chat went away (kazma_ui/chat_runs_end.py): nobody decided it.
+    "not_needed": "no longer needed (the chat went away)",
+    "cleared": "cleared with the waiting approvals",
     "waiting": "still waiting",
     "error": "could not resume",
 }

@@ -88,7 +88,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3318,
+    "blind_except": 3317,
     # ...whose body is only `pass` (or a docstring): the error vanishes
     "silent_except": 371,
 }
@@ -119,7 +119,10 @@ STRUCTURAL_BASELINE = {
     # 516 since 2026-11-23 (the S4-06 rework): sealed_zip.unseal and its
     # refusal went with the move's own whole-file seal.
     # 515 since 2026-11-25: merged with the chat move (S2-12 piece 6), which had it one lower too.
-    "module_local_public_symbols": 513,
+    # 512 since 2026-11-27: a chat that goes away drops the commitments its
+    # waiting turn held (commitment.store.abort_pending_for_thread, called
+    # from kazma_ui/chat_runs_end.py).
+    "module_local_public_symbols": 512,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

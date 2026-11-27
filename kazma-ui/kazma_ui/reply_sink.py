@@ -68,6 +68,7 @@ __all__ = [
     "reset_reply_turns",
     "resolve_reply_text",
     "resolve_reply_turn",
+    "take_reply_turn",
     "upsert_reply",
 ]
 
@@ -305,6 +306,13 @@ def _now() -> str:
 # ══════════════════════════════════════════════════════════════════════
 
 
+def _thread_ended(thread_id: str) -> bool:
+    """Whether the thread's chat was deleted in this process. Memory only."""
+    from kazma_core.spaces.threads import thread_ended
+
+    return thread_ended(thread_id)
+
+
 def open_reply_turn(thread_id: str, turn_id: str = "") -> str:
     """Begin a reply turn on *thread_id* and return its id.
 
@@ -326,6 +334,12 @@ def open_reply_turn(thread_id: str, turn_id: str = "") -> str:
 
         turn_id = uuid.uuid4().hex
     turn_id = str(turn_id)
+    if thread_id and _thread_ended(thread_id):
+        # Its chat was deleted: a late closer (a cancelled turn's own close,
+        # with no session left to name the turn) must not leave a turn open
+        # that nothing runs -- the run supervisor paged exactly that as
+        # "stuck" (live 2026-11-27, ``chat_runs_end``).
+        return turn_id
     if thread_id:
         with _lock:
             _open_turns[thread_id] = turn_id
@@ -351,6 +365,16 @@ def current_reply_turn(thread_id: str) -> str:
         return ""
     with _lock:
         return _open_turns.get(thread_id, "")
+
+
+def take_reply_turn(thread_id: str) -> str:
+    """The open reply turn of *thread_id*, taken out of the open turns in one
+    step: of two callers at once, one gets it and the other "". For a chat
+    that goes away (``chat_runs_end``): one of two ends at once reports it."""
+    if not thread_id:
+        return ""
+    with _lock:
+        return _open_turns.pop(thread_id, "")
 
 
 def close_reply_turn(thread_id: str, session_id: str = "", turn_id: str = "") -> None:

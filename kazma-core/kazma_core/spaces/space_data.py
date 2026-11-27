@@ -827,6 +827,15 @@ def erase_space(space: str, *, by: str, chats_gone: Callable[[], None] = lambda:
     people.close_space(space, by=by)
     if not file_moves.quiet(space):  # no file moves in or out from here on
         raise SpaceDataRefused("files_moving", 503, _FILES_MOVING)
+    # What its chats run or wait for ends now, while its rows and thread
+    # records still say whose each one is (kazma_ui.chat_runs_end): ended
+    # after, a run was recorded in the owner's space with no title.
+    try:
+        from kazma_ui.chat_runs_end import end_space_runs
+    except ImportError:  # no web app in this process: no chat turn runs here
+        end_space_runs = None
+    if end_space_runs is not None:
+        end_space_runs(space)
     before, first = _walk(space)
     from kazma_core.stores.knowledge_lifecycle import delete_library
 

@@ -6,6 +6,8 @@ is a fork there and this delete here (Spaces S2-12, ``kazma_ui.chat_move``).
 written late brings it back, and its thread runs no turn again:
 ``session_manager``, ``kazma_core.spaces.threads.end_thread``), bumps the
 thread's rewind generation (a turn prepared from its state does not start),
+ends what the chat had running or waiting (``chat_runs_end``: a running turn
+cancelled and waited for, its approvals settled, the run recorded as ended),
 ends the sockets and streams open on it, and removes what is left beside the
 row: the thread's checkpoints, its Time Travel steps and, last, its space
 record. What Kazma learned is memory and is kept (AGENTS.md section 15I).
@@ -43,6 +45,27 @@ def _remove_row(session_id: str, thread_id: str, unchanged: Callable[[Any], bool
         return True
     chats.mark_deleted(session_id, thread_id)
     return chats.delete_if(session_id, unchanged)
+
+
+#: What a chat's running work is told it ended for (``chat_runs_end.REASONS``),
+#: by what its sockets are told (*reason*).
+_GONE_FOR = {"deleted": "chat_deleted", "moved": "chat_moved"}
+
+
+def _title_of(session_id: str) -> str:
+    """The chat's title, for the record of what its going away ended.
+    Blocking; "" when it cannot be read (the delete goes on)."""
+    from kazma_core.db.pg_helpers import store_errors
+
+    from kazma_ui.session_manager import get_session_manager
+
+    try:
+        chats = get_session_manager()
+        row = chats.get(session_id) or chats.held(session_id)
+    except (*store_errors(), LookupError):  # a title is a label; the delete itself is what matters
+        logger.debug("[chat] the title of %s could not be read", session_id, exc_info=True)
+        return ""
+    return str(getattr(row, "title", "") or "") if row is not None else ""
 
 
 def _shows(session_id: str) -> bool:
@@ -96,8 +119,12 @@ async def delete_chat(
     from kazma_core.spaces import threads
     from kazma_core.spaces.scope import bind_scope
 
+    from kazma_ui.chat_runs_end import end_chat_runs
+
+    gone_for = _GONE_FOR.get(reason, "chat_deleted")
     with bind_scope(*scope) if scope else contextlib.nullcontext():
         shown = scope is None and await asyncio.to_thread(_shows, session_id)
+        title = await asyncio.to_thread(_title_of, session_id)
         if not await asyncio.to_thread(_remove_row, session_id, thread_id, unchanged):
             return None
         if scope is None and await asyncio.to_thread(_is_another_chats, thread_id, session_id):
@@ -105,10 +132,17 @@ async def delete_chat(
             end_chat(session_id, "", reason=reason)
             if shown and not await asyncio.to_thread(_is_another_chats, thread_id, session_id, showing=True):
                 # The archived one's rows stay; what the thread holds was the
-                # conversation deleted. Its next turn starts from nothing.
+                # conversation deleted. Its next turn starts from nothing, and
+                # what it had running or waiting ends with it.
                 _bump_generation(thread_id)
+                await end_chat_runs(thread_id, reason=gone_for, title=title)
                 return await remove_chat_remains(session_id, thread_id, checkpoints, thread_ends=False)
+            # The thread goes on in the chat that shows: its work is that chat's.
             return await remove_chat_remains(session_id if session_id != thread_id else "", "", checkpoints)
+        # What the chat had running or waiting ends before its state goes
+        # (chat_runs_end: a running turn cancelled and waited for, its
+        # approvals settled, the run recorded as ended).
+        await end_chat_runs(thread_id or session_id, reason=gone_for, title=title)
         end_chat(session_id, thread_id, reason=reason)
         # The record goes last, so a thread recorded elsewhere, or nowhere,
         # has nothing left in the space the journal names.

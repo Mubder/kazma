@@ -21,7 +21,10 @@ written in the last 30 minutes) and:
 
 Never a turn paused for an approval (its card is the action), never one that
 already ended (``turn_failed`` or no next step), never one older than 30
-minutes.
+minutes, never one Stop or a chat's going away ended (``task_status``
+``abandoned``: LangGraph keeps a paused node as ``next`` once the marker is
+written over its interrupt, 2026-11-27), and never one of an archived chat
+(nobody is looking at it; ``chat_runs_end``).
 """
 
 from __future__ import annotations
@@ -77,9 +80,10 @@ def cut_turns() -> dict[str, CutTurn]:
     return dict(_left)
 
 
-def forget_cut_turn(thread_id: str) -> None:
-    """The owner closed it: no longer offered."""
-    _left.pop(thread_id, None)
+def forget_cut_turn(thread_id: str) -> bool:
+    """The owner closed it, or its chat went away: no longer offered. True
+    when this call took it."""
+    return _left.pop(thread_id, None) is not None
 
 
 def _created_epoch(value: Any) -> float:
@@ -111,6 +115,35 @@ def _last_user_text(messages: list[Any]) -> str:
             content = getattr(msg, "content", "")
             return content if isinstance(content, str) else ""
     return ""
+
+
+def _chat_archived(thread_id: str) -> bool:
+    """Whether the thread's chat is archived, with no other chat showing it.
+    Read as the turn's asker in its own space (``whose_turn``, the binding a
+    continued turn runs under; the start pass binds none). Blocking; a store
+    that cannot answer is said and counts as not archived (as before)."""
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.spaces.scope import spaces_enforced
+
+    from kazma_ui.hitl_answerers import as_the_asker, whose_turn
+    from kazma_ui.session_manager import peek_session_manager
+
+    manager = peek_session_manager()
+    if manager is None:
+        return False
+    try:
+        with as_the_asker(whose_turn(thread_id) if spaces_enforced() else None):
+            return _archived_in(manager, thread_id)
+    except (*store_errors(), LookupError):
+        logger.warning("[turn_resume] whether thread=%s's chat is archived cannot be read", thread_id[:12],
+                       exc_info=True)
+        return False
+
+
+def _archived_in(manager: Any, thread_id: str) -> bool:
+    row = manager.get_by_thread_id(thread_id)
+    return bool(row is not None and row.archived
+                and not manager.another_chat_on(thread_id, row.session_id, showing=True))
 
 
 async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = None) -> list[CutTurn]:
@@ -145,6 +178,10 @@ async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = Non
             continue
         if any(getattr(task, "interrupts", None) for task in getattr(snapshot, "tasks", ()) or ()):
             continue                      # paused for an approval: its card is the action
+        if str(values.get("task_status") or "") == "abandoned":
+            continue                      # Stop, or its chat going away, ended it
+        if await asyncio.to_thread(_chat_archived, thread_id):
+            continue                      # an archived chat's turn is never resumed
         routing = values.get("_gateway") or {}
         platform = str(routing.get("platform") or "web").lower()
         unknown = await asyncio.to_thread(_open_effects, thread_id, _created_epoch(values.get("created_at")))
@@ -166,6 +203,7 @@ async def _whose_turn_goes_on(thread_id: str) -> tuple[Any, str]:
     import sqlite3
 
     from kazma_core.spaces.identity import IdentityUnavailable, asker_left
+
     from kazma_ui.hitl_answerers import whose_turn
 
     def _read() -> tuple[Any, bool]:

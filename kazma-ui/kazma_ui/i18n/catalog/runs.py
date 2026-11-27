@@ -41,6 +41,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "توقف كازما أثناء تنفيذ الإجراء؛ تحقّق من العمل قبل أن تتخذ إجراءً آخر.",
     },
     "runs.automatic": {"en": "Kazma's automatic first step", "ar": "الخطوة الأولى التلقائية من كازما"},
+    # Why a run ended when its chat went away (kazma_ui/chat_runs_end.py,
+    # REASONS; the run's ``ended_reason``, kazma_core/runs/text.ended_word).
+    "runs.ended.chat_deleted": {"en": "The chat was deleted", "ar": "حُذفت المحادثة"},
+    "runs.ended.chat_archived": {"en": "The chat was archived", "ar": "أُرشفت المحادثة"},
+    "runs.ended.chat_cleared": {"en": "The chat was cleared", "ar": "مُسحت المحادثة"},
+    "runs.ended.approvals_cleared": {
+        "en": "Its waiting approvals were cleared",
+        "ar": "مُسحت الموافقات التي كانت بانتظارها",
+    },
+    "runs.ended.chat_moved": {"en": "The chat moved to another space", "ar": "نُقلت المحادثة إلى مساحة أخرى"},
+    "runs.ended.space_erased": {"en": "Its space was erased", "ar": "مُحيت مساحتها"},
+    "runs.ended.chat_store_full": {
+        "en": "The chat store's limit removed the chat",
+        "ar": "أزال حدّ مخزن المحادثات هذه المحادثة",
+    },
     "runs.diagnosis_title": {"en": "Diagnosis", "ar": "التشخيص"},
     "runs.diagnosis_running": {"en": "Diagnosing…", "ar": "جارٍ التشخيص…"},
     "runs.open_page": {"en": "Open its page", "ar": "افتح صفحته"},

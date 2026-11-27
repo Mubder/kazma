@@ -17,20 +17,29 @@ Cancel is the web chat's Abort (``turn_abort.abort_turn``); Close is the
 watchdog's heal (``reply_sink.close_reply_turn``). The chat's address comes
 from the checkpoint's routing block, only when an incident needs it
 (:meth:`origin_for`): never from the session store, whose rows expire.
+
+A turn its chat's going away ended (deleted, archived, cleared, moved, its
+space erased: ``chat_runs_end``) is recorded here (:func:`record_ended`) and
+listed cancelled for the registry's window, with why (``ended_reason``, the
+catalog's words): never "nothing is running it" (live 2026-11-27, a chat
+deleted while its turn waited on an approval paged that as an incident).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from kazma_core.runs.contract import ActionResult, Run, RunState
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-__all__ = ["ADAPTER", "set_graph_getter"]
+__all__ = ["ADAPTER", "record_ended", "set_graph_getter"]
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +47,46 @@ _graph_getter: Callable[[], Any] | None = None
 
 #: thread_id -> when this adapter first saw the turn open with nothing running it.
 _abandoned_since: dict[str, float] = {}
+
+
+@dataclass(frozen=True)
+class _EndedTurn:
+    """A chat turn its chat's going away ended (``chat_runs_end``)."""
+
+    at: float
+    reason: str
+    title: str = ""
+    space: str = ""
+    asker: str = ""
+
+
+#: thread_id -> the turn its chat's going away ended, newest last. Memory,
+#: like the turn registry and the open reply turns it stands in for; bounded.
+_ended: OrderedDict[str, _EndedTurn] = OrderedDict()
+_ENDED_KEPT = 1000
+_ended_lock = threading.Lock()
+
+
+def record_ended(thread_id: str, *, reason: str, title: str = "", space: str = "", asker: str = "",
+                 at: float | None = None) -> None:
+    """The turn of *thread_id* ended because its chat went away (*reason*, a
+    ``chat_runs_end.REASONS`` code): listed cancelled, with why, from now on
+    for the registry's window. From any thread."""
+    if not thread_id:
+        return
+    with _ended_lock:
+        _ended[thread_id] = _EndedTurn(at=time.time() if at is None else at, reason=reason,
+                                      title=" ".join(str(title or "").split())[:90], space=space, asker=asker)
+        _ended.move_to_end(thread_id)
+        while len(_ended) > _ENDED_KEPT:
+            _ended.popitem(last=False)
+    _abandoned_since.pop(thread_id, None)
+
+
+def _ended_turns() -> dict[str, _EndedTurn]:
+    """The ended turns on record (a copy)."""
+    with _ended_lock:
+        return dict(_ended)
 
 
 def set_graph_getter(getter: Callable[[], Any]) -> None:
@@ -73,6 +122,8 @@ class _ChatTurnAdapter:
         # Cut off by a restart while a tool whose effect is unknown ran
         # (turn_resume, resilience plan C1): it waits for the owner.
         "cut": RunState.RUNNING,
+        # Ended because its chat went away (record_ended, chat_runs_end).
+        "ended": RunState.CANCELLED,
     }
 
     async def list_runs(self, now: float, *, window_s: float) -> list[Run]:
@@ -134,6 +185,24 @@ class _ChatTurnAdapter:
                 owner_alive=False, version=str(int(turn.at)),
                 actions=("continue", "close"), link="/chat",
                 space=homes.get(tid, ("", ""))[0], asker=homes.get(tid, ("", ""))[1],
+            ))
+            listed.add(tid)
+        for tid, end in _ended_turns().items():
+            if tid in listed:
+                # The thread runs again (a chat app's chat after /reset): what
+                # runs now is its run, and the ended one is history.
+                with _ended_lock:
+                    if _ended.get(tid) is end:
+                        del _ended[tid]
+                continue
+            if now - end.at > window_s:
+                continue
+            runs.append(Run(
+                run_id=f"chat_turn:{tid}", kind="chat_turn", native_id=tid,
+                title=end.title or tid[:12], state=RunState(self.STATE_MAP["ended"]),
+                native_state="ended", started_at=end.at, progress_at=end.at, ended_at=end.at,
+                version=f"ended:{int(end.at)}", link="/chat", ended_reason=end.reason,
+                space=end.space, asker=end.asker,
             ))
         return runs
 
