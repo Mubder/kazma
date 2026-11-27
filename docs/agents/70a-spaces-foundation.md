@@ -214,11 +214,13 @@ an install with one account behaves as before.
   stamp back -- set-based, the records loaded once into a temporary table,
   two statements per table under the schema lock with a statement timeout
   (step 4 review L6). It trusts this install's records only on this
-  install's own database (`availability.is_kazma_database`; elsewhere
-  `Applied.not_backfilled`, which `scripts/row_security.py` says loudly, and
-  the script reads this install's files even with `--url-from` so its own
-  database is known as its own: Spaces on replicas is not covered, review M2,
-  delta review N3), reads them read-only,
+  install's own database -- its own address, or any other way to the same
+  server and database, told by the server's system identifier and the
+  database's name (`row_security._this_installs_own`); the script reads this
+  install's files even with `--url-from`. Elsewhere `Applied.not_backfilled`,
+  and the script exits 1 with one message naming the remedy: Spaces on
+  replicas is not covered (review M2, delta review N3, second delta review
+  L2) -- reads them read-only,
   and a missing record store, an empty one while rows carry a space, or one
   that cannot be read keeps `apply` from being complete, changing nothing
   (M1: a missing store used to be made empty and read as "no threads").
@@ -231,15 +233,17 @@ an install with one account behaves as before.
   cancel off the task's count and asks for it again, so it lands at the
   pool's next wait and a timeout or `wait_for` ending there is still a
   `TimeoutError` -- never a second cancel, delta review N1; for upstream,
-  L1); a closed pool makes no space half, asked again under its lock and
-  once the half is open (L3, delta review N2). Gates:
+  L1); a closed or closing pool makes no space half: `close()` says it is
+  closing before it awaits the old half, as `closed` turns True only after,
+  and the half asks again under its lock (L3, delta review N2, second delta
+  review L1). Gates:
   `tests/test_pg_checkpoint_spaces.py` (real Postgres, the saver called
   directly: wire, stamp, a space's own threads, refused, backfill, the
   backfill's trust, prune; each with its control) and
   `tests/test_checkpoint_doors.py` (the door's answers, the manager, M5 and
   its control, the H4 gate over `exec_` and the sync senders, a Stop and
-  a window ending in the check, a pool closed before or while its half is
-  made). No flow moves a thread between spaces: the chat
+  a window ending in the check, a half asked for of a pool closed, closing,
+  or closed while it waited for the lock). No flow moves a thread between spaces: the chat
   move forks, its copy written under the target's scope.
 - **Every Postgres suite armed** (S4-01 step 5; nothing arms the product).
   The chat move runs armed end to end on Postgres (no restamp: thread

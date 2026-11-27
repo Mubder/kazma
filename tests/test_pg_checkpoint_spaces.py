@@ -389,13 +389,42 @@ def test_another_databases_stamps_are_not_this_installs_to_change(db: dict[str, 
     monkeypatch.setenv("KAZMA_DATABASE_URL", db["su"].rsplit("/", 1)[0] + "/postgres")  # Kazma's is elsewhere
     done = lock.apply(db["app"], vector_table="")
     assert _stamps(db, theirs) == {"sc"}, "kept"  # first: what the review measures (delta review N4)
-    assert done.complete and any("not this install's own database" in n for n in done.notes), done
+    assert done.complete and any("not the database this install's own address names" in n for n in done.notes), done
     assert done.not_backfilled, "said, for the script to say loudly (delta review N3)"
     # The control: as this install's own database, the record store answers for it.
     monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
     done = lock.apply(db["app"], vector_table="")
     assert done.backfilled >= 1 and not done.not_backfilled
     assert _stamps(db, theirs) == {None}
+
+
+def _another_name_for(dsn: str) -> str:
+    """The same database through another host name: ``hostaddr`` carries the
+    address, ``host`` a name no resolver is asked for."""
+    import socket
+
+    conninfo = psycopg.conninfo  # the module's guarded import: no bare one in a test
+    host = str(conninfo.conninfo_to_dict(dsn).get("host") or "localhost")
+    return conninfo.make_conninfo(dsn, host="kazma-db.invalid", hostaddr=socket.gethostbyname(host))
+
+
+def test_this_installs_own_database_by_another_name_is_backfilled(db: dict[str, str], lock: Any,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Second delta review L2: reached by another host name (``hostaddr``),
+    this install's own database counted as another -- nothing backfilled --
+    and the script said the rules were in place. It is told by its server
+    identity now. Another database on the same server stays another (the M2
+    test above)."""
+    from kazma_core.db.availability import is_kazma_database
+    from kazma_core.spaces import scope, threads
+
+    monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own address
+    alias = _another_name_for(db["app"])
+    assert not is_kazma_database(alias), "by its address alone it is another"
+    threads.record_thread(f"t-{uuid.uuid4().hex[:8]}", "sa", scope.OWNER_ACCOUNT_ID)
+    stray = _stamped_row(db, "sd")  # a space no record names: a whole pass gives it back to the owner
+    done = lock.apply(alias, vector_table="")
+    assert _stamps(db, stray) == {None} and not done.not_backfilled, done
 
 
 # ── the step 4 delta review: where the backfill runs, and its timeout (N4) ──
@@ -405,7 +434,11 @@ def test_a_tables_rule_at_the_checkpointers_open_backfills_nothing(db: dict[str,
                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
     """The checkpointer's open (``after_checkpointer_setup``, at every model
     switch) puts rules on its tables and no more: the backfill is a whole
-    pass's (step 4 review L6)."""
+    pass's (step 4 review L6).
+
+    It locks what d170f5c5e already did, so it cannot fail there: the second
+    delta review checked it by mutation instead (the backfill on every pass,
+    ``and tables is None`` dropped, fails it)."""
     from kazma_core.spaces import scope, threads
 
     monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])  # this install's own database
@@ -424,7 +457,11 @@ def test_a_backfill_statement_past_its_timeout_leaves_its_table(db: dict[str, st
     """A backfill statement waiting on a row another session holds is stopped
     at its statement timeout, and its table is left for the next pass,
     unchanged (step 4 review L6). With none (the control) it waits the row
-    out and changes it."""
+    out and changes it.
+
+    It locks what d170f5c5e already did, so it cannot fail there: the second
+    delta review checked it by mutation instead (no ``SET LOCAL statement_timeout``,
+    or 57014 raised instead of left, fails it)."""
     import threading
     import time
 

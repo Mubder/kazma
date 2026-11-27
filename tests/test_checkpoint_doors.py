@@ -392,6 +392,36 @@ def test_a_pool_closed_while_the_half_waits_for_its_lock_makes_none() -> None:
     assert pool._kazma_space_half is None
 
 
+def test_a_half_asked_for_while_the_pool_closes_is_refused() -> None:
+    """Second delta review L1: ``close()`` awaits the old half's close before
+    ``closed`` turns True; a half asked for in between was made, and nothing
+    ever closed it (still alive, three worker tasks, after ``close()``)."""
+    PoolClosed = pytest.importorskip("psycopg_pool").PoolClosed  # noqa: N806 - see the tests above
+    from kazma_core import checkpoints_pg
+
+    async def scenario() -> tuple[Any, Any]:
+        pool = checkpoints_pg._reported_pool_class()(conninfo="postgresql://x@127.0.0.1:1/x", min_size=0,
+                                                        max_size=1, open=False)
+        await pool.open()  # no connection: min_size 0
+        first = await pool._space_half()
+        closing = asyncio.create_task(pool.close())
+        await asyncio.sleep(0)  # close() now awaits the first half's close
+        second = None
+        try:
+            second = await pool._space_half()
+        except PoolClosed:
+            pass
+        await closing
+        if second is not None:
+            await second.close()
+        return first, second
+
+    with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+        first, second = runner.run(scenario())
+    assert first.closed
+    assert second is None, "a second half was made while the pool closed"
+
+
 def test_a_closed_shared_pool_makes_no_space_half() -> None:
     """The same for the shared pool (S4-01 step 5, found by the armed suite):
     closed before any space checkout, its first one made a half and wrote

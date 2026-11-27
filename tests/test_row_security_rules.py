@@ -371,12 +371,17 @@ def test_a_backfill_that_did_not_run_is_said_loudly(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("KAZMA_SCRATCH_URL", "postgresql://kazma@elsewhere.example/kazma")
     done = row_security.Applied()
     if skipped:
-        done.not_backfilled = "checkpoints: not this install's own database"
+        done.not_backfilled = "checkpoints: not the database this install's own address names"
         done.notes.append(done.not_backfilled)
     monkeypatch.setattr(row_security, "apply", lambda url, **_kw: done)
-    assert script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"]) == 0
+    code = script.main(["apply", "--url-from", "KAZMA_SCRATCH_URL", "--yes"])
     out = capsys.readouterr().out
-    assert ("NOT BACKFILLED" in out and "do not arm" in out and "[NOTE]" not in out) == skipped, out
+    if skipped:  # second delta review L2: not a success, one message, its remedy named
+        assert code == 1 and out.count("NOT BACKFILLED") == 1 and "[NOTE]" not in out, out
+        assert "run apply with this install's own address" in out
+        assert "The rules are in place." not in out.splitlines(), "no success line of its own"
+    else:
+        assert code == 0 and "NOT BACKFILLED" not in out and "The rules are in place." in out, out
 
 
 @pytest.mark.parametrize("argv", [
