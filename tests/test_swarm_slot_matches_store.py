@@ -421,24 +421,28 @@ async def test_a_raise_while_rejecting_frees_the_slot(
 # --- the admission table: who may remove a slot, and who may read it ---
 #
 # A removal (``.pop``, ``del``, ``.clear()``, including through an alias or a
-# parameter the caller passed the table as) is allowed in three places:
-# before this function's ``_admit_to_store`` (no RUNNING row of this run yet),
-# in the branch that says admission failed (``held is not None``,
-# ``admitted is False``, ``not reopen``), or in ``_release_admission_slot``,
-# the one helper that drops a slot after the ending is stored. ``.clear()``
-# is never allowed. A function that neither admits nor records an ending may
-# remove: that is a refusal before a row (``_store_refused`` and the
-# stop-during-admission helpers).
+# parameter the caller passed the table as) is allowed only in named places:
+# ``_release_admission_slot`` (after the ending is stored), before this
+# function's ``_admit_to_store`` (no RUNNING row of this run yet), in the
+# branch that says admission failed (``held is not None``, ``admitted is
+# False``, ``not reopen``), or in ``_store_refused`` while that function
+# still records no ending. ``.clear()`` is never allowed. Calling none of
+# the ending helpers is not itself an allowance: a new ``retire_task`` that
+# only pops would free an admitted slot.
 #
 # A read (subscription, ``.get`` / ``.values`` / ``.items`` / ``.keys``,
-# iteration, ``in``, ``len``, a copy) must call ``task_has_ended``,
-# ``_task_has_ended`` or ``_occupies_admission_slot`` in that function.
-# ``.pop``, ``.clear`` and ``.setdefault`` are not reads. Other packages do
-# not name the table: ``list_active_tasks`` and ``get_active_task`` are the
-# view, and they already leave out a task that has ended. Reading the table
-# from outside the engine would cancel, count or mark live a task whose work
-# has finished while its ending is stored.
+# iteration, ``in``, ``len``, a copy) that acts on a task calls
+# ``task_has_ended`` or ``_task_has_ended``. A read that counts slots still
+# held may call ``_occupies_admission_slot`` (an ended task still counts
+# until the write lands), and only the named counters do. ``.pop``,
+# ``.clear`` and ``.setdefault`` are not reads. Other packages do not name
+# the table: ``list_active_tasks`` and ``get_active_task`` are the view, and
+# they already leave out a task that has ended. Reading the table from
+# outside the engine would cancel, count or mark live a task whose work has
+# finished while its ending is stored.
 
+# A function that calls one of these has an ending or a RUNNING row in reach.
+# ``_store_refused`` may pop only while it calls none of them.
 _OWNS_AN_ENDING = frozenset({
     "_persist",
     "_finalize_task",
@@ -449,7 +453,21 @@ _OWNS_AN_ENDING = frozenset({
     "_run_owned",
     "_admit_to_store",
 })
-_POLICY = frozenset({"task_has_ended", "_task_has_ended", "_occupies_admission_slot"})
+# The one refusal that drops a slot because the store never took a RUNNING row.
+_REFUSED_BEFORE_A_ROW = frozenset({"_store_refused"})
+# Asks whether the task has ended. An acting reader calls one of these.
+_ACTING = frozenset({"task_has_ended", "_task_has_ended"})
+# Asks whether the slot still counts. An ended task still does, until the write.
+_COUNTING = frozenset({"_occupies_admission_slot"})
+# Readers whose question is the count, not "is this task active work".
+# ``redispatch_recovered_tasks`` skips a slot this process still holds,
+# including one whose ending is not stored yet.
+_COUNTS_THE_SLOT = frozenset({
+    "_at_capacity",
+    "running_in",
+    "_running_ahead_of",
+    "redispatch_recovered_tasks",
+})
 _COPIES = frozenset({"len", "list", "dict", "set", "tuple", "iter", "sorted"})
 _TABLE_NAME = re.compile(r"(?<![A-Za-z0-9])_active_tasks(?![A-Za-z0-9])")
 _PACKAGE_ROOTS = (
@@ -705,8 +723,12 @@ class _TableScan:
                 read, _removals = self._uses(func)
                 if not read:
                     continue
-                if _POLICY.isdisjoint(_call_names(func)):
-                    found.append(f"{module}.{func.name}")
+                calls = _call_names(func)
+                if not _ACTING.isdisjoint(calls):
+                    continue
+                if func.name in _COUNTS_THE_SLOT and not _COUNTING.isdisjoint(calls):
+                    continue
+                found.append(f"{module}.{func.name}")
         return sorted(found)
 
 
@@ -729,7 +751,9 @@ def _removal_allowed(
         return True
     if _in_failure_if(node, parents, func):
         return True
-    return _OWNS_AN_ENDING.isdisjoint(calls)
+    # A named refusal before any RUNNING row. Any other function that merely
+    # calls none of the ending helpers is not allowed to pop.
+    return func.name in _REFUSED_BEFORE_A_ROW and _OWNS_AN_ENDING.isdisjoint(calls)
 
 
 def _scan(modules: list[tuple[str, ast.AST]]) -> _TableScan:
@@ -773,9 +797,10 @@ def test_the_gate_flags_a_slot_freed_beside_the_end_stamp() -> None:
 
     A pop beside the stamp, a pop in ``reject_checkpoint`` after it finalizes,
     ``del`` / ``.pop`` / ``.clear()`` through an alias, a pop on the success
-    path after admission, and ``.clear()`` inside the release helper are all
-    flagged. A refusal before a row, a pop before ``_admit_to_store``, a pop
-    in ``if held is not None``, and the release helper's own ``.pop`` are not.
+    path after admission, ``.clear()`` inside the release helper, and a
+    ``retire_task`` that only pops are all flagged. A refusal before a row,
+    a pop before ``_admit_to_store``, a pop in ``if held is not None``, and
+    the release helper's own ``.pop`` are not.
     """
     old = _scan(_snippet(
         "class E:\n"
@@ -830,6 +855,12 @@ def test_the_gate_flags_a_slot_freed_beside_the_end_stamp() -> None:
     ))
     helper_hits = helper.illegal_removals()
     assert len(helper_hits) == 1 and helper_hits[0].endswith(":clear")
+    retire = _scan(_snippet(
+        "class E:\n"
+        "    def retire_task(self, task_id):\n"
+        "        self._active_tasks.pop(task_id, None)\n"
+    ))
+    assert retire.illegal_removals() == ["snippet.retire_task:3:pop"]
 
 
 def test_every_slot_pop_is_before_a_running_row_or_after_the_ending_write() -> None:
@@ -848,7 +879,9 @@ def test_the_gate_flags_a_reader_that_treats_an_ended_task_as_active() -> None:
 
     Returning the table's values is flagged. The same read that calls
     ``task_has_ended`` is not. A parameter the caller passed the table as is
-    the table: reading it without the check is flagged too.
+    the table: reading it without the check is flagged too. An acting reader
+    that only calls ``_occupies_admission_slot`` is flagged. A named counter
+    that calls it is not.
     """
     raw = _scan(_snippet(
         "class E:\n"
@@ -881,10 +914,26 @@ def test_the_gate_flags_a_reader_that_treats_an_ended_task_as_active() -> None:
         "        return cancel_active_task(task_id, self._active_tasks)\n"
     ))
     assert safe.reader_gaps() == []
+    acting = _scan(_snippet(
+        "class E:\n"
+        "    def cancel_task(self, task_id):\n"
+        "        task = self._active_tasks.get(task_id)\n"
+        "        if task is not None and self._occupies_admission_slot(task):\n"
+        "            return task\n"
+        "        return None\n"
+    ))
+    assert acting.reader_gaps() == ["snippet.cancel_task"]
+    counted = _scan(_snippet(
+        "class E:\n"
+        "    def _at_capacity(self):\n"
+        "        return sum(1 for task in self._active_tasks.values()\n"
+        "                   if self._occupies_admission_slot(task))\n"
+    ))
+    assert counted.reader_gaps() == []
 
 
 def test_every_reader_of_the_admission_table_asks_whether_the_task_has_ended() -> None:
-    """Every read of the table in the swarm calls the one ended-task check."""
+    """Every acting read calls the ended-task check. A named counter may count."""
     found = _scan(_swarm_modules()).reader_gaps()
     assert found == [], found
 

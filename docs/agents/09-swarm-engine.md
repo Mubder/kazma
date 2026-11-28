@@ -101,8 +101,9 @@ compatibility. **All public API methods and constructors are unchanged.**
   The stamp is this reject, so the row is still saved. An id already in
   ``_endings_recorded`` is left as it is. Gate:
   `tests/test_swarm_slot_matches_store.py` (the old pop beside the end stamp,
-  a reader that returns the raw table, and a removal through an alias, as
-  the controls).
+  a reader that returns the raw table, a removal through an alias, a
+  ``retire_task`` that only pops, and an acting reader that only calls
+  ``_occupies_admission_slot``, as the controls).
 - **A shared breaker never takes an older state** (SQ01 soak, 2026-10-15):
   an outcome changes the breaker under its lock and shares it in a second
   step, so a refresh between the two read the generation before;
