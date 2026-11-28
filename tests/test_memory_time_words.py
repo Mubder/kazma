@@ -13,8 +13,10 @@ must NOT be taken: a day ahead ("what is on March 22?"), a part of the day
 
 from __future__ import annotations
 
+import ast
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from kazma_core.memory.time_words import read_time, says_day, says_today_or_yesterday
@@ -29,6 +31,20 @@ def _day(y: int, m: int, d: int) -> float:
 
 def _read(question: str):
     return read_time(question, now=NOW, zone=UTC)
+
+
+def _search_words(question: str) -> list[str]:
+    """What recall keeps of *question* after its time words are taken out."""
+    from kazma_core.memory import recall as recall_mod
+    from kazma_core.memory.query_terms import content_terms
+
+    ask = _read(question)
+    assert ask is not None, question
+    token = recall_mod._ASK.set(ask)
+    try:
+        return recall_mod._without_time_words(content_terms(question))
+    finally:
+        recall_mod._ASK.reset(token)
 
 
 @pytest.mark.parametrize("question, start, end, said", [
@@ -335,17 +351,129 @@ def test_kam_after_akhir_is_the_last_few_days(arabic):
      "وش قلت لك آخر ثلاث أيام عن رحلتي في أغسطس؟"),
     ("What did I say in August about the last 3 days?",
      "شنو قلت لك في أغسطس عن آخر ٣ أيام؟"),
+    ("What did I tell you in the last 3 days from August?",
+     "وش قلت لك من أغسطس عن آخر ثلاث أيام؟"),
 ])
 def test_an_untied_stretch_keeps_its_window(english, arabic):
-    """A month that is not tied to the stretch stays the topic.
+    """A month that is not tied to the stretch stays a search word.
 
-    On this branch before the fix, naming August anywhere made the period
-    the whole of August."""
+    The stretch keeps the window. Recall leaves the month in the query:
+    it is not one of the time words. On this branch before the fix, naming
+    August anywhere made the period the whole of August, and after that the
+    window was right but "august" was still a time word."""
     en, ar = _read(english), _read(arabic)
     stretch = _read("What did I tell you in the last 3 days?")
     assert en is not None and ar is not None and stretch is not None
     assert (en.start, en.end) == (ar.start, ar.end) == (stretch.start, stretch.end)
     assert (en.start, en.end) != (_day(2026, 8, 1), _day(2026, 9, 1))
+    assert "august" not in en.words and "august" in _search_words(english)
+    assert "اغسطس" not in ar.words and "اغسطس" in _search_words(arabic)
+
+
+def test_a_month_that_is_the_period_is_not_a_search_word():
+    """The control: "in August" alone, and a stretch tied to August, are the
+    period, so recall drops the month."""
+    alone = "What did I tell you about Pixel in August?"
+    en = _read(alone)
+    assert en is not None and "august" in en.words
+    assert "august" not in _search_words(alone) and "pixel" in _search_words(alone)
+    ar = "وش قلت لك عن بكسل في أغسطس؟"
+    assert _read(ar) is not None and "اغسطس" in _read(ar).words
+    assert "اغسطس" not in _search_words(ar)
+    tied = "What did I say in the last 3 days of August?"
+    assert _read(tied) is not None and "august" in _read(tied).words
+    assert "august" not in _search_words(tied)
+
+
+@pytest.mark.parametrize(("question", "when"), [
+    ("What did I tell you last week about the last 3 days of August?",
+     "What did I tell you last week?"),
+    ("What did I say yesterday about the past 10 days of rain?",
+     "What did I say yesterday?"),
+    ("What did I tell you two weeks ago about the last 3 days of August?",
+     "What did I eat two weeks ago?"),
+    ("وش قلت لك الأسبوع الماضي عن آخر ٣ أيام من أغسطس؟",
+     "وش قلت لك الأسبوع الماضي؟"),
+    ("شنو قلت أمس عن آخر عشر أيام من المطر؟",
+     "شنو قلت أمس؟"),
+    ("وش قلت لك قبل أسبوعين عن آخر ٣ أيام من أغسطس؟",
+     "وش قلت لك قبل أسبوعين؟"),
+    ("What did I tell you in the last 5 days of last week?",
+     "What did I tell you last week?"),
+    ("وش قلت لك آخر خمس أيام من الأسبوع الماضي؟",
+     "وش قلت لك الأسبوع الماضي؟"),
+])
+def test_when_it_was_said_wins_over_a_topic_stretch(question, when):
+    """When it was said wins. The stretch is the topic, including one tied
+    to a month. "of last week" is when it was said; only "of last month"
+    is the stretch's own close."""
+    ask, control = _read(question), _read(when)
+    assert ask is not None and control is not None and control.period
+    assert (ask.start, ask.end) == (control.start, control.end), question
+
+
+_SAID_NOV = "2026-11-28"
+
+
+def test_a_tied_stretch_does_not_hide_another_time():
+    """The tie says its own days. Another phrase in the same text still says
+    its day: two weeks before 28 Nov is 14 Nov, and last month is October."""
+    english = "Two weeks ago I went over the last 3 days of August"
+    arabic = "قبل أسبوعين راجعت آخر ٣ أيام من أغسطس"
+    for text in (english, arabic):
+        assert says_day(text, "2026-11-14", _SAID_NOV) is True, text
+        assert says_day(text, "2026-08-29", _SAID_NOV) is True, text
+        assert says_day(text, "2026-08-01", _SAID_NOV) is False, text
+    reviewed = "Last month I reviewed the last 3 days of August"
+    reviewed_ar = "الشهر الماضي راجعت آخر ٣ أيام من أغسطس"
+    for text in (reviewed, reviewed_ar):
+        assert says_day(text, "2026-10-15", _SAID_NOV) is True, text
+        assert says_day(text, "2026-08-31", _SAID_NOV) is True, text
+        assert says_day(text, "2026-08-01", _SAID_NOV) is False, text
+        assert says_day(text, "2026-11-14", _SAID_NOV) is False, text
+
+
+@pytest.mark.parametrize("question", [
+    "What did I tell you in the last few weeks of school?",
+    "What did I tell you about the last few years of my job?",
+    "What did I do in the last a few weeks of school?",
+    "وش قلت لك آخر كم أسبوع من المدرسة؟",
+    "ماذا قلت لك عن آخر كم سنة من وظيفتي؟",
+    "وش قلت لي هالكم أسبوع من المدرسة؟",
+    "ماذا قلت لك في الكم سنة اللي فاتت من وظيفتي؟",
+])
+def test_a_few_tied_to_a_thing_is_not_a_period(question):
+    """Few tied to a noun that is not a time reads no period, in both languages.
+
+    "the last few days" and a numbered "of school" are not this."""
+    ask = _read(question)
+    assert ask is None or not ask.period, question
+    assert says_day(question, "2026-05-10", TOLD_ON) is False, question
+
+
+def test_a_few_days_and_a_numbered_stretch_of_a_thing_still_read():
+    """The few rule stops at a non-time noun. Days, a month, and a number stay."""
+    few = _read("What did I tell you in the last few days?")
+    three = _read("What did I tell you in the last 3 days?")
+    assert few is not None and three is not None
+    assert (few.start, few.end) == (three.start, three.end) == (_day(2026, 9, 22), NOW + 1)
+    of_august = _read("What did I say in the last few days of August?")
+    of_august_ar = _read("شنو قلت لك آخر كم يوم من أغسطس؟")
+    assert of_august is not None and of_august_ar is not None
+    assert (of_august.start, of_august.end) == (of_august_ar.start, of_august_ar.end)
+    assert (of_august.start, of_august.end) == (_day(2026, 8, 29), _day(2026, 9, 1))
+    of_last = _read("What did I tell you in the last few days of last month?")
+    of_last_ar = _read("وش قلت لك آخر كم يوم من الشهر الماضي؟")
+    assert of_last is not None and of_last_ar is not None
+    assert (of_last.start, of_last.end) == (of_last_ar.start, of_last_ar.end)
+    assert (of_last.start, of_last.end) == (_day(2026, 8, 29), _day(2026, 9, 1))
+    school = _read("What did I do in the last 3 weeks of school?")
+    weeks = _read("What did I do in the last 3 weeks?")
+    school_ar = _read("وش قلت آخر ثلاث أسابيع من المدرسة؟")
+    assert school is not None and weeks is not None and school_ar is not None
+    assert (school.start, school.end) == (school_ar.start, school_ar.end) == (weeks.start, weeks.end)
+    assert says_day("the last 3 weeks of school", "2026-05-10", TOLD_ON) is True
+    assert says_day("آخر ثلاث أسابيع من المدرسة", "2026-05-10", TOLD_ON) is True
 
 
 @pytest.mark.parametrize(("english", "arabic"), [
@@ -448,3 +576,119 @@ def test_every_arabic_number_word_is_an_ago_and_every_this_year_phrase_is_read()
     assert re.search(tw.TIME_AFTER_EN, "the last few days")
     old_place = r"(?:last|this|past)\s+(?:week|month|year)"
     assert re.search(old_place, "past 10 days") is None
+
+
+def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
+    found = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+    assert len(found) == 1, name
+    return found[0]
+
+
+def _past_calls(fn: ast.FunctionDef) -> list[str]:
+    """The readers called in *fn*'s ``if past`` block, in source order."""
+    for node in fn.body:
+        test = node.test if isinstance(node, ast.If) else None
+        if not isinstance(test, ast.Name) or test.id != "past":
+            continue
+        names = []
+        for stmt in node.body:
+            call = stmt.value if isinstance(stmt, ast.Expr) else None
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                names.append(call.func.id)
+        return names
+    return []
+
+
+def _when_said_before_the_stretch(names: list[str]) -> bool:
+    try:
+        return names.index("_take_when_said") < names.index("_note_counted") < names.index("_take_months")
+    except ValueError:
+        return False
+
+
+def _finditer_receivers(fn: ast.FunctionDef) -> list[str]:
+    found: list[str] = []
+    for stmt in fn.body:
+        for node in ast.walk(stmt):
+            func = node.func if isinstance(node, ast.Call) else None
+            if not isinstance(func, ast.Attribute) or func.attr != "finditer":
+                continue
+            if isinstance(func.value, ast.Name):
+                found.append(func.value.id)
+    return found
+
+
+_WHEN_SAID_READERS = ["_RELATIVE_EN", "_AR_RELATIVE", "_AGO_EN", "_AR_AGO"]
+
+
+def test_when_said_readers_run_before_a_counted_stretch():
+    """From source: when it was said, then the stretch, then the month.
+
+    A planted block with the stretch first, and one with "ago" before the
+    relatives, are the controls."""
+    root = Path(__file__).resolve().parents[1]
+    tree = ast.parse((root / "kazma-core/kazma_core/memory/time_words.py").read_text(encoding="utf-8"))
+    assert _when_said_before_the_stretch(_past_calls(_function(tree, "read_time")))
+    assert _finditer_receivers(_function(tree, "_take_when_said")) == _WHEN_SAID_READERS
+    planted = ast.parse(
+        "def read_time():\n"
+        "    if past:\n"
+        "        _note_counted()\n"
+        "        _take_months()\n"
+        "        _take_when_said()\n"
+    )
+    assert not _when_said_before_the_stretch(_past_calls(_function(planted, "read_time")))
+    swapped = ast.parse(
+        "def _take_when_said():\n"
+        "    for m in _AGO_EN.finditer(text):\n"
+        "        pass\n"
+        "    for m in _RELATIVE_EN.finditer(text):\n"
+        "        pass\n"
+    )
+    assert _finditer_receivers(_function(swapped, "_take_when_said")) != _WHEN_SAID_READERS
+
+
+def test_every_last_month_close_is_that_months_last_days():
+    """Each "من الشهر ..." phrase in the tie list is that month's last days.
+
+    A week is not in the list: it stays when it was said."""
+    from kazma_core.memory import time_words as tw
+
+    last_five = (_day(2026, 8, 27), _day(2026, 9, 1))
+    assert tw._LAST_MONTH_AR
+    for phrase in tw._LAST_MONTH_AR:
+        question = f"وش قلت لك آخر خمس أيام من {phrase}؟"
+        ask = _read(question)
+        assert ask is not None and (ask.start, ask.end) == last_five, phrase
+        assert says_day(question, "2026-08-01", "2026-09-25") is False, phrase
+        assert says_day(question, "2026-08-27", "2026-09-25") is True, phrase
+    week = _read("وش قلت لك آخر خمس أيام من الأسبوع الماضي؟")
+    told = _read("وش قلت لك الأسبوع الماضي؟")
+    assert week is not None and told is not None
+    assert (week.start, week.end) == (told.start, told.end)
+    assert (week.start, week.end) != last_five
+
+
+def test_every_few_pattern_drops_a_thing_and_a_number_does_not():
+    """Each Arabic few pattern, and English "few", drops a non-time noun.
+
+    A numbered stretch and a few tied to a month are the controls."""
+    from kazma_core.memory import time_words as tw
+
+    samples = (
+        " اخر كم اسبوع من المدرسه",
+        " هالكم اسبوع من المدرسه",
+        " الكم سنه اللي فاتت من وظيفتي",
+    )
+    assert len(samples) == len(tw._SPAN_AR_FEW)
+    for pattern, sample in zip(tw._SPAN_AR_FEW, samples, strict=True):
+        match = pattern.search(sample)
+        assert match is not None, pattern.pattern
+        assert tw._few_of_a_thing(sample, match, arabic=True), sample
+    month = tw._SPAN_AR_FEW[0].search(" اخر كم يوم من اغسطس")
+    assert month is not None and not tw._few_of_a_thing(" اخر كم يوم من اغسطس", month, arabic=True)
+    school = tw._SPAN_EN.search("the last few weeks of school")
+    numbered = tw._SPAN_EN.search("the last 3 weeks of school")
+    assert school is not None and numbered is not None
+    assert tw._few_of_a_thing("the last few weeks of school", school, arabic=False)
+    assert not tw._few_of_a_thing("the last 3 weeks of school", numbered, arabic=False)
