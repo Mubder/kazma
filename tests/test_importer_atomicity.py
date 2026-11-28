@@ -67,7 +67,7 @@ def test_sqlite_target_aborts_before_swap(tmp_path: Path, monkeypatch) -> None:
     _write_live_sqlite(live, "ORIGINAL-LIVE")
     bundle = _write_pg_bundle(tmp_path / "b.zip")
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
 
     with patch("kazma_core.db.backend.is_postgres", return_value=False):
         report = import_bundle(
@@ -88,7 +88,7 @@ def test_corrupt_pg_dump_leaves_live_sqlite(tmp_path: Path, monkeypatch) -> None
     _write_live_sqlite(live, "ORIGINAL-LIVE")
     bundle = _write_pg_bundle(tmp_path / "b.zip", dump_bytes=b"CORRUPT")
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
 
     def _boom(*_a, **_k):
         raise RuntimeError("pg_restore exploded")

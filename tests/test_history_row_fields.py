@@ -94,7 +94,7 @@ def _row_with(fields: set[str]) -> dict:
 @pytest.fixture
 def history(tmp_path, monkeypatch):
     """GET the real history route for one stored session."""
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     from kazma_ui.session_manager import get_session_manager, reset_session_manager
     from kazma_ui.sse_chat import create_sse_chat_router
 

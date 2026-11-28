@@ -191,7 +191,7 @@ def test_the_restore_cli_names_the_passphrase_file_it_reads(monkeypatch, capsys,
     import kazma_core.backup.restic_repo as restic_repo
 
     where = tmp_path / ".kazma" / "restic.pass"
-    monkeypatch.setattr(restic_repo, "ensure_password", lambda: ("", None))
+    monkeypatch.setattr(restic_repo, "ensure_password", lambda **_: ("", None))
     monkeypatch.setattr(restic_repo, "password_file", lambda: where)
     assert restore_mod.main(["--list"]) == 2
     assert str(where) in capsys.readouterr().out

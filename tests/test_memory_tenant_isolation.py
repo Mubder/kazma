@@ -37,7 +37,7 @@ def two_tenant_db(tmp_path, monkeypatch):
     from kazma_core import paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "primary_memory_db", lambda: str(state))
-    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda: str(ops))
+    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda **_: str(ops))
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
 
     c = sqlite3.connect(state)
@@ -165,7 +165,7 @@ async def test_flag_off_returns_default_everything(tmp_path, monkeypatch):
     from kazma_core import paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "primary_memory_db", lambda: str(state))
-    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda: str(ops))
+    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda **_: str(ops))
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
 
     c = sqlite3.connect(state)

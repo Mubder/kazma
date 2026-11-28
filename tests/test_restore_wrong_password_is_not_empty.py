@@ -47,7 +47,7 @@ def test_the_cli_list_exits_nonzero_and_names_the_cause(monkeypatch, capsys):
     import kazma_core.backup.restic_repo as rr
 
     _restic(monkeypatch, returncode=1, stderr=_WRONG)
-    monkeypatch.setattr(rr, "ensure_password", lambda: ("pw", "env"))
+    monkeypatch.setattr(rr, "ensure_password", lambda **_: ("pw", "env"))
     assert restore_mod.main(["--list", "--repo", "repo"]) == 2
     out = capsys.readouterr().out
     assert "wrong password" in out

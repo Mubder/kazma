@@ -71,7 +71,7 @@ def test_a_reload_mid_stream_says_kazma_is_restarting(monkeypatch, tmp_path):
     from kazma_ui.session_manager import reset_session_manager
     from kazma_ui.sse_chat import _stream_langgraph_events
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     reset_session_manager()
     saved: list[str] = []
     monkeypatch.setattr(turn_runtime, "persist_reply", lambda *a, **k: saved.append(str(a[2] if len(a) > 2 else "")))
@@ -105,7 +105,7 @@ def test_the_old_ending_read_the_checkpoint_as_a_pause(monkeypatch, tmp_path):
     from kazma_ui.session_manager import reset_session_manager
     from kazma_ui.sse_chat import _stream_langgraph_events
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     reset_session_manager()
     monkeypatch.setattr(turn_runtime, "persist_reply", lambda *a, **k: None)
 

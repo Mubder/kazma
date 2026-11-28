@@ -588,7 +588,7 @@ def _memory_lane(tmp_path: Path, monkeypatch) -> list[str]:
     from kazma_core import paths
     from kazma_core.memory import task_queue
 
-    monkeypatch.setattr(paths, "memory_ops_db", lambda: tmp_path / "memory_ops.db")
+    monkeypatch.setattr(paths, "memory_ops_db", lambda **_: tmp_path / "memory_ops.db")
     for n in range(4):
         assert task_queue.enqueue_task("micro_consolidation", {"episode_id": f"a{n}"}, space=A)
     assert task_queue.enqueue_task("micro_consolidation", {"episode_id": "b0"}, space=B)
@@ -608,7 +608,7 @@ def test_a_task_names_the_space_it_was_queued_in(enforced, tmp_path, monkeypatch
     from kazma_core import paths
     from kazma_core.memory import task_queue
 
-    monkeypatch.setattr(paths, "memory_ops_db", lambda: tmp_path / "memory_ops.db")
+    monkeypatch.setattr(paths, "memory_ops_db", lambda **_: tmp_path / "memory_ops.db")
     task_queue.enqueue_task("entity_merge", {"merge_id": "m", "tenant_id": B})
     with scope.bind_scope(A, "someone"):
         task_queue.enqueue_task("topic_summary_rebuild", {"summary_id": "s"})

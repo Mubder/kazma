@@ -159,7 +159,7 @@ def test_edits_go_to_the_data_folder_not_the_checkout(tmp_path, monkeypatch):
     shipped.write_text(json.dumps(_SHIPPED), encoding="utf-8")
     data = tmp_path / "data"
     monkeypatch.setattr(mod, "_default_templates_path", lambda: shipped)
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
 
     scaler = mod.AutoScaler(MagicMock())
     scaler.load_templates()

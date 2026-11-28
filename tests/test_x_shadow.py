@@ -18,7 +18,7 @@ def shadow_env(tmp_path, monkeypatch):
     from kazma_core.x_api.schedule import reset_x_scheduled_store
     from kazma_core.x_api.stance import Subject, get_reply_config
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     (tmp_path / ".x-shadow-isolated").write_text(str(os.getpid()), encoding="utf-8")
     reset_reply_store(tmp_path / "x_replies.db")
     reset_x_scheduled_store(tmp_path / "x_scheduled.db")

@@ -20,7 +20,7 @@ def evo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Point data_dir at tmp (used only by the legacy-migration helper now)
     monkeypatch.setattr(
         "kazma_core.paths.data_dir",
-        lambda: tmp_path,
+        lambda **_: tmp_path,
     )
     return tmp_path
 

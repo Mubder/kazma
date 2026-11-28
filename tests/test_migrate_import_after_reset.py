@@ -71,7 +71,7 @@ def target(tmp_path: Path, monkeypatch):
     """A SQLite install in tmp_path, with its own vault key in .env."""
     data = tmp_path / "kazma-data"
     data.mkdir()
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(f"KAZMA_VAULT_KEY={TARGET_KEY}\n", encoding="utf-8")
     monkeypatch.setenv("KAZMA_VAULT_KEY", TARGET_KEY)

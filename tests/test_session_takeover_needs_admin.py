@@ -34,7 +34,7 @@ OWNER = "telegram:111"
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     reset_session_manager()
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     monkeypatch.delenv("KAZMA_SESSION_OPEN_TAKEOVER", raising=False)
     monkeypatch.delenv("KAZMA_GATEWAY_ADMINS", raising=False)
     reset_session_manager()

@@ -103,7 +103,7 @@ def test_chaos_stuck_processing_reclaim(tmp_path, monkeypatch):
     try:
         import kazma_core.paths as paths
 
-        monkeypatch.setattr(paths, "memory_ops_db", lambda: str(ops))
+        monkeypatch.setattr(paths, "memory_ops_db", lambda **_: str(ops))
     except Exception:
         pass
 

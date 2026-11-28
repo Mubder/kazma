@@ -29,7 +29,7 @@ def test_default_sandbox_under_data_dir(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(
         "kazma_core.paths.data_dir",
-        lambda: tmp_path / "kazma-data",
+        lambda **_: tmp_path / "kazma-data",
     )
     root = default_sandbox_root()
     assert root == (tmp_path / "kazma-data" / "workspace").resolve()

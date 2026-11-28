@@ -197,7 +197,7 @@ def test_commitment_resolve_gate_checkpointerless_auto_deny():
 
 def test_commitment_cas_prevents_revival_of_expired(tmp_path, monkeypatch):
     test_db = str(tmp_path / "commitments.db")
-    monkeypatch.setattr("kazma_core.safety.commitment.store.memory_ops_db", lambda: test_db)
+    monkeypatch.setattr("kazma_core.safety.commitment.store.memory_ops_db", lambda **_: test_db)
 
     now = time.time()
     cmt = Commitment(

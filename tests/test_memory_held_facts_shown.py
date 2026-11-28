@@ -528,7 +528,7 @@ def test_a_failure_while_the_turn_is_read_closes_both_connections(tmp_path, monk
                 db.execute("INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
                            "created_at, tier) VALUES ('e1', 'default', 's', 1, 'Hana moved to Doha', 'ok', 1, 'episodic')")
     monkeypatch.setattr("kazma_core.paths.primary_memory_db", lambda: str(tmp_path / "primary.db"))
-    monkeypatch.setattr("kazma_core.paths.memory_ops_db", lambda: str(tmp_path / "ops.db"))
+    monkeypatch.setattr("kazma_core.paths.memory_ops_db", lambda **_: str(tmp_path / "ops.db"))
     opened: list[sqlite3.Connection] = []
     connect = sqlite3.connect
     monkeypatch.setattr(sqlite3, "connect", lambda *a, **kw: opened.append(connect(*a, **kw)) or opened[-1])

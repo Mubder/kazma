@@ -100,7 +100,7 @@ def install(tmp_path, monkeypatch):
         decoy.write_text("DECOY line\n", encoding="utf-8")
     monkeypatch.delenv("KAZMA_LOG_FILE", raising=False)
     monkeypatch.setattr(paths, "user_home", lambda: home)
-    monkeypatch.setattr(paths, "data_dir", lambda: data)
+    monkeypatch.setattr(paths, "data_dir", lambda **_: data)
     monkeypatch.chdir(workspace)
     return {"log": log, "workspace": workspace, "data": data}
 

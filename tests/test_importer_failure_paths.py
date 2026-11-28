@@ -72,7 +72,7 @@ def _bundle(path: Path, files: dict[str, bytes | str]) -> Path:
 def target(tmp_path: Path, monkeypatch):
     data = tmp_path / "kazma-data"
     data.mkdir()
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KAZMA_VAULT_KEY", raising=False)
     env = tmp_path / ".env"
@@ -119,7 +119,7 @@ def test_rollback_keeps_a_file_that_existed_but_has_no_copy(tmp_path: Path) -> N
     _write_sqlite(live, "IMPORTED")
     empty_backup = tmp_path / "bak"
     empty_backup.mkdir()
-    with patch("kazma_core.paths.data_dir", lambda: data):
+    with patch("kazma_core.paths.data_dir", lambda **_: data):
         importer._rollback_sqlite_swap(empty_backup, ["cron.db"], paths, data, {"cron.db"})
     assert live.exists()
 
@@ -135,7 +135,7 @@ def test_the_old_rollback_rule_deletes_it(tmp_path: Path) -> None:
     _write_sqlite(live, "IMPORTED")
     empty_backup = tmp_path / "bak"
     empty_backup.mkdir()
-    with patch("kazma_core.paths.data_dir", lambda: data):
+    with patch("kazma_core.paths.data_dir", lambda **_: data):
         importer._rollback_sqlite_swap(empty_backup, ["cron.db"], paths, data, set())
     assert not live.exists()
 

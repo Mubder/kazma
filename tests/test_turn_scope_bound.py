@@ -35,7 +35,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(autouse=True)
 def _own_record_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(tmp_path / "thread_scopes.db"))
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda **_: str(tmp_path / "thread_scopes.db"))
     monkeypatch.setattr(threads, "_schema_ready", set())
 
 

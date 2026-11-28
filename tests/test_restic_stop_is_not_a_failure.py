@@ -73,7 +73,7 @@ def test_the_maintenance_pages_only_a_real_failure(monkeypatch, interrupted, ale
     from kazma_core.memory import worker_bootstrap as wb
 
     monkeypatch.setattr(restic_repo, "restic_available", lambda: True)
-    monkeypatch.setattr(restic_repo, "ensure_password", lambda: ("pw", "file"))
+    monkeypatch.setattr(restic_repo, "ensure_password", lambda **_: ("pw", "file"))
     monkeypatch.setattr(restic_repo, "repo_paths", lambda: {"remote": "rclone:remote:kazma"})
     monkeypatch.setattr(restic_repo, "unlock_stale", lambda repo, password: None)
     monkeypatch.setattr(restic_repo, "forget_prune",

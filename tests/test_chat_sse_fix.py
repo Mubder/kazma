@@ -41,7 +41,7 @@ def _reset_shared_session_store(tmp_path, monkeypatch):
     """
     from kazma_ui.session_manager import reset_session_manager
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     reset_session_manager()
 
 

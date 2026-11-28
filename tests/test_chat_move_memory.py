@@ -305,11 +305,11 @@ def test_a_record_store_from_before_chats_moved_is_read(chat, monkeypatch, tmp_p
     conn.execute("INSERT INTO thread_scopes VALUES ('t-old', 'sara-own', 'sara', '2026')")
     conn.commit()
     conn.close()
-    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(path))
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda **_: str(path))
     assert threads.copied_threads() == {} and threads.record_of("t-old").copied_at is None
     threads.record_thread("t-copy", TEAM, SARA, copied_at=T0)
     assert threads.copied_threads() == {"t-copy": T0} and threads.record_of("t-copy").copied_at == T0
-    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(tmp_path / "none.db"))
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda **_: str(tmp_path / "none.db"))
     assert threads.copied_threads() == {} and not (tmp_path / "none.db").exists(), "asking makes no file"
 
 

@@ -17,7 +17,7 @@ def session_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     data.mkdir()
     monkeypatch.setattr(
         "kazma_core.tools.research_session.data_dir",
-        lambda: str(data),
+        lambda **_: str(data),
         raising=False,
     )
 

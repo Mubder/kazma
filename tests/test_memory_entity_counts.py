@@ -37,7 +37,7 @@ def state_db(tmp_path, monkeypatch):
     from kazma_core import paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "primary_memory_db", lambda: str(state))
-    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda: str(ops))
+    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda **_: str(ops))
     return state
 
 

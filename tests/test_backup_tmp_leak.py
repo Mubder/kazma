@@ -182,7 +182,7 @@ def test_a_fresh_backup_skips_the_boot_sweep(monkeypatch, tmp_path):
 
     base = tmp_path / "backups" / "universal" / "1787963091"
     base.mkdir(parents=True)
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: str(tmp_path))
     assert wb._backup_ran_recently() is True
 
     old = _t.time() - 9 * 3600
@@ -195,7 +195,7 @@ def test_no_backups_at_all_means_take_one(monkeypatch, tmp_path):
     """A fresh install must not skip its first backup."""
     from kazma_core.memory import worker_bootstrap as wb
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: str(tmp_path))
     assert wb._backup_ran_recently() is False
 
 

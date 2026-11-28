@@ -145,7 +145,7 @@ def test_failed_restore_guard_rolls_back_imported_publishing_database(tmp_path, 
         report.error("X publishing restore guard failed: settings are read-only")
         return False
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
     monkeypatch.setattr(importer, "_live_server_detected", lambda: (False, ""))
     monkeypatch.setattr(importer, "_guard_restored_x", refuse_guard)
     report = importer.import_bundle(bundle, target_workspace_root=str(tmp_path))

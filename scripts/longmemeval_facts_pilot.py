@@ -123,7 +123,9 @@ def _route_memory_paths() -> None:
 
     primary, ops = paths.primary_memory_db, paths.memory_ops_db
     paths.primary_memory_db = lambda: (_STORE.get() or (primary(), ""))[0]  # type: ignore[assignment]
-    paths.memory_ops_db = lambda: (_STORE.get() or ("", ops()))[1]  # type: ignore[assignment]
+    # Same signature as the real one: a reader passes create=False (28 Nov: a zero-argument
+    # stand-in made every memory worker call fail, and three LongMemEval tests hung).
+    paths.memory_ops_db = lambda **kw: (_STORE.get() or ("", ops(**kw)))[1]  # type: ignore[assignment]
 
 
 def prompt_tag() -> str:

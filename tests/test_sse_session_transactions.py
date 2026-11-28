@@ -26,7 +26,7 @@ _SSE = _ROOT / "kazma-ui" / "kazma_ui" / "sse_chat"
 def manager(tmp_path, monkeypatch):
     from kazma_ui.session_manager import get_session_manager, reset_session_manager
 
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: tmp_path)
     reset_session_manager()
     yield get_session_manager()
     reset_session_manager()

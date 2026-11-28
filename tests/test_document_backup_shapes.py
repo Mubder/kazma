@@ -94,7 +94,7 @@ def _import(tmp_path, monkeypatch, restore):
 
     data = tmp_path / "kazma-data"
     data.mkdir(exist_ok=True)
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: data)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: data)
     # A SQLite target through and through: the import writes the bundle's
     # settings into the target's store (FA-255), which the Postgres suite's
     # environment would otherwise make a Postgres one.

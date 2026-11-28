@@ -357,7 +357,7 @@ def test_a_missing_record_store_is_no_list_of_no_threads(db: dict[str, str], loc
     monkeypatch.setenv("KAZMA_DATABASE_URL", db["app"])
     theirs = _stamped_row(db, "sa")
     gone = tmp_path / "thread_scopes.db"
-    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(gone))
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda **_: str(gone))
     done = lock.apply(db["app"], vector_table="")
     assert not done.complete and any("not there" in u for u in done.unresolved), done
     assert _stamps(db, theirs) == {"sa"}, "nothing was reset"
@@ -375,7 +375,7 @@ def test_an_empty_record_store_with_stamped_rows_changes_nothing(db: dict[str, s
     empty = tmp_path / "thread_scopes.db"
     with sqlite3.connect(empty) as made:
         made.executescript(threads._SCHEMA)
-    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(empty))
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda **_: str(empty))
     done = lock.apply(db["app"], vector_table="")
     assert not done.complete and any("list no thread" in u for u in done.unresolved), done
     assert _stamps(db, theirs) == {"sb"}

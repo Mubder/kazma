@@ -361,7 +361,7 @@ def test_ledger_reads_rotated_logs(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(paths, "user_home", lambda: home)
-    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path / "kazma-data")
+    monkeypatch.setattr(paths, "data_dir", lambda **_: tmp_path / "kazma-data")
     # The ledger reads the file the server writes (paths.log_file()); the
     # root conftest points that at a temp file, so unpin it here.
     monkeypatch.delenv("KAZMA_LOG_FILE", raising=False)

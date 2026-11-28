@@ -20,7 +20,7 @@ def test_bundle_restore_preserves_receipts_and_never_releases_old_work(tmp_path,
     source.mkdir()
     target.mkdir()
     monkeypatch.setattr(publication_store, "_test_store", None)
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: source)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: source)
     store = publication_store.get_publication_store()
     legacy = reset_x_scheduled_store(source / "x_scheduled.db")
     base = dict(tenant_id="default", account_id="123", credential_revision="captured",
@@ -47,7 +47,7 @@ def test_bundle_restore_preserves_receipts_and_never_releases_old_work(tmp_path,
         bundle.writestr("manifest.json", manifest.to_json())
         for name, content in files.items():
             bundle.writestr(name, content)
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: target)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: target)
     monkeypatch.setattr(importer, "_live_server_detected", lambda: (False, ""))
     reset_x_scheduled_store(target / "x_scheduled.db")
     began = time.monotonic()

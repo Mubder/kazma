@@ -69,7 +69,7 @@ def _bundle(path: Path) -> Path:
 def data(tmp_path: Path, monkeypatch) -> Path:
     folder = tmp_path / "kazma-data"
     folder.mkdir()
-    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: folder)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda **_: folder)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KAZMA_VAULT_KEY", raising=False)
     return folder
