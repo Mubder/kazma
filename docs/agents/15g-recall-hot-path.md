@@ -42,14 +42,16 @@
     "بداية شهر أغسطس") is read in the operator's zone. A counted stretch
     includes today through now, as "this week" does. A word that says when
     it was said ("yesterday", "last week", "two weeks ago", "أمس",
-    "الأسبوع الماضي", "قبل أسبوعين") wins over a stretch that is the topic;
+    "الأسبوع الماضي", "قبل أسبوعين", "in August", "في أغسطس",
+    "ذكرت في شهر أغسطس", "in 2025") wins over a stretch that is the topic;
     the stretch sets the window only when no when-said reader matched. A
     stretch tied to a month ("the last 3 days of August", "آخر ٣ أيام من
     أغسطس", "من الشهر الماضي", "of last month") is that month's last days,
     and the "last month" that only closes it is not a when-said of its own.
-    A stretch that is not tied keeps its own window. A month named beside
-    it, not closing it, is left out of the time words, so recall keeps it
-    as a search word. "كم" and "how many" are questions, not counts. "كم"
+    A stretch that is not tied keeps its own window. A month or a year
+    that says when it was said wins and is the period, so recall drops it.
+    One after "about" / "عن", or after the stretch, is left out of the
+    time words, so recall keeps it as a search word. "كم" and "how many" are questions, not counts. "كم"
     right after "آخر" ("آخر كم يوم", "هالكم يوم", "الكم يوم اللي فاتت") is
     a few, the last few days, the same three "قبل كم يوم" counts. A few
     tied to a noun that is not a time ("the last few weeks of school",
