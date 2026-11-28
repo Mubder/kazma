@@ -999,27 +999,38 @@ calls reported with every run; the scale bench at 10 and 100 times the store.
 
 Built 2026-11-28 (§15 G (2)): the harness, and no timed run.
 
-`scripts/memory_scale_speed.py` fills a private store the product's way
-(`episode_row`, the local embedder's vector, the quick pass with
-`private=True`; no deep pass, no mirror, passages off) to 1, 10 and 100
-times the episode count in `tests/fixtures/memory_bench/live_lengths.json`.
-The text is synthetic, cut to that file's length percentiles. Recall is the
-product's, local only, on a fixed English and Arabic question set. A report
-carries p50, p95, paid model calls and tokens. Recall makes no paid call;
-the question's local embedding is counted apart. `size` times a sample of
-the fill and extrapolates each factor. Recall is not in that sample. `run`
-starts 100x only when that fill estimate is under two hours. 1x and 10x are
-not gated on it.
+`scripts/memory_scale_speed.py` fills a private store with its own INSERT
+(`episode_row` with the local embedder's vector inline, batch-encoded, then
+the quick pass `extract_and_apply_beliefs_sync(private=True)`; no deep pass,
+no mirror, passages off; not `write_episode`, so no forget-ledger check and
+no `BEGIN IMMEDIATE`). `fill_s` and the 100x gate measure that write cost.
+The store is 1, 10 and 100 times the episode count in
+`tests/fixtures/memory_bench/live_lengths.json`. The text is synthetic, cut
+to that file's length percentiles. Recall is the product's, local only, on
+a fixed English and Arabic question set. A report carries p50, p95, paid
+model calls and tokens. Those token counts stay 0: recall runs `local_only`
+and the paid-call guard patches httpx only. Each size gets its own embedder
+wrapper, so the question's local embedding is counted for that size; one
+wrapper would let recall's question-vector cache skip it after the first.
+One untimed recall per size is `warmup_s` and is not in the percentiles.
+`size` times a sample of the fill and extrapolates each factor. Recall is
+not in that sample. `run` starts 100x only when that fill estimate is under
+two hours. 1x and 10x are not gated on it.
 
-`scripts/longmemeval_bench.py size` counts LongMemEval-M's rounds and tokens
-and estimates the embedding from a length-stratified sample of the product's
-embed text. It does not retrieve or answer. The file stays outside the
-repository. On this machine it is `G:\BenchData\longmemeval-2026-11-21`. The
-script takes `--data` and does not default to that path.
+`scripts/longmemeval_bench.py size` counts LongMemEval-M's rounds, tokens
+and distinct embed texts, one question at a time (the file is not parsed as
+one string), and estimates the embedding from a length-stratified sample of
+the product's embed text. The estimate multiplies by the distinct non-empty
+texts, which is what a retrieve run embeds. The sample's batches pad across
+length quartiles; a retrieve run pads within near-equal lengths. It does
+not retrieve or answer. The file stays outside the repository. On this
+machine it is `G:\BenchData\longmemeval-2026-11-21`. The script takes
+`--data` and does not default to that path.
 
-Each command below lowers its own process to below normal before it works
-(Windows below-normal priority class, otherwise nice 10). The `--out` file
-stays outside the repository.
+Each command below asks to lower its own process to below normal before it
+works (Windows below-normal priority class, otherwise nice 10). The report
+says `not lowered` when that did not happen. The `--out` file stays outside
+the repository.
 
 * 1x: `python scripts/memory_scale_speed.py run --factors 1 --out G:\BenchData\scale-speed\1.json`
 * 10x: `python scripts/memory_scale_speed.py run --factors 10 --out G:\BenchData\scale-speed\10.json`
@@ -1033,8 +1044,10 @@ stays outside the repository.
 
 Gates, the embedder a stub: `tests/test_memory_scale_speed.py` (sizes as
 declared; a planted slow recall is the p95, the same questions all fast are
-the control), `tests/test_longmemeval_m_size.py` (a fixture; embedding every
-round, and a report that quotes the text, are the controls).
+the control; each size of a two-factor run embeds its questions, and one
+shared wrapper leaves the second size at 0), `tests/test_longmemeval_m_size.py`
+(a fixture; estimating from every round, and a report that quotes the text,
+are the controls).
 
 Timed runs: not yet, they need a quiet machine.
 

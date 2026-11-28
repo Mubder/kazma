@@ -1,8 +1,8 @@
 """The scale bench (``scripts/memory_scale_speed.py``, the memory plan's W8).
 
-A private store is filled the product's way and recall is timed. The embedder
-here is a stub. Nothing of an install is opened, and the real model is not
-loaded.
+A private store is filled with the bench's own insert and recall is timed.
+The embedder here is a stub. Nothing of an install is opened, and the real
+model is not loaded.
 
 * 1x is the episode count in ``live_lengths.json``. 10x and 100x are that
   count times the factor, in the counter and in the database.
@@ -86,6 +86,9 @@ def test_recall_reports_times_calls_and_both_languages(scale, tmp_path):
     assert row["prompt_tokens"] == 0
     assert row["completion_tokens"] == 0
     assert row["local_embeds"] == len(questions)
+    assert row["warmup_s"] >= 0.0
+    assert "local_only" in report["tokens_what"]
+    assert "write_episode" in report["fill_what"]
     assert "p50" in row["recall_s"] and "p95" in row["recall_s"]
     assert "p50" in row["by_lang"]["en"] and "p50" in row["by_lang"]["ar"]
     assert scale.report_problems(report, questions, factors=(1,), episodes=4, fact_every=25) == []
@@ -117,6 +120,11 @@ def test_a_planted_slow_recall_shows_in_p95(scale):
     assert timed["recall_s"]["p50"] == pytest.approx(0.001)
     assert timed["recall_s"]["p95"] == pytest.approx(0.4)
     assert timed["slowest_question"] == slow
+    # The untimed recall is outside the set. It is not one of the ten, and it
+    # is not the planted slow question, so it cannot move p95.
+    assert scale.WARMUP_TEXT not in {q["text"] for q in questions}
+    assert scale.WARMUP_TEXT not in {q["text"] for q in scale.QUESTIONS}
+    assert timed["warmup_s"] == pytest.approx(0.001)
 
     clock["t"] = 0.0
 
@@ -127,6 +135,8 @@ def test_a_planted_slow_recall_shows_in_p95(scale):
     control = scale.time_recalls(None, questions, recall_fn=fast, clock=now)
     assert control["recall_s"]["p95"] == pytest.approx(0.001)
     assert control["recall_s"]["p50"] == pytest.approx(0.001)
+    assert control["warmup_s"] == pytest.approx(0.001)
+    assert control["recall_s"]["n"] == 10
 
 
 def test_a_dead_embedder_does_not_start_the_bench(scale):
@@ -158,3 +168,63 @@ def test_only_100x_is_refused_at_two_hours(scale, tmp_path):
     assert sized["sizes"]["100"]["episodes"] == 200
     assert sized["sizes"]["1"]["episodes"] == 2
     assert sized["sizes"]["100"]["fill_s"] == pytest.approx(sized["per_episode_s"] * 200)
+    assert "write_episode" in sized["fill_what"]
+
+
+def test_each_size_embeds_its_questions(scale, tmp_path):
+    """Every factor encodes the question set.
+
+    One wrapper kept across two recalls is the control: recall's
+    question-vector cache is keyed by the embedder's identity, the set fits
+    in its 64 entries, and the second recall embeds nothing.
+    """
+    questions = ({"lang": "en", "text": "Where do I live?"}, {"lang": "ar", "text": "وين أسكن؟"})
+    path = tmp_path / "one.db"
+    embedder = scale.CountingEmbedder(scale.StubEmbedder())
+    scale.build_store(path, embedder, factor=1, episodes=2, fact_every=0)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        embedder.reset()
+        first = scale.time_recalls(conn, questions, recall_fn=scale._product_recall, embedder=embedder)
+        embedder.reset()
+        second = scale.time_recalls(conn, questions, recall_fn=scale._product_recall, embedder=embedder)
+    finally:
+        conn.close()
+    assert first["local_embeds"] == len(questions)
+    assert second["local_embeds"] == 0
+
+    report = scale.measure((1, 10), scale.StubEmbedder(), episodes=2, fact_every=0, questions=questions)
+    for key in ("1", "10"):
+        assert report["sizes"][key]["local_embeds"] == len(questions)
+        assert report["sizes"][key]["warmup_s"] >= 0.0
+
+
+def test_a_failed_priority_drop_is_not_called_below_normal(scale, monkeypatch, caplog, capsys):
+    """A report says below normal only when the drop happened."""
+    monkeypatch.setattr(scale, "_priority_lowered", lambda: True)
+    assert scale._below_normal() is True
+    assert scale._machine(True)["priority"] == "below normal"
+    assert "could not lower priority" not in caplog.text
+
+    monkeypatch.setattr(scale, "_priority_lowered", lambda: False)
+    with caplog.at_level("WARNING"):
+        assert scale._below_normal() is False
+    assert scale._machine(False)["priority"] == "not lowered"
+    assert "could not lower priority" in caplog.text
+
+    def boom():
+        raise OSError("nice")
+
+    monkeypatch.setattr(scale, "_priority_lowered", boom)
+    assert scale._below_normal() is False
+
+    monkeypatch.setattr(scale, "_below_normal", lambda: False)
+    monkeypatch.setattr(scale, "_private_data_folder", lambda: None)
+    monkeypatch.setattr(scale, "_limit_threads", lambda: None)
+    monkeypatch.setattr(scale, "_real_embedder", lambda: scale.StubEmbedder())
+    monkeypatch.setattr(scale, "_warm", lambda _embedder: None)
+    monkeypatch.setattr(scale, "measure", lambda *_a, **_k: {"sizes": {}})
+    assert scale.main(["run", "--factors", "1"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["machine"]["priority"] == "not lowered"

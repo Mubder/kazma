@@ -30,9 +30,10 @@ script does not default to that path.
         # LongMemEval's own judge prompts score each answer
     DEEPSEEK_API_KEY=... python scripts/longmemeval_bench.py translate --data DIR
     python scripts/longmemeval_bench.py size --data DIR
-        # LongMemEval-M only: how many rounds and tokens, and an estimate of
-        # embedding them on this PC from a measured sample. Retrieves nothing
-        # and answers nothing. No paid model call.
+        # LongMemEval-M only: rounds, tokens and distinct embed texts, one
+        # question parsed at a time, and an estimate of embedding the distinct
+        # texts from a measured sample. Retrieves nothing and answers nothing.
+        # No paid model call.
     python scripts/longmemeval_bench.py parallel --data DIR
         # the parallel English and Arabic set: 40 of the sample's questions,
         # their answer sessions translated (cached in DIR, never committed),
@@ -81,6 +82,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -88,9 +90,12 @@ import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures" / "longmemeval"
@@ -2054,30 +2059,91 @@ def _rerank_switch() -> contextlib.ExitStack:
     return stack
 
 
-def load_m(data: Path, *, check: bool = True) -> list[dict[str, Any]]:
-    """LongMemEval-M, hashed then parsed from the file.
+def load_m(data: Path, *, check: bool = True) -> Path:
+    """The LongMemEval-M file, hashed, not parsed.
 
-    ``json.load`` rather than reading the whole file as text first: the file
-    is a few gigabytes, and a second copy of it as a string is what runs a
-    machine out of memory."""
+    ``json.load(fp)`` is ``json.loads(fp.read())``. On this file that is
+    2.74 GB as one string and then the parsed objects, on the machine the
+    live server shares. Counting goes through :func:`iter_m`, one question
+    at a time. The hash is :func:`_sha256` (1 MiB blocks) before any parse.
+    """
     path = data / M_FILE
     if check and _sha256(path) != SOURCE["sha256"][M_FILE]:
         raise SystemExit(f"{path}: not the LongMemEval-M file this bench sizes ({SOURCE['revision']})")
+    return path
+
+
+def iter_m(path: Path, *, chunk: int = 1 << 20) -> Iterator[dict[str, Any]]:
+    """Yield one question from a LongMemEval JSON list.
+
+    A chunk is decoded with ``JSONDecoder.raw_decode`` and the bytes already
+    yielded are dropped, so the peak is one question, not the file. *chunk*
+    is characters (text mode); a test passes a handful. The error names the
+    file, never a question.
+    """
+    decoder = json.JSONDecoder()
     with path.open(encoding="utf-8") as handle:
-        items = json.load(handle)
-    if not isinstance(items, list):
-        raise SystemExit(f"{path}: not a list of questions")
-    return items
+        buf = ""
+        pos = 0
+
+        def read_more() -> bool:
+            nonlocal buf, pos
+            piece = handle.read(chunk)
+            if not piece:
+                return False
+            if pos:
+                buf = buf[pos:]
+                pos = 0
+            buf += piece
+            return True
+
+        def skip_ws() -> None:
+            nonlocal pos
+            while True:
+                while pos < len(buf) and buf[pos].isspace():
+                    pos += 1
+                if pos < len(buf) or not read_more():
+                    return
+
+        if not read_more() and not buf:
+            raise SystemExit(f"{path}: not a list of questions")
+        skip_ws()
+        if pos >= len(buf) or buf[pos] != "[":
+            raise SystemExit(f"{path}: not a list of questions")
+        pos += 1
+        while True:
+            skip_ws()
+            if pos >= len(buf):
+                raise SystemExit(f"{path}: the question list ended early")
+            if buf[pos] == "]":
+                return
+            if buf[pos] == ",":
+                pos += 1
+                continue
+            while True:
+                try:
+                    item, end = decoder.raw_decode(buf, pos)
+                    break
+                except json.JSONDecodeError:
+                    if not read_more():
+                        raise SystemExit(f"{path}: the question list ended early") from None
+            if not isinstance(item, dict):
+                raise SystemExit(f"{path}: not a list of questions")
+            pos = end
+            buf = buf[pos:]
+            pos = 0
+            yield item
 
 
-def embedding_estimate(n_rounds: int, sample_seconds: float, sample_n: int) -> float:
-    """Seconds to embed *n_rounds* at the sample's seconds per round.
+def embedding_estimate(n_texts: int, sample_seconds: float, sample_n: int) -> float:
+    """Seconds to embed *n_texts* at the sample's seconds per text.
 
-    The sample's own seconds are not this: a report that returns them has
-    not extrapolated."""
+    A retrieve run embeds each distinct non-empty text once. *n_texts* is
+    that count, not the number of rounds. The sample's own seconds are not
+    this: a report that returns them has not extrapolated."""
     if sample_n <= 0:
         raise ValueError("a sample of no rounds cannot estimate the embedding")
-    return n_rounds * sample_seconds / sample_n
+    return n_texts * sample_seconds / sample_n
 
 
 def _sample_plan(lengths: list[int], sample: int) -> list[int]:
@@ -2117,7 +2183,7 @@ def _sample_plan(lengths: list[int], sample: int) -> list[int]:
     return picked[:sample]
 
 
-def _embed_texts(items: list[dict[str, Any]], indices: list[int]) -> list[str]:
+def _embed_texts(items: Iterable[dict[str, Any]], indices: list[int]) -> list[str]:
     """The product's embed text of the rounds *indices* name, and nothing else
     kept. A round embeds its question, else its answer, cut at 4,000
     characters (``episode_text.embed_text``)."""
@@ -2137,34 +2203,66 @@ def _embed_texts(items: list[dict[str, Any]], indices: list[int]) -> list[str]:
     return [found[i] for i in indices if i in found]
 
 
-def corpus_counts(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Questions, sessions, rounds and tokens of *items*, plus each round's
-    embed-text length (for the sample). Tokens are
-    ``estimate_text_tokens`` on the question and the answer together: the
-    size of the text, not what the embedder is given."""
+def _fresh_counts() -> dict[str, Any]:
+    return {"questions": 0, "sessions": 0, "rounds": 0, "tokens": 0, "embed_lengths": [], "unique": set()}
+
+
+def _add_item(counted: dict[str, Any], item: dict[str, Any]) -> None:
+    """One question's sessions, rounds, tokens, embed lengths and distinct texts.
+
+    A distinct text is the non-empty embed text. ``CachedEmbedder.fill``
+    skips an empty string and embeds each remaining text once. The set holds
+    digests, not the strings.
+    """
     from kazma_core.memory.episode_text import embed_text
     from kazma_core.summarizer import estimate_text_tokens
 
-    sessions = 0
-    n_rounds = 0
-    tokens = 0
-    lengths: list[int] = []
+    counted["questions"] += 1
+    sessions = item.get("haystack_sessions") or []
+    counted["sessions"] += len(sessions)
+    for session in sessions:
+        for turn in rounds(session):
+            counted["rounds"] += 1
+            counted["tokens"] += estimate_text_tokens(f"{turn['user']}\n{turn['assistant']}")
+            text = embed_text(turn["user"], turn["assistant"], "")
+            counted["embed_lengths"].append(len(text))
+            if text:
+                counted["unique"].add(hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+
+def _public_counts(counted: dict[str, Any]) -> dict[str, Any]:
+    return {"questions": counted["questions"], "sessions": counted["sessions"], "rounds": counted["rounds"],
+            "tokens": counted["tokens"], "embed_lengths": counted["embed_lengths"],
+            "unique_texts": len(counted["unique"])}
+
+
+def corpus_counts(items: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Questions, sessions, rounds and tokens of *items*, plus each round's
+    embed-text length (for the sample) and the distinct non-empty embed texts.
+    Tokens are ``estimate_text_tokens`` on the question and the answer
+    together: the size of the text, not what the embedder is given."""
+    counted = _fresh_counts()
     for item in items:
-        sessions += len(item.get("haystack_sessions") or [])
-        for session in item.get("haystack_sessions") or []:
-            for turn in rounds(session):
-                n_rounds += 1
-                tokens += estimate_text_tokens(f"{turn['user']}\n{turn['assistant']}")
-                lengths.append(len(embed_text(turn["user"], turn["assistant"], "")))
-    return {"questions": len(items), "sessions": sessions, "rounds": n_rounds,
-            "tokens": tokens, "embed_lengths": lengths}
+        _add_item(counted, item)
+    return _public_counts(counted)
+
+
+def stream_counts(path: Path, *, chunk: int = 1 << 20) -> dict[str, Any]:
+    """:func:`corpus_counts` over :func:`iter_m`. One question is parsed at a time."""
+    counted = _fresh_counts()
+    for item in iter_m(path, chunk=chunk):
+        _add_item(counted, item)
+    return _public_counts(counted)
 
 
 def measure_sample(texts: list[str], embedder: Any, *, clock: Any = None, batch: int = 32) -> dict[str, Any]:
-    """Time embedding *texts*, shortest first, the way a retrieve run batches.
+    """Time embedding *texts*, shortest first, in batches of *batch*.
 
-    *clock* is called twice, around every batch: a test clock that advances
-    between the two calls is the elapsed time, not the wall clock."""
+    A batch is padded to its longest text. This sample is drawn across
+    length quartiles, so a batch mixes a short text with a long one. A
+    retrieve run sorts every distinct text and pads within near-equal
+    lengths. *clock* is called before the batches and after them: a test
+    clock that advances between the two calls is the elapsed time."""
     now = clock or time.perf_counter
     ordered = sorted(texts, key=lambda text: (len(text), text))
     started = now()
@@ -2178,34 +2276,41 @@ def measure_sample(texts: list[str], embedder: Any, *, clock: Any = None, batch:
     return {"sample_n": len(texts), "sample_s": now() - started, "encoded": encoded}
 
 
-def size_report(items: list[dict[str, Any]], embedder: Any, *, sample: int = 64,
-                clock: Any = None, batch: int = 32) -> dict[str, Any]:
-    """Counts, tokens, and the estimated embedding seconds. No round text.
+#: Said on the size report. The sample overestimates a sorted retrieve run by
+#: padding each batch across quartiles; that is the caveat, not a claim that
+#: the sample batches the way the run does.
+BATCH_WHAT = (
+    "the sample's batches pad across length quartiles, so a short text is padded to a long one. "
+    "A retrieve run sorts every distinct text and pads within near-equal lengths"
+)
 
-    The estimate embeds the product's embed text (the question, else the
-    answer, first 4,000 characters), not the whole answer: that is what a
-    retrieve run embeds. The sample is stratified by that length. Recall is
-    not run and no question is answered."""
-    counted = corpus_counts(items)
-    lengths = list(counted.pop("embed_lengths"))
+
+def _size_from_counts(counted: dict[str, Any], items: Iterable[dict[str, Any]], embedder: Any, *,
+                      sample: int, clock: Any, batch: int) -> dict[str, Any]:
+    """The size report from counts already taken. *items* is read only for the sample."""
+    lengths = list(counted["embed_lengths"])
+    unique = int(counted["unique_texts"])
     if counted["rounds"] == 0:
         measured = {"sample_n": 0, "sample_s": 0.0, "encoded": 0}
         estimate = 0.0
     else:
         texts = _embed_texts(items, _sample_plan(lengths, sample))
         measured = measure_sample(texts, embedder, clock=clock, batch=batch)
-        estimate = embedding_estimate(counted["rounds"], measured["sample_s"], measured["sample_n"])
+        estimate = embedding_estimate(unique, measured["sample_s"], measured["sample_n"])
     return {
         "file": M_FILE,
         "revision": SOURCE["revision"],
         "questions": counted["questions"],
         "sessions": counted["sessions"],
         "rounds": counted["rounds"],
+        "unique_texts": unique,
         "tokens": counted["tokens"],
         "tokens_what": "estimate_text_tokens on each round's question and answer (Latin characters / 4, "
                        "Arabic about 2.5 per character)",
         "embed_what": "episode embed_text: the question, else the answer, first 4000 characters; "
-                      "the estimate is that text, not the whole answer",
+                      "the estimate multiplies the sample by the distinct non-empty texts, which is what "
+                      "a retrieve run embeds (empty texts are skipped, and each remaining text once)",
+        "batch_what": BATCH_WHAT,
         "sample_n": measured["sample_n"],
         "sample_s": measured["sample_s"],
         "sampled_all": measured["sample_n"] == counted["rounds"],
@@ -2218,27 +2323,64 @@ def size_report(items: list[dict[str, Any]], embedder: Any, *, sample: int = 64,
     }
 
 
-def _below_normal() -> None:
-    """Leave the machine responsive. The live server shares it."""
+def size_report(items: list[dict[str, Any]], embedder: Any, *, sample: int = 64,
+                clock: Any = None, batch: int = 32) -> dict[str, Any]:
+    """Counts, tokens, and the estimated embedding seconds. No round text.
+
+    The estimate embeds the product's embed text (the question, else the
+    answer, first 4,000 characters) and multiplies by the distinct non-empty
+    texts, not by every round. The sample is stratified by that length.
+    Recall is not run and no question is answered."""
+    return _size_from_counts(corpus_counts(items), items, embedder, sample=sample, clock=clock, batch=batch)
+
+
+def _priority_lowered() -> bool:
+    """Ask for below-normal priority. False when the OS refuses. An OSError
+    propagates so the caller can say the failure."""
     if os.name != "nt":
-        try:
-            os.nice(10)
-        except OSError:
-            return
-        return
+        os.nice(10)
+        return True
     import ctypes
 
-    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
+    kernel = ctypes.windll.kernel32
+    return bool(kernel.SetPriorityClass(kernel.GetCurrentProcess(), 0x00004000))
+
+
+def _priority_word(lowered: bool) -> str:
+    """What a report may say. ``below normal`` only when the drop happened."""
+    return "below normal" if lowered else "not lowered"
+
+
+def _below_normal() -> bool:
+    """Leave the machine responsive. The live server shares it.
+
+    False, and a warning, when the priority was not lowered. A report must
+    not say "below normal" in that case.
+    """
+    try:
+        lowered = _priority_lowered()
+    except OSError:
+        logger.warning("[longmemeval] could not lower priority", exc_info=True)
+        return False
+    if not lowered:
+        logger.warning("[longmemeval] could not lower priority")
+        return False
+    return True
 
 
 def _cmd_size(data: Path, sample: int) -> int:
-    """Count LongMemEval-M and estimate its embedding. Retrieve and answer nothing."""
-    _below_normal()
+    """Count LongMemEval-M and estimate its embedding. Retrieve and answer nothing.
+
+    The file is hashed, then counted one question at a time. The sample is a
+    second pass of those questions. The whole file is not one string.
+    """
+    lowered = _below_normal()
     _limit_cpu_threads()
     _private_data_folder()
     os.environ["KAZMA_EMBED_PROVIDER"] = "local"
     os.environ.pop("KAZMA_EMBED_BASE_URL", None)
-    items = load_m(data)
+    path = load_m(data)
+    counted = stream_counts(path)
     from kazma_core.memory.embedder import get_embedder
 
     embedder = get_embedder()
@@ -2246,11 +2388,16 @@ def _cmd_size(data: Path, sample: int) -> int:
         print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
         return 2
     # Load the model before the sample is timed. A load inside the sample
-    # would be multiplied by every round of the extrapolation.
+    # would be multiplied by every distinct embed text of the extrapolation.
     if not embedder.encode("warm"):
         print("the local embedder returned no vector; sizing was not run", file=sys.stderr)
         return 2
-    report = size_report(items, embedder, sample=sample)
+    if counted["rounds"] == 0:
+        source: Iterable[dict[str, Any]] = ()
+    else:
+        source = iter_m(path)
+    report = _size_from_counts(counted, source, embedder, sample=sample, clock=None, batch=32)
+    report["priority"] = _priority_word(lowered)
     print(json.dumps(report, indent=1))
     return 0
 
@@ -2351,7 +2498,7 @@ def main(argv: list[str] | None = None) -> int:
         "size", help="count LongMemEval-M's rounds and tokens and estimate the embedding; retrieve and answer nothing")
     size_p.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")
     size_p.add_argument("--sample", type=int, default=64,
-                        help="rounds embedded to estimate the rest, one share from each length quartile")
+                        help="length-stratified rounds embedded to estimate the distinct embed texts")
     for name in ("sample", "split", "retrieve", "answer", "translate", "parallel"):
         s = sub.add_parser(name)
         s.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")

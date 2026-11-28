@@ -3,7 +3,8 @@
 
 No paid model call. The deep pass, weekly summaries and the reranker stay
 out: this is the part of scale and speed that needs no model. A private
-database is filled the product's way and ``recall()`` is timed.
+database is filled and ``recall()`` is timed. The insert is this bench's
+own (``episode_row`` written with its vector inline), not ``write_episode``.
 
 1x is the episode count in ``tests/fixtures/memory_bench/live_lengths.json``
 (1,723 on the backup that file was taken from). That file is lengths only,
@@ -26,19 +27,23 @@ database, no state mirror and no remote index. The deep pass is not queued.
 Passages stay off, as shipped. Recall is the product's, ``local_only``,
 limit 5, times read in UTC.
 
-Recall makes no paid call. It embeds the question once on the local
-embedder; that encode is counted apart from model calls and tokens, which
-are the paid API's. The latency budget in the plan (150 ms p50, 400 ms p95,
-decision 4) is time a reranker may add. This bench times recall itself,
-reranker off, and says when that alone is already over those numbers.
+Recall makes no paid call (``local_only``). Each size gets a new embedder
+wrapper, so the question's local embedding is counted for that size: recall
+caches a question vector by the embedder's identity, and one wrapper would
+make every later size embed nothing. Token counts stay 0; the paid-call
+guard patches httpx only. The latency budget in the plan (150 ms p50, 400 ms
+p95, decision 4) is time a reranker may add. This bench times recall itself,
+reranker off, and says when that alone is already over those numbers. One
+untimed recall per size runs first and is reported as ``warmup_s``.
 
     python scripts/memory_scale_speed.py size
     python scripts/memory_scale_speed.py run --factors 1,10 --out REPORT.json
 
-``size`` fills a sample through the same write path and extrapolates. ``run``
+``size`` fills a sample through the same insert and extrapolates. ``run``
 refuses 100x when that extrapolation is two hours or more (recall at 100x is
 not in the sample; it is small beside the fill on the measured-limits
-bench). Text is synthetic. Nothing of an install is read or written.
+bench). The gate is this bench's write cost. Text is synthetic. Nothing of
+an install is read or written.
 """
 
 from __future__ import annotations
@@ -71,6 +76,17 @@ TWO_HOURS_S = 2 * 60 * 60
 #: itself, so a recall already over it cannot grow a reranker and stay inside.
 BUDGET_P50_S = 0.150
 BUDGET_P95_S = 0.400
+#: One recall before the timed set. Not one of QUESTIONS: those stay the sample.
+WARMUP_TEXT = "What is on the hall table?"
+FILL_WHAT = (
+    "the bench's own INSERT of episode_row with the vector inline, batch-encoded; "
+    "not write_episode (no forget-ledger check, no BEGIN IMMEDIATE). "
+    "fill_s and the 100x gate measure this write cost"
+)
+TOKENS_WHAT = (
+    "prompt_tokens and completion_tokens are 0 because recall runs local_only. "
+    "model_calls counts an httpx request to a paid host, which the guard refuses"
+)
 TENANT = "scale"
 FIXED_NOW = datetime(2026, 11, 1, tzinfo=UTC).timestamp()
 _VOCAB = 20_000
@@ -486,6 +502,11 @@ def time_recalls(conn: sqlite3.Connection, questions: list[dict[str, str]] | tup
     # for the whole question, or the count is of a model the recall never used.
     patch = _patched(embedder) if embedder is not None else contextlib.nullcontext()
     with patch, _paid_guard() as paid:
+        # Untimed. The first recall pays for lazy imports, the first FTS and
+        # vector reads, and an analyser. That cost is warmup_s, not p95.
+        warm_started = now()
+        recall_fn(WARMUP_TEXT, conn)
+        warmup_s = now() - warm_started
         for question in questions:
             before_s = embedder.seconds if embedder is not None else 0.0
             before_n = embedder.encodes if embedder is not None else 0
@@ -520,6 +541,9 @@ def time_recalls(conn: sqlite3.Connection, questions: list[dict[str, str]] | tup
         "degraded": degraded,
         "slowest_question": slowest,
         "over_budget": percentile(walls, 0.50) > BUDGET_P50_S or percentile(walls, 0.95) > BUDGET_P95_S,
+        "warmup_s": warmup_s,
+        "warmup_what": "one untimed recall of a question outside the set, before the timed questions",
+        "tokens_what": TOKENS_WHAT,
     }
 
 
@@ -614,10 +638,10 @@ def estimate_fill(embedder: Any, *, sample: int = 48, episodes: int | None = Non
         sizes[str(factor)] = {"episodes": n, "fill_s": fill_s,
                                "under_two_hours": within_two_hours(fill_s, factor=factor)}
     return {"sample_n": sample, "sample_s": elapsed, "per_episode_s": per, "one_x_episodes": base,
-            "recall_included": False, "sizes": sizes, "sample_facts": built["facts"]}
+            "recall_included": False, "fill_what": FILL_WHAT, "sizes": sizes, "sample_facts": built["facts"]}
 
 
-def _machine() -> dict[str, Any]:
+def _machine(lowered: bool) -> dict[str, Any]:
     import platform
 
     info: dict[str, Any] = {
@@ -626,7 +650,7 @@ def _machine() -> dict[str, Any]:
         "os": platform.platform(),
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version,
-        "priority": "below normal",
+        "priority": "below normal" if lowered else "not lowered",
     }
     try:
         import psutil
@@ -643,6 +667,17 @@ def _machine() -> dict[str, Any]:
     return info
 
 
+def _size_embedder(embedder: Any) -> CountingEmbedder:
+    """A new wrapper for one size.
+
+    Recall caches a question vector by ``id(embedder)`` (64 entries, and the
+    question set fits). One wrapper kept across sizes makes every size after
+    the first embed nothing, and its ``local_embeds`` is 0.
+    """
+    inner = embedder.inner if isinstance(embedder, CountingEmbedder) else embedder
+    return CountingEmbedder(inner)
+
+
 def measure(factors: tuple[int, ...], embedder: Any, *, episodes: int | None = None,
             fact_every: int = FACT_EVERY,
             questions: tuple[dict[str, str], ...] | list[dict[str, str]] | None = None,
@@ -650,10 +685,11 @@ def measure(factors: tuple[int, ...], embedder: Any, *, episodes: int | None = N
             clock: Callable[[], float] | None = None, profile: bool = False) -> dict[str, Any]:
     """Build each factor and time the question set. The caller decided 100x."""
     asked = list(questions or QUESTIONS)
-    counting = embedder if isinstance(embedder, CountingEmbedder) else CountingEmbedder(embedder)
     call = recall_fn or _product_recall
     report: dict[str, Any] = {
-        "what": "recall on a private store filled by the product's write path, no paid model",
+        "what": "recall on a private store. The insert is the bench's own, not write_episode. No paid model",
+        "fill_what": FILL_WHAT,
+        "tokens_what": TOKENS_WHAT,
         "one_x_episodes": ONE_X_EPISODES if episodes is None else episodes,
         "one_x_why": "tests/fixtures/memory_bench/live_lengths.json episodes, the backup that file records; "
                      "text is synthetic, lengths are that file's percentiles; facts are the quick pass on "
@@ -670,6 +706,7 @@ def measure(factors: tuple[int, ...], embedder: Any, *, episodes: int | None = N
         "sizes": {},
     }
     for factor in factors:
+        counting = _size_embedder(embedder)
         folder = Path(tempfile.mkdtemp(prefix=f"kazma-scale-{factor}-"))
         path = folder / "memory.db"
         try:
@@ -690,7 +727,7 @@ def measure(factors: tuple[int, ...], embedder: Any, *, episodes: int | None = N
                 try:
                     # The question already timed as the slowest. Profiling it
                     # again asks recall once; the others are not asked again.
-                    row["profile"] = profile_slowest(conn, row["slowest_question"], counting)
+                    row["profile"] = profile_slowest(conn, row["slowest_question"], _size_embedder(embedder))
                 finally:
                     conn.close()
             report["sizes"][str(factor)] = row
@@ -736,19 +773,33 @@ def _private_data_folder() -> None:
     pin_project_root(REPO)
 
 
-def _below_normal() -> None:
-    """Leave the machine responsive. The live server shares it."""
+def _priority_lowered() -> bool:
+    """Ask for below-normal priority. False when the OS refuses. An OSError
+    propagates so the caller can say the failure."""
     if os.name != "nt":
-        try:
-            os.nice(10)
-        except OSError:
-            logger.warning("[scale] could not lower priority", exc_info=True)
-        return
+        os.nice(10)
+        return True
     import ctypes
 
     kernel = ctypes.windll.kernel32
-    if not kernel.SetPriorityClass(kernel.GetCurrentProcess(), 0x00004000):
+    return bool(kernel.SetPriorityClass(kernel.GetCurrentProcess(), 0x00004000))
+
+
+def _below_normal() -> bool:
+    """Leave the machine responsive. The live server shares it.
+
+    False, and a warning, when the priority was not lowered. A report must
+    not say "below normal" in that case.
+    """
+    try:
+        lowered = _priority_lowered()
+    except OSError:
+        logger.warning("[scale] could not lower priority", exc_info=True)
+        return False
+    if not lowered:
         logger.warning("[scale] could not lower priority")
+        return False
+    return True
 
 
 def _limit_threads() -> None:
@@ -797,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--out", type=Path, default=None)
     run_p.add_argument("--sample", type=int, default=48, help="the fill sample used to gate 100x")
     args = parser.parse_args(argv)
-    _below_normal()
+    lowered = _below_normal()
     _private_data_folder()
     _limit_threads()
     embedder = _real_embedder()
@@ -813,12 +864,13 @@ def main(argv: list[str] | None = None) -> int:
         estimate = estimate_fill(embedder, sample=args.sample)
         fill_s = float(estimate["sizes"]["100"]["fill_s"])
         print(f"100x fill estimate {fill_s:.0f} s from {estimate['sample_n']} episodes "
-              f"in {estimate['sample_s']:.1f} s (recall not included)", file=sys.stderr)
+              f"in {estimate['sample_s']:.1f} s (the bench's own insert, not write_episode; "
+              "recall not included)", file=sys.stderr)
         blocked = hundred_x_block(estimate)
         if blocked:
             raise SystemExit(blocked)
     report = measure(factors, embedder, profile=True)
-    report["machine"] = _machine()
+    report["machine"] = _machine(lowered)
     text = json.dumps(_round(report), indent=1, ensure_ascii=False)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
