@@ -415,9 +415,9 @@ def test_full_text_tables_are_left_to_the_table_they_index():
 
 def _kazma_rows(url: str) -> dict[str, int]:
     """How many rows each of Kazma's tables holds in the database at *url*."""
-    import psycopg
     from kazma_core.db.pg_backup import KAZMA_PG_TABLES
 
+    psycopg = pytest.importorskip("psycopg")
     with psycopg.connect(url, autocommit=True) as conn:
         present = {r[0] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")}
