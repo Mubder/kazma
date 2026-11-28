@@ -26,7 +26,13 @@ code it names.
   masks every message and traceback before it is queued
   (`logging_config._LogQueueHandler.prepare`, `url_credentials.mask_urls_in_text`):
   model discovery and the model registry logged provider addresses as they
-  were. `kazma doctor`'s rows (`doctor._line`) and the update log
+  were. The same call masks `password:` / `secret=` (including a value on
+  the next line), a JSON member whose key is a credential label, and the
+  Arabic labels, through `errors.hide_prose_secrets`, the one rule
+  `redact_secrets` uses. A planted `password:` and a planted
+  `{"password": …}` do not reach the file. An ordinary `pin` line
+  (`workspace pin skipped`, `turn-model pin=…`) is written unchanged.
+  `kazma doctor`'s rows (`doctor._line`) and the update log
   (`update._without_url_passwords`, a local copy: the updater runs while
   Kazma's package may not import) mask too, and the settings store's change
   log masks a list's or mapping's nested secrets by name (`_redact_for_log`,
@@ -56,8 +62,11 @@ code it names.
   opener with no ">" is redacted too), the provider address's version test
   and its "/v1/v1" trim (`normalize_provider_url`), the attachment-name
   scan (`extract_active_attachments`) and the problem report's e-mail
-  scrubber (`problem_report._EMAIL`). Gate: `tests/test_regexes_stay_linear.py`
-  (the old patterns' answers on random inputs, their growth as the control).
+  scrubber (`problem_report._EMAIL`), and the credential maskers
+  (`errors._REDACT_SECRETS` and the phrase patterns: a long run of letters
+  used to take minutes on the URL-userinfo alternative). Gate: `tests/test_regexes_stay_linear.py`
+  (the old patterns' answers on random inputs, their growth as the control)
+  and `tests/test_credential_phrases_masked.py`.
   Measure before changing a flagged pattern: the schedule parser, the bare
   host and file-path patterns were linear on their real input.
 - **Smaller ones:** maps keyed by server frames in the turn view are

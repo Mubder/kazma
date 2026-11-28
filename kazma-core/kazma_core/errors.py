@@ -65,60 +65,91 @@ _CODES: tuple[tuple[type[BaseException], str], ...] = (
     (OSError, "io_error"),
 )
 
-_PATH_FRAGMENTS = r"""
-        \b[A-Za-z]:[\\/](?![\\/])[^\s'"]*   # Windows absolute paths (not the "s://" of a URL)
-      | /(?:home|Users|root|etc|var|opt)/[^\s'"]*   # POSIX absolute paths
-"""
-#: Secrets recognised by what surrounds them: a JSON member or ``name=value``
-#: whose name is a credential's, URL userinfo. Credentials recognised by their
-#: own shape (an Authorization header's, ``sk-``, ``xapp-``, ``ya29.``, a
-#: JWT...) are ``security.token_shapes.TOKEN_SHAPES``, the table every masker
-#: reads (2026-11-15: this list knew five of them, the maskers none).
-_SECRET_FRAGMENTS = r"""
-        "[^"\s]*(?:password|passwd|secret|token(?!s)|api[_-]?key|private[_-]?key|authorization)[^"\s]*"
-          \s*:\s*"[^"]*"                                # a JSON member ("password": "x")
-      | (?:password|passwd|secret|api[_-]?key)(?:\s*[=:]\s*\S+|\s+\S*[0-9_-]\S*)
-      | token\s*[=:]\s*\S+
-      | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
-"""
 _REDACTED = "<redacted>"
-#: Fragments that must never reach a client even in verbose mode.
-_REDACT_PATTERN = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
-#: The secrets alone, for a message whose path is the answer (below).
-_REDACT_SECRETS = re.compile("(" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
-#: Arabic names of a credential. ``re.VERBOSE`` drops spaces, so a label of
-#: more than one word cannot live in ``_SECRET_FRAGMENTS``. The words are the
-#: same ones the English pattern knows: a password, a secret key, and a PIN.
+#: Windows and POSIX paths. The trailing run is possessive, so a long path
+#: cannot be re-scanned. ``(?![\\/])`` keeps the ``s://`` of a URL.
+_REDACT_PATHS = re.compile(
+    r"""(?ix)
+    \b[A-Za-z]:[\\/](?![\\/])[^\s'"]*+
+    | /(?:home|Users|root|etc|var|opt)/[^\s'"]*+
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+#: How a value is told from an ordinary word. One rule, used by
+#: :func:`redact_secrets` and by :func:`hide_prose_secrets` (the log writer
+#: reads it through ``mask_urls_in_text``). A colon, an equals sign, or a
+#: fullwidth colon (U+FF1A) masks the next token, and that value may sit on
+#: the following line (``\s`` after the separator). ``is`` / ``هي`` / ``هو``,
+#: and a label with no separator, mask the next word when it is
+#: secret-shaped: an underscore, a hyphen whose piece is at most three
+#: characters (``abc-def``) or that has three or more pieces
+#: (``long-value-here``; a two-piece compound such as ``rotation-policy``
+#: or ``reset-link`` stays), both a letter and a digit, or four or more
+#: digits. A bare English ``password`` / ``secret`` / ``api_key`` leaves a
+#: four-digit year (``The secret 2024 plan``). English ``PIN`` is
+#: case-sensitive and masks only after a separator or a run of four or more
+#: digits, so ``workspace pin skipped`` and ``turn-model pin=…`` stay. The
+#: Arabic PIN labels (``الرقم السري``, ``رمز المرور``) mask the next word
+#: whatever it is. The gap between a label's words, and the gap of a bare
+#: or copula form, is any whitespace but a line break (``[^\S\r\n]``). A
+#: JSON member whose key is a credential label is this same rule, in either
+#: language. ASCII ``token:`` stays in :data:`_REDACT_SECRETS` only:
+#: :func:`redact_secrets` masks ``token: expired`` and the phrase masker
+#: keeps that unquoted form.
+#:
+#: Every pattern below is a string literal on ``re.compile``: the regex
+#: sweep only sees those, and a concatenation is invisible to it. Each
+#: repeat that used to re-scan (``*://``, a JSON key, a no-colon word) is
+#: possessive or one forward lookahead.
+_REDACT_SECRETS = re.compile(
+    r"""(?ix)
+    token \s*+ [=:] \s*+ \S++
+    | (?<![A-Za-z0-9+.\-]) [A-Za-z] [A-Za-z0-9+.\-]{0,31}+ :// [^/\s:@'"]++ : [^@\s/'"]++ @
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+#: Key=value, key: value, the JSON member, and the no-separator phrases, in
+#: English. Arabic phrases are :data:`_ARABIC_SECRET`; Arabic JSON keys are
+#: :data:`_ARABIC_JSON_SECRET`. ASCII ``token:`` is not here.
+_PROSE_SECRETS = re.compile(
+    r"""(?ix)
+    "(?> (?: (?! password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization ) [^"\s] )*+ )
+      (?: password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization )
+      [^"\s]*+
+      " \s*+ [:\uFF1A] \s*+ " [^"]*+ "
+    | (?: password | passwd | secret | api[_-]?key )
+      (?: [^\S\r\n]*+ [=:\uFF1A] \s*+ (?!\*++(?!\S))\S++
+        | [^\S\r\n]++ is [^\S\r\n]++ (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))
+        | [^\S\r\n]++ (?! (?:19|20) [0-9]{2}+ (?!\S) ) (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))
+      )
+    | (?<!\w) (?-i:PIN) (?!\w)
+      (?: [^\S\r\n]*+ [=:\uFF1A] \s*+ (?!\*++(?!\S))\S++
+        | [^\S\r\n]++ \d{4,}+ (?!\d)
+      )
+    | token [^\S\r\n]*+ \uFF1A \s*+ \S++
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+#: Arabic names of a credential, including the joined spelling and "رمز المرور".
+#: Marks (shadda, other tashkeel, tatweel) may sit on any letter. The same
+#: value rule as English. ``الرقم السري`` and ``رمز المرور`` mask any next
+#: word. The words of a label are joined by ``[^\S\r\n]``, not only a space.
 _ARABIC_CREDENTIAL_LABELS = (
     "كلمة السر",
     "كلمة المرور",
     "الرمز السري",
     "مفتاح سري",
     "الرقم السري",
+    "كلمةالمرور",
+    "رمز المرور",
 )
-#: Marks (shadda, other tashkeel, tatweel) may sit on any letter of a label.
 _ARABIC_MARKS = re.compile(r"[\u064B-\u065F\u0670\u0640]")
-_ARABIC_MARK = r"[\u064B-\u065F\u0670\u0640]*"
-
-
-def _arabic_label_pattern(label: str) -> str:
-    """*label* with optional marks after each letter. A space matches whitespace."""
-    parts: list[str] = []
-    for char in label:
-        if char.isspace():
-            parts.append(r"\s+")
-        else:
-            parts.append(re.escape(char) + _ARABIC_MARK)
-    return "".join(parts)
-
-
-_ARABIC_LABEL = "(?:" + "|".join(_arabic_label_pattern(label) for label in _ARABIC_CREDENTIAL_LABELS) + ")"
-#: A colon, or no colon when the next word carries a digit, hyphen, or underscore.
 _ARABIC_SECRET = re.compile(
-    _ARABIC_LABEL + r"(?:\s*[=:]\s*\S+|\s+\S*[0-9_-]\S*)",
+    r"(?:(?:ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ق[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A]\s*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++\S++|[^\S\r\n]++\S++)|(?:ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|م[\u064B-\u065F\u0670\u0640]*+ف[\u064B-\u065F\u0670\u0640]*+ت[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ح[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A]\s*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))|[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))))"
 )
-#: ``"كلمة المرور": "x"``. The English JSON member is in ``_SECRET_FRAGMENTS``.
-_ARABIC_JSON_SECRET = re.compile('"' + _ARABIC_LABEL + r'"\s*:\s*"[^"]*"')
+_ARABIC_JSON_SECRET = re.compile(
+    r'"(?:ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|م[\u064B-\u065F\u0670\u0640]*+ف[\u064B-\u065F\u0670\u0640]*+ت[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ح[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ق[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)"\s*+[:\uFF1A]\s*+"[^"]*+"'
+)
 
 
 def is_arabic_credential_label(text: str) -> bool:
@@ -127,11 +158,29 @@ def is_arabic_credential_label(text: str) -> bool:
     return bare in _ARABIC_CREDENTIAL_LABELS
 
 
-def _mask_labels(text: str, pattern: re.Pattern[str], replacement: str) -> str:
-    """*pattern* (paths and English labels), then Arabic labels and JSON keys."""
-    stepped = pattern.sub(replacement, str(text))
+def hide_prose_secrets(text: str, replacement: str) -> str:
+    """Phrases a free-text masker reads, in either language.
+
+    The one copy of the key=value, key: value, and JSON-member rule (English
+    here, Arabic in :data:`_ARABIC_SECRET` and :data:`_ARABIC_JSON_SECRET`),
+    so a log line that never reaches :func:`redact_secrets` still hides
+    them. ASCII ``token:`` stays out, so ``token: expired`` remains;
+    :func:`redact_secrets` masks that unquoted form itself. A fullwidth
+    colon masks the next token, and a value after a separator may sit on
+    the next line. ``is``, ``هي``, ``هو``, and a bare next word mask a
+    secret-shaped word, or four or more digits, across any whitespace but
+    a line break. English ``PIN`` is case-sensitive and masks only after a
+    separator or four or more digits. The Arabic PIN labels mask the next
+    word whatever it is.
+    """
+    stepped = _PROSE_SECRETS.sub(replacement, str(text))
     stepped = _ARABIC_SECRET.sub(replacement, stepped)
     return _ARABIC_JSON_SECRET.sub(replacement, stepped)
+
+
+def _mask_labels(text: str, pattern: re.Pattern[str], replacement: str) -> str:
+    """*pattern*, then the prose phrases and the Arabic labels."""
+    return hide_prose_secrets(pattern.sub(replacement, str(text)), replacement)
 
 
 def _mask_secret_text(text: str, pattern: re.Pattern[str], replacement: str) -> str:
@@ -142,17 +191,15 @@ def _mask_secret_text(text: str, pattern: re.Pattern[str], replacement: str) -> 
 
 
 class _Redactor:
-    """``_REDACT.sub(...)``: the paths and context-shaped secrets, then every
+    """``_REDACT.sub(...)``: paths, then context-shaped secrets, then every
     token shape (``security.token_shapes``)."""
 
-    def __init__(self, pattern: re.Pattern[str]) -> None:
-        self._pattern = pattern
-
     def sub(self, replacement: str, text: str) -> str:
-        return _mask_secret_text(text, self._pattern, replacement)
+        stripped = _REDACT_PATHS.sub(replacement, str(text))
+        return _mask_secret_text(stripped, _REDACT_SECRETS, replacement)
 
 
-_REDACT = _Redactor(_REDACT_PATTERN)
+_REDACT = _Redactor()
 
 
 def redact_secrets(text: str) -> str:
@@ -162,9 +209,22 @@ def redact_secrets(text: str) -> str:
     that would not start ("No such file: C:\\...\\npx.cmd") -- where
     :func:`validation_error`'s path redaction would remove the answer. A key
     is still never shown: an HTTP failure quotes its URL, query and all; a
-    token is found by its shape too (``security.token_shapes``). An Arabic
-    credential label is masked the same way as ``password`` or ``secret``:
-    with or without a colon, with marks on the letters, and as a JSON key.
+    token is found by its shape too (``security.token_shapes``).
+
+    A credential label (``password``, ``secret``, ``api_key``, and the
+    Arabic names in :data:`_ARABIC_CREDENTIAL_LABELS`, marks allowed) is
+    masked with a colon, an equals sign, or a fullwidth colon whatever the
+    next token is, including a value on the next line. ``is`` / ``هي`` /
+    ``هو``, and the same label with no separator, mask the next word when
+    it contains an underscore, a short hyphen piece, three or more hyphen
+    pieces, both a letter and a digit, or four or more digits, across any
+    whitespace but a line break. A bare year (``The secret 2024 plan``),
+    a two-piece compound (``rotation-policy``), and ``the password is
+    required`` stay. English ``PIN`` is case-sensitive and masks only after
+    a separator or four or more digits; the Arabic PIN labels mask the next
+    word whatever it is. A JSON member whose key is a credential label is
+    masked here and by :func:`hide_prose_secrets`. ASCII ``token:`` is
+    masked here and kept, unquoted, by :func:`hide_prose_secrets`.
     """
     from kazma_core.security.token_shapes import mask_tokens
 

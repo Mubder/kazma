@@ -105,7 +105,8 @@ with a test that fails on the old code and a gate for its class:
   characters, and one that grows faster than its input fails unless declared
   with why its input is bounded or contained (a planted quadratic and
   exponential pattern as controls; a declared pattern no longer in the code
-  fails).
+  fails). The credential patterns in `errors.py` are literals on
+  `re.compile` (a concatenation is invisible here) and are not declared.
 - **Log lines cannot be forged** (113 issues, one class). Every record passes
   `_LogQueueHandler.prepare`, which now makes it one line: CR, LF, the other
   control characters, DEL, U+0085 and U+2028/2029 are written as visible
