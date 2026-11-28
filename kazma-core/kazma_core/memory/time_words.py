@@ -16,8 +16,23 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   asks about a day ahead, not about what was said on one, and is left alone.
   A word that only shares those letters ("the last 3 emails", "قبل ثلاث
   صفحات", "السنة الدراسية") is not a period. A counted stretch includes
-  today through now. "the last 3 days of August" / "آخر ٣ أيام من أغسطس"
-  is that month's last days. "كم" and "how many" are not counts.
+  today through now. A word that says when it was said ("yesterday",
+  "last week", "two weeks ago", "أمس", "الأسبوع الماضي", "قبل أسبوعين",
+  "in August", "في أغسطس", "ذكرت في شهر أغسطس", "August 2024", "in 2025")
+  wins over a stretch that is only the topic; the stretch decides the
+  window only when no when-said reader matched. One tied to a month ("the
+  last 3 days of August", "آخر ٣ أيام من أغسطس", "آخر خمس أيام من الشهر
+  الماضي") is that month's last days, and the "last month" that only
+  closes it is not a when-said of its own. A stretch that is not tied
+  keeps its own window. A month or a year after "about" / "عن", or after
+  that stretch ("in the last 3 days about my trip in August", "in 2025"
+  there), is left out of the time words, so recall keeps it as a search
+  word. "كم" and
+  "how many" are not counts, except "كم" right after "آخر" ("آخر كم يوم",
+  "هالكم يوم", "الكم يوم اللي فاتت"), which is a few: the three days
+  "قبل كم يوم" counts, read as "the last few days". A few tied to a noun
+  that is not a time ("the last few weeks of school", "آخر كم أسبوع من
+  المدرسة") is not a period.
 * **What was true before**: "before we moved", "at first", "originally",
   "used to", "previously", "قبل ما نغيره", "في البداية", "سابقاً". Recall
   then shows the values a fact had before its current one (its history), the
@@ -130,7 +145,7 @@ _RELATIVE_EN = re.compile(
 #: "past 10 days", "the last 3 weeks": a number is required, so "past week"
 #: and "last week" stay on :data:`_RELATIVE_EN`, and "weekends" is not "weeks".
 _SPAN_EN_WORDS = "|".join(sorted(
-    ("a couple of", "a few", "three", "seven", "eight", "four", "five", "nine", "one", "two", "six", "ten"),
+    ("a couple of", "a few", "few", "three", "seven", "eight", "four", "five", "nine", "one", "two", "six", "ten"),
     key=len, reverse=True,
 ))
 _SPAN_EN = re.compile(
@@ -143,6 +158,15 @@ _OF_MONTH_EN = re.compile(
     rf"\s+of\s+({_MONTH_WORDS})\b(?:\s+((?:19|20)\d\d))?",
     re.IGNORECASE,
 )
+#: "the last 5 days of last month": the stretch is tied to the month before
+#: today, not to a month's name.
+# One space: read_time and the fold collapse whitespace, and an unbounded
+# \s+ searched over a run of tabs grows faster than the input (the sweep).
+_OF_LAST_MONTH_EN = re.compile(r"\sof\slast\smonth\b", re.IGNORECASE)
+#: "the last few weeks of school": "few" tied to a noun that is not a time.
+#: A month ("of August", "of last month") is a time and is not one of these.
+_OF_A_THING_EN = re.compile(r"\sof\b", re.IGNORECASE)
+_FEW_EN = frozenset({"few", "a few"})
 #: A month named in context ("in June", "June 2025", "3 June", "June 3"): a
 #: bare "may" or "march" is a verb.
 _MONTH_EN = re.compile(
@@ -152,6 +176,25 @@ _MONTH_EN = re.compile(
     re.IGNORECASE,
 )
 _YEAR_EN = re.compile(r"\b(?:in|during|since)\s+((?:19|20)\d\d)\b", re.IGNORECASE)
+#: "in August", "during 2025", "August 2024": when it was said. "from",
+#: "of" and "on" are not these: "from August" beside a stretch is the
+#: topic, and "of August" ties the stretch. One space, as the other ties:
+#: the question is already collapsed, and ``\s+`` over a run of tabs is
+#: not linear.
+_WHEN_SAID_IN_EN = ("in", "during", "since")
+_WHEN_MONTH_EN = re.compile(
+    rf"\b(?:in|during|since)\s({_MONTH_WORDS})\b(?:\s((?:19|20)\d\d))?"
+    rf"|\b({_MONTH_WORDS})\s((?:19|20)\d\d)\b",
+    re.IGNORECASE,
+)
+#: "في أغسطس", "خلال شهر أغسطس", "ب أغسطس". "من" is "from" / the tie.
+_WHEN_SAID_IN_AR = ("خلال", "في", "ب")
+#: "في 2025", "في عام 2025", "في سنة 2025" (folded "سنه"), on folded text.
+_YEAR_AR = re.compile(
+    r"(?:^|\s)في\s(?:عام\s|سنه\s)?((?:19|20)\d\d)(?=\s|$|[؟?.,،])"
+)
+_TOPIC_EN = re.compile(r"\babout\b", re.IGNORECASE)
+_TOPIC_AR = re.compile(r"(?:^|\s)عن(?=\s|$|[؟?.,،])")
 #: Letters ``fold_for_search`` folds away (alef with hamza or madda, taa
 #: marbuta, alef maqsura): a month's name with one is not its folded form.
 _FOLDED_AWAY = frozenset(map(chr, (0x0623, 0x0625, 0x0622, 0x0629, 0x0649)))
@@ -202,7 +245,8 @@ _AGO_NUMBERS_AR = {"ثلاثه": 3, "ثلاث": 3, "اربعه": 4, "اربع": 
                    "بضعه": 3, "عده": 3, "كذا": 3}
 _AR_NUMBER = "|".join(sorted(_AGO_NUMBERS_AR, key=len, reverse=True))
 #: "كم" (how many) and "كذا" count as a few after "قبل" ("قبل كم يوم").
-#: In a counted stretch they are the question, not the count.
+#: In a counted stretch they are the question, not the count. "كم" right
+#: after "آخر" is the exception, and it lives in :data:`_SPAN_AR_FEW`.
 _AR_QUESTION_NUMBERS = frozenset({"كم", "كذا"})
 _AR_SPAN_NUMBER = "|".join(sorted(
     (word for word in _AGO_NUMBERS_AR if word not in _AR_QUESTION_NUMBERS), key=len, reverse=True))
@@ -248,6 +292,24 @@ _SPAN_AR_GONE = re.compile(
     rf"(?:^|\s)(?:اخر\s+)?({_AR_SPAN_NUMBER}|\d{{1,3}})\s+({_AR_UNIT})\s+"
     rf"(?:اللي\s+)?(?:فاتت|فات|طافت|طاف){_SPAN_EDGE}"
 )
+#: "كم" directly after "آخر" is "a few", not the question: "آخر كم يوم",
+#: "هالكم يوم", "الكم يوم اللي فاتت". "كم يوم فات" (no آخر) stays the question
+#: and is not one of these. The count is the 3 of "قبل كم يوم".
+_SPAN_AR_FEW = (
+    re.compile(rf"(?:^|\s)اخر\s+كم\s+({_AR_UNIT}){_SPAN_EDGE}"),
+    re.compile(rf"(?:^|\s)هالكم\s+({_AR_UNIT}){_SPAN_EDGE}"),
+    re.compile(
+        rf"(?:^|\s)الكم\s+({_AR_UNIT})\s+(?:اللي\s+)?(?:فاتت|فات|طافت|طاف){_SPAN_EDGE}"
+    ),
+)
+#: "آخر خمس أيام من الشهر الماضي": the stretch is tied to the previous month.
+#: The same phrases :func:`_last_month_phrases` skips when they only close it.
+_LAST_MONTH_AR = (
+    "الشهر الماضي", "الشهر اللي فات", "الشهر اللي طاف", "الشهر اللي راح", "الشهر السابق",
+)
+_OF_LAST_MONTH_AR = re.compile(r"\sمن\s(?:" + "|".join(_LAST_MONTH_AR) + ")" + _SPAN_EDGE)
+#: "آخر كم أسبوع من المدرسة": كم-as-a-few tied to a noun that is not a time.
+_OF_A_THING_AR = re.compile(r"\sمن(?=\s|$)")
 
 #: "Now" in Arabic (Gulf and MSA), as written; read folded: never a content
 #: word of a question (English "now" is a stopword).
@@ -269,7 +331,7 @@ _PRESENT_AR_RAW = (*_NOW_AR_RAW, "حالياً", "هالأيام", "هالفتر
 #: so "last month" stays the alternative below it.
 _SPAN_EN_TIME = (
     r"(?:the\s+)?(?:past|last)\s+"
-    r"(?:\d{1,3}|a\s+couple\s+of|a\s+few|ten|nine|eight|seven|six|five|four|three|two|one)\s+"
+    r"(?:\d{1,3}|a\s+couple\s+of|a\s+few|few|ten|nine|eight|seven|six|five|four|three|two|one)\s+"
     r"(?:days?|weeks?|months?|years?)"
 )
 TIME_AFTER_EN = (
@@ -329,6 +391,22 @@ def _ar_month_re() -> re.Pattern[str]:
     return _AR_MONTH_RE[0]
 
 
+_WHEN_MONTH_AR: list[re.Pattern[str]] = []
+
+
+def _when_month_ar() -> re.Pattern[str]:
+    """"في أغسطس" / "خلال شهر أغسطس" on folded text. "من" is not when-said."""
+    if not _WHEN_MONTH_AR:
+        if not _AR_MONTH_CACHE:
+            _AR_MONTH_CACHE.update(_ar_months())
+        names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
+        prefixes = "|".join(_WHEN_SAID_IN_AR)
+        _WHEN_MONTH_AR.append(re.compile(
+            rf"(?:^|\s)(?:{prefixes})\s(?:شهر\s)?({names})(?:\s((?:19|20)\d\d))?(?=\s|$|[؟?.,،])"
+        ))
+    return _WHEN_MONTH_AR[0]
+
+
 def _day_start(when: datetime) -> datetime:
     return when.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -344,6 +422,13 @@ def _latest_month(month: int, year: int | None, today: datetime, zone: Any) -> t
     if year is None:
         year = today.year if month <= today.month else today.year - 1
     return _month_span(year, month, zone)
+
+
+def _previous_month(today: datetime) -> tuple[int, int]:
+    """The month before *today*, as ``(month, year)``."""
+    if today.month == 1:
+        return 12, today.year - 1
+    return today.month - 1, today.year
 
 
 def _relative(phrase: str, today: datetime, now: float, zone: Any) -> tuple[float, float]:
@@ -429,8 +514,22 @@ def _of_month_ar() -> re.Pattern[str]:
     return _OF_MONTH_AR[0]
 
 
-def _month_tied(text: str, end: int, *, arabic: bool) -> tuple[int, int | None] | None:
-    """The month a counted stretch is of ("of August", "من أغسطس"), or none."""
+def _has_month_tie(text: str, end: int, *, arabic: bool) -> bool:
+    """Whether a counted stretch ending at *end* is tied to a month."""
+    if arabic:
+        return _OF_LAST_MONTH_AR.match(text, end) is not None or _of_month_ar().match(text, end) is not None
+    return _OF_LAST_MONTH_EN.match(text, end) is not None or _OF_MONTH_EN.match(text, end) is not None
+
+
+def _month_tied(text: str, end: int, *, arabic: bool, today: datetime) -> tuple[int, int | None] | None:
+    """The month a counted stretch is of, or none.
+
+    "of August" / "من أغسطس" is that month. "of last month" / "من الشهر
+    الماضي" is the month before *today*."""
+    if arabic and _OF_LAST_MONTH_AR.match(text, end):
+        return _previous_month(today)
+    if not arabic and _OF_LAST_MONTH_EN.match(text, end):
+        return _previous_month(today)
     found = (_of_month_ar() if arabic else _OF_MONTH_EN).match(text, end)
     if found is None:
         return None
@@ -439,24 +538,65 @@ def _month_tied(text: str, end: int, *, arabic: bool) -> tuple[int, int | None] 
     return _EN_MONTHS[found.group(1).lower()], int(found.group(2)) if found.group(2) else None
 
 
+def _ar_few_matches(text: str):
+    """"آخر كم يوم", "هالكم يوم", "الكم يوم اللي فاتت": كم is a few (3).
+
+    "كم يوم فات" is the question and is not one of these. The 3 is the count
+    "قبل كم يوم" already uses; here it is the last few days."""
+    for pattern in _SPAN_AR_FEW:
+        for match in pattern.finditer(text):
+            unit = match.group(1)
+            if unit in _AR_UNITS:
+                yield match, (3.0, _AR_UNITS[unit])
+
+
+def _few_of_a_thing(text: str, match: re.Match[str], *, arabic: bool) -> bool:
+    """Whether *match* is a few tied to a noun that is not a time.
+
+    "the last few weeks of school", "آخر كم سنة من وظيفتي" name no period.
+    "of August" / "من أغسطس" / "of last month" is a time and stays. A
+    numbered stretch ("the last 3 weeks of school") is not a few."""
+    if _has_month_tie(text, match.end(), arabic=arabic):
+        return False
+    if arabic:
+        return _OF_A_THING_AR.match(text, match.end()) is not None
+    if match.group(1).lower() not in _FEW_EN:
+        return False
+    return _OF_A_THING_EN.match(text, match.end()) is not None
+
+
+def _counted_spans(text: str, *, arabic: bool):
+    """Each counted stretch in *text*, with its (how many, the unit's days).
+
+    A few tied to a noun that is not a time is left out."""
+    if not arabic:
+        for match in _SPAN_EN.finditer(text):
+            window = _counted(match.group(1), match.group(2), arabic=False)
+            if window and not _few_of_a_thing(text, match, arabic=False):
+                yield match, window
+        return
+    for pattern, number_at, unit_at in (
+        (_SPAN_AR_LAST, 1, 2), (_SPAN_AR_GONE, 1, 2), (_SPAN_AR_MSA, 2, 1),
+    ):
+        for match in pattern.finditer(text):
+            window = _counted(match.group(number_at), match.group(unit_at), arabic=True)
+            if window:
+                yield match, window
+    for match, window in _ar_few_matches(text):
+        if not _few_of_a_thing(text, match, arabic=True):
+            yield match, window
+
+
 def _tied_month_names(text: str) -> list[tuple[int, int]]:
     """Spans of the month name that closes a counted stretch.
 
     "of August" there names the stretch's month, not the whole of August.
     "في أغسطس عن آخر ٣ أيام" does not: the month stands on its own."""
     found: list[tuple[int, int]] = []
-    rows = (
-        (False, _SPAN_EN, 1, 2),
-        (True, _SPAN_AR_LAST, 1, 2),
-        (True, _SPAN_AR_GONE, 1, 2),
-        (True, _SPAN_AR_MSA, 2, 1),
-    )
-    for arabic, pattern, number_at, unit_at in rows:
+    for arabic in (False, True):
         tail_re = _of_month_ar() if arabic else _OF_MONTH_EN
-        for m in pattern.finditer(text):
-            if _counted(m.group(number_at), m.group(unit_at), arabic=arabic) is None:
-                continue
-            tail = tail_re.match(text, m.end())
+        for match, _window in _counted_spans(text, arabic=arabic):
+            tail = tail_re.match(text, match.end())
             if tail is not None:
                 found.append(tail.span(1))
     return found
@@ -478,8 +618,23 @@ def _last_of_month(
     return end - count * unit_days * DAY, end
 
 
-def _names_a_month(text: str, folded: str) -> bool:
-    return _MONTH_EN.search(text) is not None or _ar_month_re().search(folded) is not None
+def _span_inside(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    """Whether ``[start, end)`` sits inside one of *spans*."""
+    for a, b in spans:
+        if a <= start and end <= b:
+            return True
+    return False
+
+
+def _last_month_tie_spans(text: str, *, arabic: bool) -> list[tuple[int, int]]:
+    """Spans of "of last month" / "من الشهر الماضي" that close a counted stretch."""
+    tail_re = _OF_LAST_MONTH_AR if arabic else _OF_LAST_MONTH_EN
+    found: list[tuple[int, int]] = []
+    for match, _window in _counted_spans(text, arabic=arabic):
+        tail = tail_re.match(text, match.end())
+        if tail is not None:
+            found.append(tail.span())
+    return found
 
 
 def _note_counted(
@@ -487,26 +642,203 @@ def _note_counted(
 ) -> None:
     """The counted stretches of *text*, each handed to *took*.
 
-    One tied to a month ("the last 3 days of August", "آخر ٣ أيام من أغسطس")
-    is that month's last days. Any other stretch is left out when the
-    question also names a month, so the month is the period. Otherwise the
-    stretch runs through now."""
-    month_named = _names_a_month(text, folded)
-    noted = ((text, False, _SPAN_EN, 1, 2),)
-    noted += tuple((folded, True, pattern, number_at, 1 if number_at == 2 else 2)
-                   for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2)))
-    for source, arabic, pattern, number_at, unit_at in noted:
-        for m in pattern.finditer(source):
-            window = _counted(m.group(number_at), m.group(unit_at), arabic=arabic)
-            if not window:
-                continue
-            tied = _month_tied(source, m.end(), arabic=arabic)
+    One tied to a month ("of August", "من أغسطس", "من الشهر الماضي") is that
+    month's last days. A stretch that is not tied keeps its own window
+    through now. The when-said readers run first and win; this sets the
+    window only when they matched nothing. A month named beside an untied
+    stretch is not added here."""
+    for source, arabic in ((text, False), (folded, True)):
+        for match, window in _counted_spans(source, arabic=arabic):
+            tied = _month_tied(source, match.end(), arabic=arabic, today=today)
             if tied:
-                took(*_last_of_month(*window, tied[0], tied[1], today, zone), m.group(0).strip())
-            elif month_named:
-                continue
+                took(*_last_of_month(*window, tied[0], tied[1], today, zone), match.group(0).strip())
             else:
-                took(*_span_window(*window, today, now), m.group(0).strip())
+                took(*_span_window(*window, today, now), match.group(0).strip())
+
+
+def _year_span(year: int, zone: Any) -> tuple[float, float]:
+    """1 January of *year* through 1 January of the next."""
+    return (datetime(year, 1, 1, tzinfo=zone).timestamp(),
+            datetime(year + 1, 1, 1, tzinfo=zone).timestamp())
+
+
+def _topic_cut(text: str, *, arabic: bool) -> int | None:
+    """Where the topic starts, or None when *text* names no topic.
+
+    "about" / "عن", or a counted stretch, whichever comes first. A month
+    before this, attached to the saying, says when it was said."""
+    cut: int | None = None
+    for match, _window in _counted_spans(text, arabic=arabic):
+        cut = match.start()
+        break
+    marker = (_TOPIC_AR if arabic else _TOPIC_EN).search(text)
+    if marker is not None and (cut is None or marker.start() < cut):
+        return marker.start()
+    return cut
+
+
+def _before_topic(at: int, cut: int | None) -> bool:
+    """Whether *at* sits before the topic, including when there is none."""
+    if cut is None:
+        return True
+    return at < cut
+
+
+def _en_when_month(match: re.Match[str]) -> tuple[str, int | None]:
+    """The month and year an English when-said month match names."""
+    name = match.group(1) or match.group(3)
+    raw = match.group(2) or match.group(4)
+    return name, int(raw) if raw else None
+
+
+def _take_when_said_calendar(
+    text: str, folded: str, today: datetime, zone: Any, took: Any,
+) -> None:
+    """"in August", "في أغسطس", "August 2024", "in 2025": when it was said.
+
+    These win over a counted stretch, as "last week" does, and are the
+    period. One after "about" / "عن" or after the stretch is the topic and
+    is left for :func:`_take_months`, which keeps it a search word when the
+    stretch owns the window. Within one language the earlier phrase wins."""
+    en_cut = _topic_cut(text, arabic=False)
+    ar_cut = _topic_cut(folded, arabic=True)
+    english: list[tuple[int, float, float, str]] = []
+    for match in _WHEN_MONTH_EN.finditer(text):
+        if not _before_topic(match.start(), en_cut):
+            continue
+        name, year = _en_when_month(match)
+        start, end = _latest_month(_EN_MONTHS[name.lower()], year, today, zone)
+        english.append((match.start(), start, end, match.group(0)))
+    for match in _YEAR_EN.finditer(text):
+        if not _before_topic(match.start(), en_cut):
+            continue
+        start, end = _year_span(int(match.group(1)), zone)
+        english.append((match.start(), start, end, match.group(0)))
+    english.sort(key=lambda item: item[0])
+    for _at, start, end, words in english:
+        took(start, end, words)
+    arabic: list[tuple[int, float, float, str]] = []
+    for match in _when_month_ar().finditer(folded):
+        if not _before_topic(match.start(), ar_cut):
+            continue
+        raw = match.group(2)
+        start, end = _latest_month(
+            _AR_MONTH_CACHE[match.group(1)], int(raw) if raw else None, today, zone)
+        arabic.append((match.start(), start, end, match.group(0).strip()))
+    for match in _YEAR_AR.finditer(folded):
+        if not _before_topic(match.start(), ar_cut):
+            continue
+        start, end = _year_span(int(match.group(1)), zone)
+        arabic.append((match.start(), start, end, match.group(0).strip()))
+    arabic.sort(key=lambda item: item[0])
+    for _at, start, end, words in arabic:
+        took(start, end, words)
+
+
+def _recorded_when_said(
+    pattern: re.Pattern[str], at: int, cut: int | None, text: str,
+) -> bool:
+    """Whether the when-said reader already took *pattern* at *at*."""
+    if not _before_topic(at, cut):
+        return False
+    return pattern.match(text, at) is not None
+
+
+def _note_loose_years(
+    text: str, folded: str, zone: Any, took: Any, *, stretch_owns: bool,
+) -> None:
+    """A year that is the period and was not already read as when-said.
+
+    When the stretch owns the window, the year is the topic and stays a
+    search word ("in the last 3 days about the trip in 2025")."""
+    if stretch_owns:
+        return
+    en_cut = _topic_cut(text, arabic=False)
+    ar_cut = _topic_cut(folded, arabic=True)
+    for match in _YEAR_EN.finditer(text):
+        if _before_topic(match.start(), en_cut):
+            continue
+        took(*_year_span(int(match.group(1)), zone), match.group(0))
+    for match in _YEAR_AR.finditer(folded):
+        if _before_topic(match.start(), ar_cut):
+            continue
+        took(*_year_span(int(match.group(1)), zone), match.group(0).strip())
+
+
+def _take_when_said(
+    text: str, folded: str, today: datetime, now: float, zone: Any, took: Any,
+) -> None:
+    """When it was said: "yesterday", "last week", "قبل أسبوعين".
+
+    These win over a counted stretch that is only the topic. A "last month"
+    that only closes a stretch ("the last 5 days of last month") is not one
+    of them: its words are kept and its window is not, so the stretch still
+    names that month's last days."""
+    en_ties = _last_month_tie_spans(text, arabic=False)
+    ar_ties = _last_month_tie_spans(folded, arabic=True)
+    for m in _RELATIVE_EN.finditer(text):
+        closes = _span_inside(m.start(1), m.end(1), en_ties)
+        took(*_relative(m.group(1).lower(), today, now, zone), m.group(1), window=not closes)
+    for m in _AR_RELATIVE.finditer(folded):
+        closes = _span_inside(m.start(1), m.end(1), ar_ties)
+        took(*_relative(m.group(1), today, now, zone), m.group(1), window=not closes)
+    for m in _AGO_EN.finditer(text):
+        raw = m.group(1).lower()
+        count = float(raw) if raw.isdigit() else float(_EN_NUMBERS.get(raw, 1))
+        took(*_ago(count, _EN_UNITS[m.group(2).lower()], now), m.group(0))
+    for m in _AR_AGO.finditer(folded):
+        unit = m.group(2)
+        raw = m.group(1)
+        if unit in _AR_DUALS:
+            count, unit_days = _AR_DUALS[unit]
+        elif raw and not raw.isdigit():
+            count, unit_days = float(_AGO_NUMBERS_AR[raw]), _AR_UNITS[unit]
+        else:
+            count, unit_days = (float(raw) if raw else 1.0), _AR_UNITS[unit]
+        took(*_ago(float(count), unit_days, now), m.group(0).strip())
+
+
+def _month_name_at(match: re.Match[str], groups: tuple[int, ...]) -> int:
+    """Where *match* names the month, or -1 when it does not."""
+    for i in groups:
+        if match.group(i):
+            return match.start(i)
+    return -1
+
+
+def _take_months(
+    text: str, folded: str, today: datetime, zone: Any, took: Any, *, stretch_owns: bool,
+) -> None:
+    """A named month or a year that the when-said reader did not take.
+
+    When a counted stretch already took the window, a month that does not
+    close that stretch was overridden. It stays a search word and is not
+    added ("in the last 3 days about my trip in August"). The month that
+    closes the stretch ("of August") is the period and is added. A year the
+    stretch overrode stays a search word too ("about the trip in 2025")."""
+    tied_en = _tied_month_names(text)
+    tied_ar = _tied_month_names(folded)
+    en_cut = _topic_cut(text, arabic=False)
+    ar_cut = _topic_cut(folded, arabic=True)
+    when_ar = _when_month_ar()
+    for m in _MONTH_EN.finditer(text):
+        at = _month_name_at(m, (1, 3, 6, 7))
+        if stretch_owns and not _closes_counted_stretch(at, tied_en):
+            continue
+        if _recorded_when_said(_WHEN_MONTH_EN, m.start(), en_cut, text):
+            continue
+        name = next(g for g in (m.group(1), m.group(3), m.group(6), m.group(7)) if g)
+        year = m.group(2) or m.group(4)
+        month = _EN_MONTHS[name.lower()]
+        took(*_latest_month(month, int(year) if year else None, today, zone), m.group(0))
+    for m in _ar_month_re().finditer(folded):
+        if stretch_owns and not _closes_counted_stretch(m.start(1), tied_ar):
+            continue
+        if _recorded_when_said(when_ar, m.start(), ar_cut, folded):
+            continue
+        took(*_latest_month(_AR_MONTH_CACHE[m.group(1)], int(m.group(2)) if m.group(2) else None,
+                            today, zone), m.group(0).strip())
+    _note_loose_years(text, folded, zone, took, stretch_owns=stretch_owns)
 
 
 def read_time(question: str, *, now: float, zone: Any, past: bool | None = None) -> TimeAsk | None:
@@ -527,44 +859,23 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     spans: list[str] = []
     start = end = None
 
-    def took(a: float, b: float, words: str) -> None:
+    def took(a: float, b: float, words: str, *, window: bool = True) -> None:
         nonlocal start, end
-        if start is None:
+        if window and start is None:
             start, end = a, b
         spans.append(words)
 
     if past:
-        for m in _RELATIVE_EN.finditer(text):
-            took(*_relative(m.group(1).lower(), today, now, zone), m.group(1))
-        for m in _AR_RELATIVE.finditer(folded):
-            took(*_relative(m.group(1), today, now, zone), m.group(1))
-        for m in _AGO_EN.finditer(text):
-            raw = m.group(1).lower()
-            count = float(raw) if raw.isdigit() else float(_EN_NUMBERS.get(raw, 1))
-            took(*_ago(count, _EN_UNITS[m.group(2).lower()], now), m.group(0))
-        for m in _AR_AGO.finditer(folded):
-            unit = m.group(2)
-            raw = m.group(1)
-            if unit in _AR_DUALS:
-                count, unit_days = _AR_DUALS[unit]
-            elif raw and not raw.isdigit():
-                count, unit_days = float(_AGO_NUMBERS_AR[raw]), _AR_UNITS[unit]
-            else:
-                count, unit_days = (float(raw) if raw else 1.0), _AR_UNITS[unit]
-            took(*_ago(float(count), unit_days, now), m.group(0).strip())
+        # When it was said (a relative, an ago, then "in August" / "in
+        # 2025"), then a counted stretch only if nothing set the window,
+        # then a month or year that is the period. A "last month" that only
+        # closes a stretch does not set the window (_take_when_said). A
+        # month or year the stretch overrode stays a search word.
+        _take_when_said(text, folded, today, now, zone, took)
+        _take_when_said_calendar(text, folded, today, zone, took)
+        held = start is not None
         _note_counted(text, folded, today, now, zone, took)
-        for m in _MONTH_EN.finditer(text):
-            name = next(g for g in (m.group(1), m.group(3), m.group(6), m.group(7)) if g)
-            year = m.group(2) or m.group(4)
-            month = _EN_MONTHS[name.lower()]
-            took(*_latest_month(month, int(year) if year else None, today, zone), m.group(0))
-        for m in _ar_month_re().finditer(folded):
-            took(*_latest_month(_AR_MONTH_CACHE[m.group(1)], int(m.group(2)) if m.group(2) else None,
-                                today, zone), m.group(0).strip())
-        for m in _YEAR_EN.finditer(text):
-            year = int(m.group(1))
-            took(datetime(year, 1, 1, tzinfo=zone).timestamp(),
-                 datetime(year + 1, 1, 1, tzinfo=zone).timestamp(), m.group(0))
+        _take_months(text, folded, today, zone, took, stretch_owns=not held and start is not None)
     history = bool(_HISTORY_EN.search(text) or _HISTORY_AR.search(folded))
     for m in _HISTORY_EN.finditer(text):
         spans.append(m.group(0))
@@ -827,20 +1138,18 @@ def says_day(text: str, day: str, said_on: str | None) -> bool:
     weekend = any(w in folded for w in (*_WEEKEND_EN, *_said_words().weekend))
     if dom and weekend and abs(near) <= 14 and first.weekday() in (3, 4, 5, 6):
         return True
-    for table in (_LAST_EN, _said_words().last):
-        for phrase, back in table.items():
-            lo, hi = _days_back(back, said)
-            if phrase in folded and near <= hi and far >= lo:
-                return True
+    # A tied stretch says the days of its own month. Another phrase in the
+    # same text ("two weeks ago", "last month") still says its day.
+    if _day_of_tied_month(folded, day, said_on):
+        return True
+    if _last_period_says(folded, said, near, far):
+        return True
     for count, unit in _counts_back(folded):
         slack = 1.0 if unit == 1.0 else unit * 0.75
         if near <= count * unit + slack and far >= count * unit - slack:
             return True
     # A counted stretch is the window it covers, not a point: "past 10 days"
     # says today and the day ten back, and not the day before that.
-    # "the last 3 days of August" says those days of August.
-    if _day_of_tied_month(folded, day, said_on):
-        return True
     if _in_counted_span(folded, near, far):
         return True
     return False
@@ -936,30 +1245,85 @@ def _days_back(back: tuple[int, int] | str, said: date) -> tuple[int, int]:
     return (said - end).days, (said - start).days
 
 
-def _day_of_tied_month(folded: str, day: str, said_on: str | None) -> bool:
+_LAST_MONTH_PHRASES_EN = frozenset({"last month"})
+_LAST_MONTH_PHRASES_AR: list[frozenset[str]] = []
+
+
+def _last_month_phrases(arabic: bool) -> frozenset[str]:
+    """The "last month" phrases that can close a counted stretch, folded."""
+    if not arabic:
+        return _LAST_MONTH_PHRASES_EN
+    if not _LAST_MONTH_PHRASES_AR:
+        from kazma_core.documents.arabic import fold_for_search
+
+        _LAST_MONTH_PHRASES_AR.append(frozenset(fold_for_search(p) for p in _LAST_MONTH_AR))
+    return _LAST_MONTH_PHRASES_AR[0]
+
+
+def _every_occurrence_inside(text: str, phrase: str, spans: list[tuple[int, int]]) -> bool:
+    """Whether every time *phrase* occurs in *text* it sits inside *spans*."""
+    if not spans:
+        return False
+    start = 0
+    while True:
+        at = text.find(phrase, start)
+        if at < 0:
+            return True
+        if not _span_inside(at, at + len(phrase), spans):
+            return False
+        start = at + len(phrase)
+
+
+def _last_period_says(folded: str, said: date, near: int, far: int) -> bool:
+    """Whether a "last week" / "الشهر الماضي" phrase covers the day.
+
+    The "last month" that only closes a counted stretch does not say the
+    whole month ("the last 5 days of last month"). A separate "last month"
+    in the same text still does."""
+    tables = (
+        (False, _LAST_EN, _last_month_tie_spans(folded, arabic=False)),
+        (True, _said_words().last, _last_month_tie_spans(folded, arabic=True)),
+    )
+    for _arabic, table, ties in tables:
+        phrases = _last_month_phrases(_arabic)
+        for phrase, back in table.items():
+            if phrase not in folded:
+                continue
+            if phrase in phrases and _every_occurrence_inside(folded, phrase, ties):
+                continue
+            lo, hi = _days_back(back, said)
+            if near <= hi and far >= lo:
+                return True
+    return False
+
+
+def _day_of_tied_month(folded: str, day: str, said_on: str | None) -> bool | None:
     """Whether *day* is one of "the last N of <month>" in *folded*.
 
-    The same days :func:`_last_of_month` gives ``read_time``. A relative
-    "last N days" does not say them."""
+    True when it is. False when a stretch is tied and the day is outside
+    those days, so the other readers still run. None when no stretch is
+    tied. The same days :func:`_last_of_month` gives ``read_time``. "last
+    month" in the tie does not say the whole month:
+    :func:`_last_period_says` skips that phrase."""
     said = _as_date(said_on)
     want = _as_date(str(day)[:10]) if len(str(day)) >= 10 else None
     if said is None or want is None:
-        return False
+        return None
     today = datetime(said.year, said.month, said.day, tzinfo=UTC)
     want_ts = datetime(want.year, want.month, want.day, tzinfo=UTC).timestamp()
-    specs = [(False, _SPAN_EN, 1, 2)]
-    specs += [(True, pattern, number_at, 1 if number_at == 2 else 2)
-              for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2))]
-    for arabic, pattern, number_at, unit_at in specs:
-        for m in pattern.finditer(folded):
-            window = _counted(m.group(number_at), m.group(unit_at), arabic=arabic)
-            tied = _month_tied(folded, m.end(), arabic=arabic) if window else None
-            if not window or tied is None:
+    saw = False
+    for arabic in (False, True):
+        for match, window in _counted_spans(folded, arabic=arabic):
+            tied = _month_tied(folded, match.end(), arabic=arabic, today=today)
+            if tied is None:
                 continue
+            saw = True
             start, end = _last_of_month(*window, tied[0], tied[1], today, UTC)
             if start <= want_ts < end:
                 return True
-    return False
+    if saw:
+        return False
+    return None
 
 
 def _in_counted_span(folded: str, near: int, far: int) -> bool:
@@ -975,21 +1339,16 @@ def _in_counted_span(folded: str, near: int, far: int) -> bool:
 
 
 def _span_counts(folded: str) -> list[tuple[float, float]]:
-    """"past 10 days", "آخر ثلاث أسابيع": (how many, the unit's days).
+    """"past 10 days", "آخر ثلاث أسابيع", "آخر كم يوم": (how many, the unit's days).
 
     The stretch through the turn's day, not the point :func:`_counts_back`
-    reads ("three weeks ago"). A question word ("كم", "how many") is not a
-    count here."""
+    reads ("three weeks ago"). A question word ("كم يوم فات", "how many") is
+    not a count here. "كم" right after "آخر" is a few. A stretch tied to a
+    month is not also this relative window."""
     found: list[tuple[float, float]] = []
-    for m in _SPAN_EN.finditer(folded):
-        got = _counted(m.group(1), m.group(2), arabic=False)
-        if got and _month_tied(folded, m.end(), arabic=False) is None:
-            found.append(got)
-    for pattern, number_at in ((_SPAN_AR_LAST, 1), (_SPAN_AR_GONE, 1), (_SPAN_AR_MSA, 2)):
-        unit_at = 1 if number_at == 2 else 2
-        for m in pattern.finditer(folded):
-            got = _counted(m.group(number_at), m.group(unit_at), arabic=True)
-            if got and _month_tied(folded, m.end(), arabic=True) is None:
+    for arabic in (False, True):
+        for match, got in _counted_spans(folded, arabic=arabic):
+            if not _has_month_tie(folded, match.end(), arabic=arabic):
                 found.append(got)
     return found
 

@@ -40,12 +40,24 @@
     "past 10 days", "the last 3 weeks", "آخر عشر أيام", "آخر ثلاث أسابيع",
     "الأيام العشرة الماضية", "الأسابيع الثلاثة الماضية", "بداية أغسطس" and
     "بداية شهر أغسطس") is read in the operator's zone. A counted stretch
-    includes today through now, as "this week" does. "the last 3 days of
-    August" / "آخر ٣ أيام من أغسطس" is that month's last days; a stretch
-    that is not of the month leaves the month as the period. "كم" and
-    "how many" are questions, not counts ("قبل كم يوم" is still a few days
-    ago). Its words are never
-    content words (`recall._without_time_words`; every question-word reader
+    includes today through now, as "this week" does. A word that says when
+    it was said ("yesterday", "last week", "two weeks ago", "أمس",
+    "الأسبوع الماضي", "قبل أسبوعين", "in August", "في أغسطس",
+    "ذكرت في شهر أغسطس", "in 2025") wins over a stretch that is the topic;
+    the stretch sets the window only when no when-said reader matched. A
+    stretch tied to a month ("the last 3 days of August", "آخر ٣ أيام من
+    أغسطس", "من الشهر الماضي", "of last month") is that month's last days,
+    and the "last month" that only closes it is not a when-said of its own.
+    A stretch that is not tied keeps its own window. A month or a year
+    that says when it was said wins and is the period, so recall drops it.
+    One after "about" / "عن", or after the stretch, is left out of the
+    time words, so recall keeps it as a search word. "كم" and "how many" are questions, not counts. "كم"
+    right after "آخر" ("آخر كم يوم", "هالكم يوم", "الكم يوم اللي فاتت") is
+    a few, the last few days, the same three "قبل كم يوم" counts. A few
+    tied to a noun that is not a time ("the last few weeks of school",
+    "آخر كم أسبوع من المدرسة") is not a period; "the last few days" still
+    is. A period's words are never content words
+    (`recall._without_time_words`; every question-word reader
     in recall goes through it or `_search_words`, a gate). A word that only
     shares those letters ("the last 3 emails", "قبل ثلاث صفحات", "السنة
     الدراسية", "هذي السيارة") is not a period. What was SAID in

@@ -705,7 +705,7 @@ def test_admin_rederivation_gate_catches_the_drifted_copy():
 # with level = 'week'. topic_summaries.project_week_keys is the one query.
 
 _PROJECT_WEEK_HOME = "kazma-core/kazma_core/memory/topic_summaries.py"
-_PROJECT_WEEK_MIN = re.compile(r"MIN\s*\(\s*[A-Za-z_]\w*\.period_key\s*\)")
+_PROJECT_WEEK_MIN = re.compile(r"MIN\s*\(\s*(?:\w+\.)?period_key\s*\)")
 
 
 def _project_week_queries(text: str) -> list[int]:
@@ -738,6 +738,17 @@ def test_control_a_second_project_week_query_is_found():
     )
     assert _project_week_queries(old) == [2, 4]
     assert _project_week_queries("from topic_summaries import project_week_keys\n") == []
+
+
+def test_control_an_unaliased_project_week_query_is_found():
+    """The same query written MIN(period_key), with no table alias."""
+    bare = (
+        'rows = conn.execute(\n'
+        '    "SELECT MIN(period_key), MAX(period_key) FROM memory_summary_parts"\n'
+        ')\n'
+    )
+    assert _project_week_queries(bare) == [2]
+    assert _project_week_queries("MIN(period_key_start)") == []
 
 
 # ── 2e. A write the server refused is not reported as saved (2026-09-22) ──
