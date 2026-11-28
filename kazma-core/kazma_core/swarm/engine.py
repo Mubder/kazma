@@ -2727,115 +2727,118 @@ class SwarmEngine:
         The ending write releases the admission slot. If recording that ending
         raises before the write is scheduled, the slot is released here, and
         only when no store write is still in flight.
+
+        The checkpoint handler stamps ``failed`` on the shared task before
+        this save. That stamp is this reject, not an ending already recorded:
+        judging it used to skip the save, and the row stayed paused
+        (2026-09-25). An ending recorded before this call is left as it is.
         """
         try:
-            return await self._reject_checkpoint_body(task_id, reason)
+            # "Already terminally finalized" is decided BEFORE the handler runs.
+            # ``_checkpoint_handler.reject`` marks the shared task object failed
+            # and gives it a result, and judging afterwards took this reject's own
+            # change for an earlier terminal record: a pipeline restored after a
+            # restart (in history, not in _active_tasks) was never saved as
+            # rejected, and came back paused at every boot. Live 2026-09-25: four
+            # rejected with 200s, still ``paused`` in Postgres.
+            _before = _hist_get_task(self._task_history, self._task_lock, task_id)
+            _already_final = (
+                _before is not None
+                and getattr(_before, "status", None) in TERMINAL_STATUSES
+                and getattr(_before, "result", None) is not None
+            )
+            result = await self._checkpoint_handler.reject(task_id, reason=reason)
+            if (
+                result is None
+                and _before is not None
+                and getattr(_before, "status", None) == TaskStatus.PAUSED
+            ):
+                # Paused with no checkpoint pending: nothing can approve or resume
+                # it. Product code only pauses a pipeline together with its
+                # checkpoint (CheckpointManager.handle_pipeline_checkpoint); the
+                # live store had one such row, left by a 2026-08-14 test run.
+                # Rejecting closes it, where the route used to answer "not found"
+                # for a task that exists.
+                result = TaskResult(
+                    task_id=task_id,
+                    status="failed",
+                    error=f"{reason} (no checkpoint was pending)",
+                )
+            if result is not None:
+                # Gate registry (P4): record the rejection. Best-effort.
+                try:
+                    from kazma_core.swarm.checkpoint_manager import (
+                        _gate_settle_pipeline,
+                    )
+
+                    await asyncio.to_thread(_gate_settle_pipeline, task_id, "deny")
+                except Exception:
+                    logger.warning("[SwarmEngine] could not settle the gate row of rejected task '%s'",
+                                   task_id, exc_info=True)
+                    record_swarm_failure("gate_settle")
+                # Paused tasks stay in _active_tasks until reject/resume. The
+                # handler has already stamped this reject on the shared task,
+                # so its status is terminal before the save. That stamp is not
+                # an ending recorded earlier. Skip only an id recorded before
+                # this call: a second "failed" would sit beside a success
+                # whose write is still in flight.
+                active = self._active_tasks.get(task_id)
+                recorded_before = active is not None and active.id in self._endings_recorded
+                if active is not None and not (
+                    self._task_has_ended(active) and recorded_before
+                ):
+                    self._finalize_task(
+                        active,
+                        worker_results=list(getattr(result, "worker_results", None) or []),
+                        status="failed",
+                        error=reason,
+                        duration_seconds=float(getattr(result, "duration_seconds", 0.0) or 0.0),
+                        aggregated_output=getattr(result, "aggregated_output", None),
+                        metadata=dict(getattr(result, "metadata", None) or {}),
+                    )
+                elif active is None:
+                    # Update task history with the failed result — unless the
+                    # task already carried a terminal record BEFORE this reject
+                    # (reaped/cancelled while paused): overwriting would persist a
+                    # SECOND terminal result for the same task (deep-audit
+                    # 2026-08-19). See _already_final above for why "before".
+                    if _already_final:
+                        logger.debug(
+                            "[SwarmEngine] reject_checkpoint('%s'): task already "
+                            "terminally finalized (status=%s) — skipping duplicate persist",
+                            task_id,
+                            getattr(_before, "status", None),
+                        )
+                    else:
+                        def _mark_failed(task: SwarmTask) -> None:
+                            task.status = TaskStatus.FAILED
+                            task.result = result
+                            # The handler stamps this for a checkpointed task; a
+                            # task with no checkpoint ends here and must say when,
+                            # or retention dates it by its creation.
+                            task.completed_at = task.completed_at or _utc_now_iso()
+
+                        updated = _hist_update_task(
+                            self._task_history,
+                            self._task_lock,
+                            task_id,
+                            _mark_failed,
+                            max_history=self._max_history,
+                        )
+                        if updated is not None:
+                            self._persist(updated, "failed", reason)
+                        else:
+                            # If task not in history, store the result directly.
+                            self._checkpoint_mgr.complete_pipeline(task_id, result)
+                # The ending write releases the slot. Flush waits until it has,
+                # so a reject does not free the slot while the row is still open.
+                await self._flush_writes(task_id)
+            return result
         finally:
             # A finalize that raised never scheduled the write. Releasing while
             # a write is in flight would free the slot before ``completed_at``
             # is stored.
             self._release_ended_without_a_write(task_id)
-
-    async def _reject_checkpoint_body(
-        self,
-        task_id: str,
-        reason: str,
-    ) -> TaskResult | None:
-        """The reject itself. :meth:`reject_checkpoint` releases a stranded slot."""
-        # "Already terminally finalized" is decided BEFORE the handler runs.
-        # ``_checkpoint_handler.reject`` marks the shared task object failed
-        # and gives it a result, and judging afterwards took this reject's own
-        # change for an earlier terminal record: a pipeline restored after a
-        # restart (in history, not in _active_tasks) was never saved as
-        # rejected, and came back paused at every boot. Live 2026-09-25: four
-        # rejected with 200s, still ``paused`` in Postgres.
-        _before = _hist_get_task(self._task_history, self._task_lock, task_id)
-        _already_final = (
-            _before is not None
-            and getattr(_before, "status", None) in TERMINAL_STATUSES
-            and getattr(_before, "result", None) is not None
-        )
-        result = await self._checkpoint_handler.reject(task_id, reason=reason)
-        if (
-            result is None
-            and _before is not None
-            and getattr(_before, "status", None) == TaskStatus.PAUSED
-        ):
-            # Paused with no checkpoint pending: nothing can approve or resume
-            # it. Product code only pauses a pipeline together with its
-            # checkpoint (CheckpointManager.handle_pipeline_checkpoint); the
-            # live store had one such row, left by a 2026-08-14 test run.
-            # Rejecting closes it, where the route used to answer "not found"
-            # for a task that exists.
-            result = TaskResult(
-                task_id=task_id,
-                status="failed",
-                error=f"{reason} (no checkpoint was pending)",
-            )
-        if result is not None:
-            # Gate registry (P4): record the rejection. Best-effort.
-            try:
-                from kazma_core.swarm.checkpoint_manager import (
-                    _gate_settle_pipeline,
-                )
-
-                await asyncio.to_thread(_gate_settle_pipeline, task_id, "deny")
-            except Exception:
-                logger.warning("[SwarmEngine] could not settle the gate row of rejected task '%s'",
-                               task_id, exc_info=True)
-                record_swarm_failure("gate_settle")
-            # Clear in-flight maps (audit H6) — paused tasks stay in
-            # _active_tasks until reject/resume. One that has already ended
-            # is not rejected again: that wrote "failed" beside its ending.
-            active = self._active_tasks.get(task_id)
-            if active is not None and not self._task_has_ended(active):
-                self._finalize_task(
-                    active,
-                    worker_results=list(getattr(result, "worker_results", None) or []),
-                    status="failed",
-                    error=reason,
-                    duration_seconds=float(getattr(result, "duration_seconds", 0.0) or 0.0),
-                    aggregated_output=getattr(result, "aggregated_output", None),
-                    metadata=dict(getattr(result, "metadata", None) or {}),
-                )
-            elif active is None:
-                # Update task history with the failed result — unless the
-                # task already carried a terminal record BEFORE this reject
-                # (reaped/cancelled while paused): overwriting would persist a
-                # SECOND terminal result for the same task (deep-audit
-                # 2026-08-19). See _already_final above for why "before".
-                if _already_final:
-                    logger.debug(
-                        "[SwarmEngine] reject_checkpoint('%s'): task already "
-                        "terminally finalized (status=%s) — skipping duplicate persist",
-                        task_id,
-                        getattr(_before, "status", None),
-                    )
-                else:
-                    def _mark_failed(task: SwarmTask) -> None:
-                        task.status = TaskStatus.FAILED
-                        task.result = result
-                        # The handler stamps this for a checkpointed task; a
-                        # task with no checkpoint ends here and must say when,
-                        # or retention dates it by its creation.
-                        task.completed_at = task.completed_at or _utc_now_iso()
-
-                    updated = _hist_update_task(
-                        self._task_history,
-                        self._task_lock,
-                        task_id,
-                        _mark_failed,
-                        max_history=self._max_history,
-                    )
-                    if updated is not None:
-                        self._persist(updated, "failed", reason)
-                    else:
-                        # If task not in history, store the result directly.
-                        self._checkpoint_mgr.complete_pipeline(task_id, result)
-            # The ending write releases the slot. Flush waits until it has,
-            # so a reject does not free the slot while the row is still open.
-            await self._flush_writes(task_id)
-        return result
 
     # ------------------------------------------------------------------
     # Reliability layer — delegated to ReliabilityRegistry (P2-1 refactor)

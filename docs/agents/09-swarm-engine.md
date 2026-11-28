@@ -96,7 +96,10 @@ compatibility. **All public API methods and constructors are unchanged.**
   snapshot). `reject_checkpoint` does not pop the slot on its own. Its
   `finally` releases only when the ending is recorded and no store write is
   in flight, so a raise before the write was scheduled cannot hold the slot
-  until restart, and a write that is still running is not cut short. Gate:
+  until restart, and a write that is still running is not cut short. The
+  checkpoint handler stamps ``failed`` on the shared task before that save.
+  The stamp is this reject, so the row is still saved. An id already in
+  ``_endings_recorded`` is left as it is. Gate:
   `tests/test_swarm_slot_matches_store.py` (the old pop beside the end stamp,
   a reader that returns the raw table, and a removal through an alias, as
   the controls).

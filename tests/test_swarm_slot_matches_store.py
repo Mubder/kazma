@@ -448,7 +448,6 @@ _OWNS_AN_ENDING = frozenset({
     "_resume_run",
     "_run_owned",
     "_admit_to_store",
-    "_reject_checkpoint_body",
 })
 _POLICY = frozenset({"task_has_ended", "_task_has_ended", "_occupies_admission_slot"})
 _COPIES = frozenset({"len", "list", "dict", "set", "tuple", "iter", "sorted"})
