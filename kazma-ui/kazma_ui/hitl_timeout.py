@@ -241,14 +241,14 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # drive is started and registered (chat_runs_end.begin_drive): a chat
         # that went away since took the gate (expired, not run), and nothing
         # continues; its card is stamped settled.
-        from kazma_ui.chat_runs_end import begin_drive, real_gate_id, settle_refused_card
+        from kazma_ui.chat_runs_end import begin_drive, real_gate_id, refused_drive
         from kazma_ui.hitl_answerers import as_the_asker
 
         drive_gate = await asyncio.to_thread(real_gate_id, _iid or _intr_id)
         if not begin_drive(thread_id, drive_gate, since=decided_at):
             logger.info("[HITL-WD] thread=%s: its chat went away before the expiry was carried out; "
                         "nothing continues", str(thread_id)[:12])
-            await asyncio.to_thread(settle_refused_card, thread_id, session_id, turn_id)
+            await asyncio.to_thread(refused_drive, thread_id, drive_gate, session_id, turn_id)
             return
         if route is not None and _chat_app_resumer is not None:
             with as_the_asker(whose):

@@ -234,6 +234,9 @@ _going: dict[str, int] = {}
 #: have left the live states meanwhile (an expiry), so the end took no token
 #: for it (review of e916a8f96, L1). Bounded like the tokens.
 _ended_at: OrderedDict[str, float] = OrderedDict()
+#: thread id -> why its chat last went away (a :data:`REASONS` code), for a
+#: refused drive's gate (:func:`refused_drive`). Bounded like the tokens.
+_end_reasons: OrderedDict[str, str] = OrderedDict()
 
 
 def _mark(gate_id: str, what: str) -> None:
@@ -274,7 +277,7 @@ def begin_drive(thread_id: str, gate_id: str, *, since: float) -> bool:
     was ended after *since* (:func:`drive_clock`, read before the decision
     was recorded), or an end took the gate (*gate_id*: the registry's own
     id, :func:`real_gate_id`) -- and nothing may start: the caller says the
-    chat went away and stamps its card (:func:`settle_refused_card`).
+    chat went away and ends its gate and stamps its card (:func:`refused_drive`).
     Memory only, never blocks."""
     from kazma_core.spaces.threads import thread_ended
 
@@ -300,11 +303,16 @@ def _take(gate_id: str) -> bool:
 
 
 @contextmanager
-def _going_away(thread_id: str) -> Iterator[None]:
-    """The thread's chat is being ended: no drive starts on it meanwhile,
-    nor after for a decision recorded before the end finished."""
+def _going_away(thread_id: str, reason: str = "") -> Iterator[None]:
+    """The thread's chat is being ended (for *reason*): no drive starts on it
+    meanwhile, nor after for a decision recorded before the end finished."""
     with _token_lock:
         _going[thread_id] = _going.get(thread_id, 0) + 1
+        if reason:
+            _end_reasons[thread_id] = reason
+            _end_reasons.move_to_end(thread_id)
+            while len(_end_reasons) > _TOKENS_KEPT:
+                _end_reasons.popitem(last=False)
     try:
         yield
     finally:
@@ -318,6 +326,36 @@ def _going_away(thread_id: str) -> Iterator[None]:
             _ended_at.move_to_end(thread_id)
             while len(_ended_at) > _TOKENS_KEPT:
                 _ended_at.popitem(last=False)
+
+
+def refused_drive(thread_id: str, gate_id: str, session_id: str = "", turn_id: str = "") -> str:
+    """After :func:`begin_drive` refused a drive: its gate, still live, is
+    ended as its chat's going away ends a gate (the decision kept, its call
+    not run, ``ended_reason`` the end's reason) -- an end that touched no
+    gate (an archive that left a running turn to finish, a failed step, the
+    registry off) left it ``resuming`` until the next boot sweep (review of
+    974f2ae85, N2) -- and its card is stamped settled
+    (:func:`settle_refused_card`). The fate ("" when another writer ended
+    it). Blocking; never raises."""
+    fate = _step("ending its refused gate", thread_id, lambda: _end_refused_gate(thread_id, gate_id), "")
+    settle_refused_card(thread_id, session_id, turn_id)
+    return fate
+
+
+def _end_refused_gate(thread_id: str, gate_id: str) -> str:
+    """:func:`refused_drive`'s gate, ended when still live. Blocking."""
+    from kazma_ui.hitl_gate_bridge import registry_on
+
+    if not gate_id or not registry_on():
+        return ""
+    from kazma_core.safety.hitl_gates import gate_for
+
+    row = gate_for(gate_id)
+    if row is None or not row.is_live:
+        return ""
+    with _token_lock:
+        reason = _end_reasons.get(thread_id, "chat_deleted")
+    return _end_one(row, GATE_OUTCOME, reason, waiting_only=False)
 
 
 def settle_refused_card(thread_id: str, session_id: str = "", turn_id: str = "") -> bool:
@@ -622,7 +660,7 @@ async def end_chat_runs(thread_id: str, *, reason: str, session_id: str = "", ti
     _checked(reason)
     if not thread_id:
         return ChatRunsEnded("", reason)
-    with _going_away(thread_id):
+    with _going_away(thread_id, reason):
         return await _end_on_loop(thread_id, reason, session_id=session_id, title=title,
                                   gate_outcome=gate_outcome, graph=graph, waiting_only=waiting_only)
 
@@ -662,7 +700,7 @@ def chat_went_away(thread_id: str, *, reason: str, session_id: str = "", title: 
     _checked(reason)
     if not thread_id:
         return ChatRunsEnded("", reason)
-    with _going_away(thread_id):
+    with _going_away(thread_id, reason):
         cancelled = _step("cancelling its turn", thread_id, lambda: _cancel_where_it_runs(thread_id), False)
         return _end_the_rest(thread_id, reason, session_id=session_id, title=title, gate_outcome=gate_outcome,
                              cancelled=bool(cancelled), space=space)

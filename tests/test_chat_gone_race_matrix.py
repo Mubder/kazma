@@ -133,9 +133,9 @@ def hooks(monkeypatch):
         return real_take(gate_id)
 
     @contextlib.contextmanager
-    def going(tid):
+    def going(tid, reason=""):
         sched().point("going+")
-        with real_going(tid):
+        with real_going(tid, reason):
             m = state["model"]
             m["going_at"] = sched().stamp()
             yield

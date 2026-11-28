@@ -38,6 +38,7 @@ import asyncio
 import logging
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -701,6 +702,307 @@ def test_the_chat_page_says_why_and_settles_the_card() -> None:
         assert needed in branch, needed
     # Control: the same file without the branch is caught.
     assert _chat_gone_branch(source.replace("res.body.reason === 'chat_gone'", "false")) == ""
+
+
+# ── the review of 974f2ae85: the store's lock (N1), a refused drive's gate (N2) ──
+
+
+@pytest.fixture
+def small(tmp_path):
+    """A chat store that keeps one chat: the next one evicts it."""
+    from kazma_ui import session_manager
+    from kazma_ui.session_manager import SessionManager
+
+    before = session_manager.peek_session_manager()
+    made = SessionManager(max_sessions=1, db_path=str(tmp_path / "small.db"))
+    session_manager.set_session_manager(made)
+    _gone._clean()
+    yield made
+    _gone._clean()
+    session_manager.set_session_manager(before)
+    made.close()
+
+
+def _an_end_holds_the_thread(chat: Any, ending: threading.Event, held: list[bool], *, store_: Any) -> Any:
+    """An archive's end of the chat's thread, at its store write: it holds
+    the thread's end lock, waits (bounded) until the eviction is ending the
+    same thread, then takes the store's lock -- bounded, so a lock-order
+    inversion fails the test instead of hanging it."""
+    def run() -> None:
+        with chat_runs_end._one_end_at_a_time(chat.thread_id):
+            holding.set()
+            assert ending.wait(10), "the eviction never ended the chat"
+            got = store_._lock.acquire(timeout=2)
+            held.append(got)
+            if got:
+                store_._lock.release()
+
+    holding = threading.Event()
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    assert holding.wait(10)
+    return worker
+
+
+def test_an_eviction_ends_its_chat_after_the_store_lock(small, monkeypatch) -> None:
+    """N1 (the reviewer's probe, through the real store): the store's limit
+    evicts a chat while an end of its thread holds the end lock and is about
+    to write the store. The eviction ends the chat after it released the
+    store's lock, so the end gets the store at once and the eviction then
+    ends the chat behind it. Before, it waited for the end lock UNDER the
+    store's lock: every chat save froze for REST_WAIT_S."""
+    monkeypatch.setattr(chat_runs_end, "REST_WAIT_S", 10.0)
+    chat = _waiting_chat(small)
+    ending, held = threading.Event(), []
+    real = chat_runs_end.chat_went_away
+
+    def went_away(*a: Any, **k: Any) -> Any:
+        ending.set()                          # the eviction is ending the chat now
+        return real(*a, **k)
+
+    monkeypatch.setattr(chat_runs_end, "chat_went_away", went_away)
+    worker = _an_end_holds_the_thread(chat, ending, held, store_=small)
+    with as_owner():
+        small.update_from_dict(f"s-{uuid4().hex[:8]}", {"messages": [{"role": "user", "content": "x"}],
+                                                        "thread_id": f"t-{uuid4().hex[:8]}"})
+    worker.join(10)
+    assert held == [True], "the end waited for the store's lock: the eviction held it"
+    assert small.held(chat.session_id) is None
+    assert hitl_gates.live_gates(chat.thread_id) == []
+    assert _gate(chat.gate_id).ended_reason == "chat_store_full"
+
+
+def test_control_an_end_under_the_store_lock_freezes_the_store(small, monkeypatch) -> None:
+    """Control (the probe as it was): ending the chat under the store's
+    lock, the end of the same thread cannot get the store."""
+    monkeypatch.setattr(chat_runs_end, "REST_WAIT_S", 3.0)
+    chat = _waiting_chat(small, gate=False)
+    ending, held = threading.Event(), []
+    worker = _an_end_holds_the_thread(chat, ending, held, store_=small)
+    with small._lock:
+        ending.set()
+        chat_went_away(chat.thread_id, reason="chat_store_full")
+    worker.join(10)
+    assert held == [False]
+
+
+#: What ends a chat's runs, and the store's own ways to them.
+_STORE_ENDERS = frozenset({"chat_went_away", "end_chat_runs", "end_space_runs", "end_every_chat_run",
+                           "_chat_went_away"})
+#: The store's way to end its evicted chats AFTER its lock: ``_end_evicted``
+#: returns while the calling thread still holds the lock (a nested call),
+#: and ``_locked`` runs it once its own hold ends. Never an end under it.
+_DEFERRING = frozenset({"_end_evicted", "_locked"})
+
+
+def store_lock_holders_that_end(source: str) -> list[str]:
+    """Every call made under the chat store's lock (``with self._lock`` or
+    ``with self._locked()``) that reaches what ends a chat's runs, through
+    the store's own methods: ``method:line``. An end of a thread may write
+    the store, so it never waits under its lock (N1)."""
+    tree = ast.parse(source)
+    manager = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionManager")
+    methods = {n.name: n for n in manager.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def self_calls(node: ast.AST) -> set[str]:
+        return {c.func.attr for c in _own(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                and isinstance(c.func.value, ast.Name) and c.func.value.id == "self"}
+
+    reaching = {name for name, node in methods.items() if name not in _DEFERRING
+                and any(isinstance(c, ast.Call) and _name(c) in _STORE_ENDERS for c in _own(node))}
+    while True:
+        grown = {name for name, node in methods.items() if name not in reaching and name not in _DEFERRING
+                 and self_calls(node) & reaching}
+        if not grown:
+            break
+        reaching |= grown
+
+    def under_the_lock(item: ast.withitem) -> bool:
+        expr = item.context_expr
+        expr = expr.func if isinstance(expr, ast.Call) else expr
+        return isinstance(expr, ast.Attribute) and expr.attr in ("_lock", "_locked") and isinstance(
+            expr.value, ast.Name) and expr.value.id == "self"
+
+    found = []
+    for name, node in methods.items():
+        for block in (n for n in _own(node) if isinstance(n, ast.With) and any(map(under_the_lock, n.items))):
+            for stmt in block.body:
+                for call in (c for c in ast.walk(stmt) if isinstance(c, ast.Call)):
+                    callee = _name(call)
+                    is_self = isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name) \
+                        and call.func.value.id == "self"
+                    if callee in _STORE_ENDERS or (is_self and callee in reaching):
+                        found.append(f"{name}:{call.lineno}")
+    return sorted(set(found))
+
+
+def test_nothing_ends_a_chat_under_the_store_lock() -> None:
+    source = (REPO / "kazma-ui/kazma_ui/session_manager.py").read_text(encoding="utf-8")
+    assert not store_lock_holders_that_end(source), (
+        "A chat's runs are ended under the chat store's lock: an end of the same thread writes the store, "
+        "so both wait and every save freezes (review of 974f2ae85, N1). Queue it (self._evicted) and end "
+        "it after the lock (_locked / _end_evicted).")
+    assert "self._evicted.append(" in source
+    # The deferring pair defers: _end_evicted returns under a held lock first.
+    tree = ast.parse(source)
+    end_evicted = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_end_evicted")
+    first = end_evicted.body[1] if isinstance(end_evicted.body[0], ast.Expr) else end_evicted.body[0]
+    assert isinstance(first, ast.If) and "_is_owned" in ast.unparse(first.test), ast.unparse(first)
+
+
+def test_control_the_eviction_ending_under_the_lock_is_caught() -> None:
+    source = (REPO / "kazma-ui/kazma_ui/session_manager.py").read_text(encoding="utf-8")
+    old = source.replace("self._evicted.append((evicted, session_id))",
+                         'self._chat_went_away(evicted, session_id, "chat_store_full")', 1)
+    assert old != source
+    found = store_lock_holders_that_end(old)
+    assert any(f.startswith("get_or_create:") for f in found) and any(f.startswith("_put:") for f in found), found
+
+
+def _a_turn_runs(thread_id: str) -> Any:
+    """A turn registered as running on *thread_id* (an archive leaves it)."""
+    from kazma_ui.active_turns import register_turn
+
+    running = SimpleNamespace(done=lambda: False, cancelled=lambda: False)
+    register_turn(thread_id, running)
+    return running
+
+
+def _an_end_that_touches_no_gate(chat: Any, cause: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An end of the chat's thread after which begin_drive refuses, but which
+    leaves its gate as it is (N2): an archive that leaves a running turn, the
+    approvals step failing, the registry read off."""
+    import sqlite3
+
+    from kazma_ui import hitl_gate_bridge
+    from kazma_ui.active_turns import unregister_turn
+
+    if cause == "archive_a_turn_runs":
+        running = _a_turn_runs(chat.thread_id)
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", waiting_only=True))
+        unregister_turn(chat.thread_id, running)
+        return
+    with monkeypatch.context() as during:
+        if cause == "approvals_step_fails":
+            def fails(*a: Any, **k: Any) -> Any:
+                raise sqlite3.OperationalError("database is locked")
+
+            during.setattr(chat_runs_end, "_end_gates", fails)
+        else:
+            during.setattr(hitl_gate_bridge, "registry_on", lambda: False)
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", waiting_only=True))
+
+
+CAUSES = ("archive_a_turn_runs", "approvals_step_fails", "registry_read_off")
+
+
+@pytest.mark.parametrize("cause", CAUSES)
+def test_a_chat_apps_refused_drive_ends_its_gate(store, monkeypatch, cause) -> None:
+    """N2, the chat app's branch, each cause: the end left the gate
+    resuming, the drive is refused, and the refusal ends the gate (decision
+    kept, call not run, the end's reason) -- it stayed resuming until the
+    next boot sweep."""
+    from kazma_gateway.agent_handler import hitl as gw_hitl
+
+    chat = _waiting_chat(store)
+    since = drive_clock()
+    _claim(chat.gate_id, resuming=True)
+    _an_end_that_touches_no_gate(chat, cause, monkeypatch)
+    assert _gate(chat.gate_id).state == "resuming"            # the end left it
+    outcome = asyncio.run(gw_hitl._drive_decision(SimpleNamespace(), object(), {}, chat.thread_id, chat.gate_id,
+                                                  since=since, whose=None))
+    assert outcome is None
+    gate = _gate(chat.gate_id)
+    assert (gate.state, gate.decision, gate.ended_reason) == ("settled", "approve", "chat_archived"), gate
+    assert _fate(chat.gate_id) == "not_run"
+
+
+def test_control_a_refusal_that_ends_no_gate_leaves_it_resuming(store, monkeypatch) -> None:
+    from kazma_gateway.agent_handler import hitl as gw_hitl
+
+    monkeypatch.setattr(chat_runs_end, "_end_refused_gate", lambda *a: "")
+    chat = _waiting_chat(store)
+    since = drive_clock()
+    _claim(chat.gate_id, resuming=True)
+    _an_end_that_touches_no_gate(chat, "archive_a_turn_runs", monkeypatch)
+    asyncio.run(gw_hitl._drive_decision(SimpleNamespace(), object(), {}, chat.thread_id, chat.gate_id,
+                                        since=since, whose=None))
+    assert _gate(chat.gate_id).state == "resuming"
+
+
+def test_the_approve_routes_refused_drive_ends_its_gate(store, monkeypatch) -> None:
+    """N2, the web route's branch: an archive that leaves a running turn
+    lands between the decision and its drive."""
+    from kazma_ui.active_turns import unregister_turn
+
+    chat = _waiting_chat(store)
+
+    def archive_leaving_a_turn() -> None:
+        running = _a_turn_runs(chat.thread_id)
+        asyncio.run(end_chat_runs(chat.thread_id, reason="chat_archived", waiting_only=True))
+        unregister_turn(chat.thread_id, running)
+
+    seen = _approve_route(monkeypatch, chat, in_the_window=archive_leaving_a_turn)
+    assert seen.answer.status_code == 409 and seen.answer.json()["reason"] == "chat_gone", seen.answer.text
+    seen.drive.assert_not_called()
+    gate = _gate(chat.gate_id)
+    assert (gate.state, gate.decision, gate.ended_reason) == ("settled", "approve", "chat_archived"), gate
+
+
+def test_the_watchdogs_refused_drive_ends_its_gate(store, monkeypatch) -> None:
+    """N2, the approval watchdog's branch: the expiry is recorded, an archive
+    that leaves a running turn lands before its drive; the drive is refused
+    and the gate is ended as expired, its call not run."""
+    import kazma_core.safety.commitment.resume as resume_mod
+    import kazma_ui.delivery as delivery
+    import kazma_ui.hitl_decision as hd
+    import kazma_ui.hitl_status as hs
+    import kazma_ui.hitl_timeout as wd
+    import kazma_ui.sse_chat._streaming as streaming
+    import kazma_ui.turn_runtime as tr_mod
+    from kazma_ui.active_turns import unregister_turn
+
+    chat = _waiting_chat(store)
+    drives: list[Any] = []
+
+    async def pending(graph: Any, cfg: Any) -> Any:
+        return {"tool": "python_exec", "kind": "security", "interrupt_id": chat.gate_id}, chat.gate_id
+
+    async def record(thread_id: str, *, interrupt_id: str = "", **_: Any) -> str:
+        await asyncio.to_thread(_claim, interrupt_id, "deny", TIMEOUT_ACTOR, resuming=True)
+        running = _a_turn_runs(thread_id)              # then the archive, leaving that turn
+        await end_chat_runs(thread_id, reason="chat_archived", waiting_only=True)
+        unregister_turn(thread_id, running)
+        return interrupt_id
+
+    class Broker:
+        async def emit(self, thread_id: str, frame: Any) -> Any:
+            return frame
+
+    async def journal(*a: Any, **k: Any) -> None:
+        drives.append(k.get("thread_id"))
+
+    monkeypatch.setattr(resume_mod, "pending_interrupt", pending)
+    monkeypatch.setattr(resume_mod, "build_resume_command", lambda *a, **k: "deny-cmd")
+    monkeypatch.setattr(hs, "is_resume_claimed", lambda t: False)
+    monkeypatch.setattr(hd, "record_gate_decision", record)
+    monkeypatch.setattr(delivery, "get_turn_broker", lambda: Broker())
+    monkeypatch.setattr(tr_mod, "resolve_session_id", lambda t: chat.session_id)
+    monkeypatch.setattr(reply_sink, "resolve_reply_turn", lambda *a, **k: chat.turn_id)
+    monkeypatch.setattr(streaming, "_drive_graph_to_journal", journal)
+    monkeypatch.setattr(streaming, "mark_thread_unpaused", lambda t: None)
+    monkeypatch.setattr(wd, "_chat_app_resumer", None)
+    graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(values={}, next=("tools",))))
+
+    async def scenario() -> None:
+        await wd._auto_deny(graph, chat.thread_id, 300.0)
+        await asyncio.gather(*list(wd._deny_tasks))
+
+    asyncio.run(scenario())
+    assert drives == []
+    gate = _gate(chat.gate_id)
+    assert (gate.state, gate.decision, gate.ended_reason) == ("settled", "deny", "chat_archived"), gate
+    assert _fate(chat.gate_id) == "expired"
 
 
 # ── the gates ───────────────────────────────────────────────────────────
