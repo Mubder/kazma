@@ -257,8 +257,10 @@ def peak_in_flight(intervals: list[tuple[str, str | None]], *, since: float | No
     """The most tasks running at once, from their stored starts and ends.
 
     An ending at the same instant as a start comes first: the engine frees
-    the slot before it admits the next task. With *since*, only the moments
-    from *since* on count (an interval begun earlier counts from there)."""
+    the slot before it admits the next task, and it stores the ending before
+    that free, so a row with no ``completed_at`` is still holding its slot.
+    With *since*, only the moments from *since* on count (an interval begun
+    earlier counts from there)."""
     now = time.time() if now is None else now
     events: list[tuple[float, int]] = []
     for started, completed in intervals:

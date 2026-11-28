@@ -72,7 +72,7 @@ def swarm_store(tmp_path, monkeypatch):
             task.completed_at = stamp
         assert store.persist_task(task)
     running = store.list_tasks(status="running")[0]
-    engine = SimpleNamespace(_task_store=store, _active_tasks={running.id: running})
+    engine = SimpleNamespace(_task_store=store, list_active_tasks=lambda: [running])
     monkeypatch.setattr("kazma_core.runs.adapters.swarm._engine", lambda: engine)
     yield store
     store.close()
@@ -89,7 +89,7 @@ def test_swarm_tasks_are_read_from_the_task_store(swarm_store):
 
 def test_a_running_row_no_engine_owns_is_dead(swarm_store, monkeypatch):
     """A RUNNING row left by a process that died: no owner here."""
-    engine = SimpleNamespace(_task_store=swarm_store, _active_tasks={})
+    engine = SimpleNamespace(_task_store=swarm_store, list_active_tasks=lambda: [])
     monkeypatch.setattr("kazma_core.runs.adapters.swarm._engine", lambda: engine)
     run = _by_native("swarm_task")["running"]
     assert run.owner_alive is False

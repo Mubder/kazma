@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Set as AbstractSet
 from typing import Any
 
-from kazma_core.swarm.task import SwarmTask, TaskStatus
+from kazma_core.swarm.task import SwarmTask, TaskStatus, task_has_ended
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 
 __all__ = ["RETRY_EXCLUDED_FIELDS", "RetryNeedsAcknowledgement", "build_retry_task", "cancel_active_task"]
@@ -76,6 +77,7 @@ def cancel_active_task(
     finalize: Any,
     history: dict[str, SwarmTask] | None = None,
     history_lock: threading.Lock | None = None,
+    endings: AbstractSet[str] | None = None,
 ) -> bool:
     """Cancel an in-flight task, or a paused one restored after a restart.
 
@@ -91,7 +93,9 @@ def cancel_active_task(
     The panel offers Cancel on every paused task, and on those it used to
     answer "not active". Pass ``history`` so they cancel too.
 
-    Returns True if cancelled, False if not active.
+    Returns True if cancelled, False if not active. A task that has already
+    ended is not active, even while its admission slot is still held for the
+    ending write: cancelling it would record "cancelled" over a success.
     """
     if task_id not in active_tasks:
         restored = (
@@ -116,6 +120,9 @@ def cancel_active_task(
         return False
 
     task = active_tasks[task_id]
+    if task_has_ended(task, endings):
+        logger.info("[task_control] cancel: '%s' has already ended", task_id)
+        return False
     handle = task_handles.get(task_id)
     if handle is not None and not handle.done():
         handle.cancel()
@@ -156,7 +163,11 @@ def build_retry_task(
     """
     original = _hist_get_task(history, history_lock or threading.Lock(), task_id)
     if original is None:
-        original = active_tasks.get(task_id)
+        held = active_tasks.get(task_id)
+        # An ended task is not a live run to copy. Its record is the history
+        # or the store; the slot can still hold it while the ending is written.
+        if held is not None and not task_has_ended(held):
+            original = held
     if original is None and task_store is not None:
         original = task_store.get_task(task_id)
     if original is None:

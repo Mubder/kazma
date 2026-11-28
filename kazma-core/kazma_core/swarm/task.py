@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
@@ -20,6 +21,7 @@ __all__ = [
     "WorkerCapabilities",
     "WorkerResult",
     "is_terminal",
+    "task_has_ended",
 ]
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,18 @@ def is_terminal(status: TaskStatus | str | None) -> bool:
         return TaskStatus(status) in TERMINAL_STATUSES
     except ValueError:
         return False
+
+
+def task_has_ended(task: Any, endings: AbstractSet[str] | None = None) -> bool:
+    """True when *task* is not active to a caller.
+
+    The admission slot can still be held until the ending is stored. *endings*
+    is the engine's set of task ids whose ending was recorded
+    (``_endings_recorded``): a task is ended once that set has its id, or its
+    status is one it never leaves."""
+    if endings is not None and getattr(task, "id", None) in endings:
+        return True
+    return is_terminal(getattr(task, "status", None))
 
 
 @dataclass

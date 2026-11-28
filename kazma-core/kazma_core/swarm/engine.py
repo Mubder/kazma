@@ -50,6 +50,7 @@ from kazma_core.swarm.task import (
     TaskType,
     WorkerCapabilities,
     WorkerResult,
+    task_has_ended,
 )
 from kazma_core.swarm.dispatch_helpers import (
     aggregate_outputs as _aggregate_outputs_impl,
@@ -275,6 +276,10 @@ class SwarmEngine:
         # Each task's newest store write (SW-E07): writes run in threads,
         # each after the one before it for the same task.
         self._writes: dict[str, asyncio.Task] = {}
+        # Admitted tasks whose ending is recorded and whose slot stays until
+        # that ending is stored (_release_admission_slot). A second finalize
+        # in that window keeps the first ending.
+        self._endings_recorded: set[str] = set()
         # An admission write whose run or approval was stopped while it ran:
         # kept for the code that records the stop, which reads its outcome
         # (the write itself goes on in its thread).
@@ -399,13 +404,24 @@ class SwarmEngine:
         """Return a task by id from the history."""
         return _hist_get_task(self._task_history, self._task_lock, task_id)
 
+    def _task_has_ended(self, task: SwarmTask) -> bool:
+        """The one check that *task* is not active to a caller.
+
+        The slot can still be held until the ending is stored
+        (:meth:`_occupies_admission_slot`)."""
+        return task_has_ended(task, self._endings_recorded)
+
     def list_active_tasks(self) -> list[SwarmTask]:
-        """Return all in-flight (running or paused) tasks."""
-        return list(self._active_tasks.values())
+        """Running or paused tasks. A task whose ending is recorded is left
+        out, for as long as its slot waits on the ending write."""
+        return [task for task in self._active_tasks.values() if not self._task_has_ended(task)]
 
     def get_active_task(self, task_id: str) -> SwarmTask | None:
-        """Public accessor for a specific active task (avoids direct _active_tasks)."""
-        return self._active_tasks.get(task_id)
+        """The active task *task_id*, or None when it is absent or has ended."""
+        task = self._active_tasks.get(task_id)
+        if task is None or self._task_has_ended(task):
+            return None
+        return task
 
     def get_task_handle(self, task_id: str) -> Any | None:
         """Public accessor for task handle (avoids direct _task_handles access from UI)."""
@@ -692,14 +708,25 @@ class SwarmEngine:
         return evidence, (f" Tools that change things had already run ({', '.join(tools)}): "
                           "inspect their effects before running it again.")
 
+    def _occupies_admission_slot(self, task: SwarmTask) -> bool:
+        """True when *task* counts toward the admission cap.
+
+        Paused work waits on a person and does not. A task that has ended
+        still does, until :meth:`_release_admission_slot`: the soak reads a
+        row with no ``completed_at`` as running, so the slot and that row
+        change together. Callers that ask what is active use
+        :meth:`_task_has_ended` instead."""
+        return task.status != TaskStatus.PAUSED
+
     def _at_capacity(self) -> int | None:
         """The admission cap when it is reached (resumed and running tasks
-        count; paused ones wait on a human and do not), else None."""
+        count; paused ones wait on a human and do not), else None.
+
+        A task whose work has finished still counts until its ending is
+        stored (:meth:`_release_admission_slot`)."""
         max_active = self._max_concurrent_tasks()
-        active_non_paused = sum(
-            1 for t in self._active_tasks.values() if t.status != TaskStatus.PAUSED
-        )
-        return max_active if active_non_paused >= max_active else None
+        holding = sum(1 for task in self._active_tasks.values() if self._occupies_admission_slot(task))
+        return max_active if holding >= max_active else None
 
     def at_capacity(self) -> int | None:
         """Public: the admission cap when a new task would be refused now."""
@@ -708,8 +735,8 @@ class SwarmEngine:
     def running_in(self, space_id: str) -> int:
         """How many of *space_id*'s tasks run now (paused ones wait on a
         human and do not count, as for the install's cap)."""
-        return sum(1 for t in list(self._active_tasks.values())
-                   if t.status != TaskStatus.PAUSED and space_of_task(t) == space_id)
+        return sum(1 for task in self._active_tasks.values()
+                   if self._occupies_admission_slot(task) and space_of_task(task) == space_id)
 
     def _running_ahead_of(self, task: SwarmTask) -> tuple[int, int]:
         """``(of its space, of its person)``: how many tasks of *task*'s
@@ -721,7 +748,7 @@ class SwarmEngine:
         for other in list(self._active_tasks.values()):
             if other is task:
                 break
-            if other.status != TaskStatus.PAUSED and space_of_task(other) == space:
+            if self._occupies_admission_slot(other) and space_of_task(other) == space:
                 ahead += 1
                 mine += bool(asker) and str((other.metadata or {}).get("asker") or "") == asker
         return ahead, mine
@@ -977,7 +1004,9 @@ class SwarmEngine:
 
         problem = limits.task_problem(task)
         if problem is None and (task.metadata or {}).get("hitl_checkpoints"):
-            paused = sum(1 for t in self._active_tasks.values() if t.status == TaskStatus.PAUSED)
+            paused = sum(
+                1 for task in self._active_tasks.values()
+                if task.status == TaskStatus.PAUSED and not self._task_has_ended(task))
             if paused >= limits.MAX_PAUSED_TASKS:
                 problem = ("too_many_paused",
                            f"{paused} pipelines already wait at a checkpoint; answer some first.")
@@ -1184,7 +1213,9 @@ class SwarmEngine:
         restart alike (SW-E05)."""
         reaped = 0
         for tid, t in list(self._active_tasks.items()):
-            if getattr(t, "status", None) == TaskStatus.PAUSED:
+            # A task whose ending is already recorded is not running. Reaping
+            # it wrote a timeout over that ending while the write was in flight.
+            if self._task_has_ended(t) or getattr(t, "status", None) == TaskStatus.PAUSED:
                 continue
             budget = task_budget(t)
             if budget is None:
@@ -1246,6 +1277,8 @@ class SwarmEngine:
         """A run that did not end when stopped: record the ending it was
         stopped for, with the outcome unknown, and say so."""
         task = self._active_tasks.get(task_id)
+        if task is not None and self._task_has_ended(task):
+            return
         status, error, cause = self._interrupts.get(
             task_id, ("cancelled", "Cancelled by user", "cancelled_by_user"))
         logger.warning(
@@ -1293,7 +1326,10 @@ class SwarmEngine:
             # rows that some future producer may enqueue for other reasons.
             if not (task.metadata or {}).get("recovery_count"):
                 continue
-            if task.id in self._active_tasks:
+            held = self._active_tasks.get(task.id)
+            if held is not None and (
+                self._occupies_admission_slot(held) or held.status == TaskStatus.PAUSED
+            ):
                 continue
             task.metadata = dict(task.metadata or {})
             task.metadata["execution_outcome"] = "unknown"
@@ -1489,6 +1525,11 @@ class SwarmEngine:
         found or already terminal. A paused pipeline restored after a
         restart is in history only, and cancels too.
         """
+        task = self._active_tasks.get(task_id)
+        if task is not None and self._task_has_ended(task):
+            # The work already ended. Cancelling it told the caller "cancelled"
+            # and kept a cancelled orphan beside a success (2026-11-27).
+            return False
         run = self._runs.get(task_id)
         if run is not None and not run.done():
             # Stop the work first, then record the ending (SW-E02): the run's
@@ -1508,6 +1549,7 @@ class SwarmEngine:
             finalize=self._finalize_task,
             history=self._task_history,
             history_lock=self._task_lock,
+            endings=self._endings_recorded,
         )
         await self._flush_writes(task_id)
         return cancelled
@@ -1992,12 +2034,15 @@ class SwarmEngine:
         the pattern's own model call (the Refiner, a synthesis: SW-E15),
         added to the workers' in the task's totals."""
         # Idempotent terminal finalize (audit H7): avoid double SSE/persist
-        # when cancel() and CancelledError both race.
+        # when cancel() and CancelledError both race. The slot stays until
+        # the ending write lands, so a second call in that window is the
+        # same ending, not a task still to record.
         prior_status = getattr(task, "status", None)
         if (
             prior_status in TERMINAL_STATUSES
-            and task.id not in self._active_tasks
             and task.result is not None
+            and self._task_has_ended(task)
+            and (task.id not in self._active_tasks or task.id in self._endings_recorded)
         ):
             # A finished task is never reopened (SW-E03): a late "paused" from
             # a run the watchdog already ended used to bring it back.
@@ -2005,98 +2050,152 @@ class SwarmEngine:
                 self._keep_as_evidence(task, status, error)
             return task.result
 
-        task.status = _task_status_for(status)
-        if status not in _RESULT_STATUS_TO_TASK:
-            logger.warning("[SwarmEngine] task '%s' ended with an unknown status %r: recorded failed",
-                           task.id, status)
-        uncertain = status != "success" and any(
-            not getattr(wr, "retry_safe", True) for wr in worker_results)
-        if status == "partial" or uncertain:
-            # What "completed" hides (SW-E08): only part of the work finished,
-            # and a step that changed things did not finish.
-            metadata = dict(metadata or {})
-            metadata.setdefault("result_status", status)
-            if uncertain:
-                metadata["effects_uncertain"] = True
-                metadata.setdefault("execution_outcome", "unknown")
-                if task.status == TaskStatus.COMPLETED:
-                    # A step that changes things did not finish: the task did
-                    # not complete, whatever part of it did.
-                    task.status = TaskStatus.FAILED
-                tracker = self._effects.get(task.id)
-                if tracker is not None and tracker.tools:
-                    metadata.setdefault("invoked_tools", list(tracker.tools))
-        task.completed_at = _utc_now_iso()
+        # The slot stays until the ending is stored. An exception between the
+        # status stamp and the write used to leave that slot held until
+        # restart (2026-11-27): the ending is recorded first, and the slot is
+        # released here unless the write took over the release.
+        release_unless_the_write_owns_it = False
+        try:
+            task.status = _task_status_for(status)
+            if status not in _RESULT_STATUS_TO_TASK:
+                logger.warning("[SwarmEngine] task '%s' ended with an unknown status %r: recorded failed",
+                               task.id, status)
+            uncertain = status != "success" and any(
+                not getattr(wr, "retry_safe", True) for wr in worker_results)
+            if status == "partial" or uncertain:
+                # What "completed" hides (SW-E08): only part of the work finished,
+                # and a step that changed things did not finish.
+                metadata = dict(metadata or {})
+                metadata.setdefault("result_status", status)
+                if uncertain:
+                    metadata["effects_uncertain"] = True
+                    metadata.setdefault("execution_outcome", "unknown")
+                    if task.status == TaskStatus.COMPLETED:
+                        # A step that changes things did not finish: the task did
+                        # not complete, whatever part of it did.
+                        task.status = TaskStatus.FAILED
+                    tracker = self._effects.get(task.id)
+                    if tracker is not None and tracker.tools:
+                        metadata.setdefault("invoked_tools", list(tracker.tools))
+            ending = task.status != TaskStatus.PAUSED
+            if ending:
+                self._endings_recorded.add(task.id)
+                release_unless_the_write_owns_it = True
+            task.completed_at = _utc_now_iso()
 
-        # Remove from in-flight tracking (unless paused — paused tasks
-        # stay visible until resumed or rejected).
-        if task.status != TaskStatus.PAUSED:
-            self._active_tasks.pop(task.id, None)
-            self._task_handles.pop(task.id, None)
-            self._close_open_checkpoint(task.id)
+            # A paused task keeps its slot: it waits on a person.
+            if ending:
+                self._close_open_checkpoint(task.id)
 
-        # Record per-worker metrics for any worker results not yet recorded.
-        for wr in worker_results:
-            self._metrics_collector.record_worker_result(wr)
+            # Record per-worker metrics for any worker results not yet recorded.
+            for wr in worker_results:
+                self._metrics_collector.record_worker_result(wr)
 
-        result = TaskResult(
-            task_id=task.id,
-            status=status,
-            worker_results=worker_results,
-            individual_opinions=list(individual_opinions or []),
-            aggregated_output=aggregated_output,
-            synthesized_output=synthesized_output,
-            error=error,
-            total_cost=sum(item.cost for item in worker_results) + float(synthesis_cost or 0.0),
-            total_tokens=sum(item.tokens_used for item in worker_results) + int(synthesis_tokens or 0),
-            duration_seconds=duration_seconds,
-            metadata=dict(metadata or {}),
-        )
-        task.result = result
-        _hist_record_task(
-            self._task_history,
-            self._task_lock,
-            task,
-            max_history=self._max_history,
-        )
-
-        # Emit lifecycle event for observers (SSE etc.)
-        if status == "paused":
-            checkpoint_data = (metadata or {}).get("checkpoint", {})
-            self._emit_sse(
-                task.id,
-                "checkpoint",
-                {
-                    "step": checkpoint_data.get("step", 0),
-                    "needs_approval": True,
-                    "output_preview": checkpoint_data.get("output_preview", ""),
-                },
+            result = TaskResult(
+                task_id=task.id,
+                status=status,
+                worker_results=worker_results,
+                individual_opinions=list(individual_opinions or []),
+                aggregated_output=aggregated_output,
+                synthesized_output=synthesized_output,
+                error=error,
+                total_cost=sum(item.cost for item in worker_results) + float(synthesis_cost or 0.0),
+                total_tokens=sum(item.tokens_used for item in worker_results) + int(synthesis_tokens or 0),
+                duration_seconds=duration_seconds,
+                metadata=dict(metadata or {}),
             )
-        else:
-            self._emit_sse(
-                task.id,
-                "task_completed",
-                {"task_id": task.id, "result": result.to_dict()},
+            task.result = result
+            _hist_record_task(
+                self._task_history,
+                self._task_lock,
+                task,
+                max_history=self._max_history,
             )
-            # A task from a chat app sends its ending back to that chat
-            # (the chat's turn may be long over).
-            from kazma_core.swarm.chat_delivery import deliver_finished_task
 
-            deliver_finished_task(task, result)
+            # Emit lifecycle event for observers (SSE etc.)
+            if status == "paused":
+                checkpoint_data = (metadata or {}).get("checkpoint", {})
+                self._emit_sse(
+                    task.id,
+                    "checkpoint",
+                    {
+                        "step": checkpoint_data.get("step", 0),
+                        "needs_approval": True,
+                        "output_preview": checkpoint_data.get("output_preview", ""),
+                    },
+                )
+            else:
+                self._emit_sse(
+                    task.id,
+                    "task_completed",
+                    {"task_id": task.id, "result": result.to_dict()},
+                )
+                # A task from a chat app sends its ending back to that chat
+                # (the chat's turn may be long over).
+                from kazma_core.swarm.chat_delivery import deliver_finished_task
 
-        # Persist to SQLite when a task store is configured. The store's
-        # transition table refuses a write from a superseded run or over a
-        # finished row; that result is kept as evidence (SW-E03).
-        if self._task_store is not None:
-            self._persist(task, status, error)
+                deliver_finished_task(task, result)
 
-        return result
+            # Persist to SQLite when a task store is configured. The store's
+            # transition table refuses a write from a superseded run or over a
+            # finished row; that result is kept as evidence (SW-E03). The
+            # admission slot is released when that write lands, not before.
+            if self._task_store is not None:
+                self._persist(task, status, error)
+                release_unless_the_write_owns_it = False
+            elif ending:
+                self._release_admission_slot(task.id)
+                release_unless_the_write_owns_it = False
+            return result
+        finally:
+            if release_unless_the_write_owns_it:
+                self._release_admission_slot(task.id)
+
+    def _release_admission_slot(self, task_id: str) -> None:
+        """Drop *task_id*'s admission slot now that its ending is stored.
+
+        The limit counts ``_active_tasks``. A row with no ``completed_at``
+        still reads as running, so the slot is not free until the ending
+        write has returned. A task that is running or paused is left: this
+        run does not take its slot."""
+        task = self._active_tasks.get(task_id)
+        if task is not None and not task_has_ended(task, self._endings_recorded):
+            return
+        self._endings_recorded.discard(task_id)
+        self._active_tasks.pop(task_id, None)
+        self._task_handles.pop(task_id, None)
+
+    def _release_if_ending_stored(self, task_id: str) -> None:
+        """Release *task_id*'s slot when its ending is recorded and no later
+        store write is still in flight (that write releases)."""
+        if task_id not in self._endings_recorded:
+            return
+        newer = self._writes.get(task_id)
+        if newer is not None and not newer.done():
+            return
+        self._release_admission_slot(task_id)
+
+    def _release_ended_without_a_write(self, task_id: str) -> None:
+        """Release *task_id* when its ending is recorded and no write is in flight.
+
+        The ending write releases the slot when it returns. This is the safety
+        for a finalize that raised before that write was scheduled
+        (``reject_checkpoint`` calls it from ``finally``)."""
+        task = self._active_tasks.get(task_id)
+        if task is None or not self._task_has_ended(task):
+            return
+        write = self._writes.get(task_id)
+        if write is not None and not write.done():
+            return
+        self._release_admission_slot(task_id)
 
     def _persist(self, task: SwarmTask, status: str = "", error: str | None = None) -> None:
         """Write *task* as it is now. With an event loop running the write
         runs in a thread (Swarm audit SW-E07: every task write ran on the
         loop), after the task's previous write; :meth:`_flush_writes` waits
-        for it. A write the transition table refuses is kept as evidence."""
+        for it. A write the transition table refuses is kept as evidence.
+        When this task's ending is recorded, the last write to finish
+        releases its admission slot."""
         if self._task_store is None:
             return
         snapshot = SwarmTask.from_dict(task.to_dict())
@@ -2141,6 +2240,7 @@ class SwarmEngine:
             asyncio.get_running_loop()
         except RuntimeError:
             _write()
+            self._release_if_ending_stored(task.id)
             return
         previous = self._writes.get(task.id)
 
@@ -2148,6 +2248,12 @@ class SwarmEngine:
             if previous is not None and not previous.done():
                 await asyncio.wait({previous})
             await asyncio.to_thread(_write)
+            # Before this task is marked done: a flush waiting on it must
+            # already see the slot free. A newer write of this task owns
+            # the release.
+            if self._writes.get(task.id) is asyncio.current_task():
+                self._writes.pop(task.id, None)
+            self._release_if_ending_stored(task.id)
 
         from kazma_core.background import spawn_background
 
@@ -2155,8 +2261,10 @@ class SwarmEngine:
         self._writes[task.id] = write
 
         def _done(finished: asyncio.Task, tid: str = task.id) -> None:
+            # Cancelled before _in_order released: the slot must not stay.
             if self._writes.get(tid) is finished:
                 self._writes.pop(tid, None)
+            self._release_if_ending_stored(tid)
 
         write.add_done_callback(_done)
 
@@ -2615,101 +2723,122 @@ class SwarmEngine:
         Returns the finalized ``TaskResult`` with ``status="failed"``, or
         ``None`` if *task_id* is neither at a checkpoint nor paused. A paused
         task with no checkpoint pending is closed the same way.
+
+        The ending write releases the admission slot. If recording that ending
+        raises before the write is scheduled, the slot is released here, and
+        only when no store write is still in flight.
+
+        The checkpoint handler stamps ``failed`` on the shared task before
+        this save. That stamp is this reject, not an ending already recorded:
+        judging it used to skip the save, and the row stayed paused
+        (2026-09-25). An ending recorded before this call is left as it is.
         """
-        # "Already terminally finalized" is decided BEFORE the handler runs.
-        # ``_checkpoint_handler.reject`` marks the shared task object failed
-        # and gives it a result, and judging afterwards took this reject's own
-        # change for an earlier terminal record: a pipeline restored after a
-        # restart (in history, not in _active_tasks) was never saved as
-        # rejected, and came back paused at every boot. Live 2026-09-25: four
-        # rejected with 200s, still ``paused`` in Postgres.
-        _before = _hist_get_task(self._task_history, self._task_lock, task_id)
-        _already_final = (
-            _before is not None
-            and getattr(_before, "status", None) in TERMINAL_STATUSES
-            and getattr(_before, "result", None) is not None
-        )
-        result = await self._checkpoint_handler.reject(task_id, reason=reason)
-        if (
-            result is None
-            and _before is not None
-            and getattr(_before, "status", None) == TaskStatus.PAUSED
-        ):
-            # Paused with no checkpoint pending: nothing can approve or resume
-            # it. Product code only pauses a pipeline together with its
-            # checkpoint (CheckpointManager.handle_pipeline_checkpoint); the
-            # live store had one such row, left by a 2026-08-14 test run.
-            # Rejecting closes it, where the route used to answer "not found"
-            # for a task that exists.
-            result = TaskResult(
-                task_id=task_id,
-                status="failed",
-                error=f"{reason} (no checkpoint was pending)",
+        try:
+            # "Already terminally finalized" is decided BEFORE the handler runs.
+            # ``_checkpoint_handler.reject`` marks the shared task object failed
+            # and gives it a result, and judging afterwards took this reject's own
+            # change for an earlier terminal record: a pipeline restored after a
+            # restart (in history, not in _active_tasks) was never saved as
+            # rejected, and came back paused at every boot. Live 2026-09-25: four
+            # rejected with 200s, still ``paused`` in Postgres.
+            _before = _hist_get_task(self._task_history, self._task_lock, task_id)
+            _already_final = (
+                _before is not None
+                and getattr(_before, "status", None) in TERMINAL_STATUSES
+                and getattr(_before, "result", None) is not None
             )
-        if result is not None:
-            # Gate registry (P4): record the rejection. Best-effort.
-            try:
-                from kazma_core.swarm.checkpoint_manager import (
-                    _gate_settle_pipeline,
-                )
-
-                await asyncio.to_thread(_gate_settle_pipeline, task_id, "deny")
-            except Exception:
-                logger.warning("[SwarmEngine] could not settle the gate row of rejected task '%s'",
-                               task_id, exc_info=True)
-                record_swarm_failure("gate_settle")
-            # Clear in-flight maps (audit H6) — paused tasks stay in
-            # _active_tasks until reject/resume.
-            active = self._active_tasks.get(task_id)
-            if active is not None:
-                self._finalize_task(
-                    active,
-                    worker_results=list(getattr(result, "worker_results", None) or []),
+            result = await self._checkpoint_handler.reject(task_id, reason=reason)
+            if (
+                result is None
+                and _before is not None
+                and getattr(_before, "status", None) == TaskStatus.PAUSED
+            ):
+                # Paused with no checkpoint pending: nothing can approve or resume
+                # it. Product code only pauses a pipeline together with its
+                # checkpoint (CheckpointManager.handle_pipeline_checkpoint); the
+                # live store had one such row, left by a 2026-08-14 test run.
+                # Rejecting closes it, where the route used to answer "not found"
+                # for a task that exists.
+                result = TaskResult(
+                    task_id=task_id,
                     status="failed",
-                    error=reason,
-                    duration_seconds=float(getattr(result, "duration_seconds", 0.0) or 0.0),
-                    aggregated_output=getattr(result, "aggregated_output", None),
-                    metadata=dict(getattr(result, "metadata", None) or {}),
+                    error=f"{reason} (no checkpoint was pending)",
                 )
-            else:
-                # Update task history with the failed result — unless the
-                # task already carried a terminal record BEFORE this reject
-                # (reaped/cancelled while paused): overwriting would persist a
-                # SECOND terminal result for the same task (deep-audit
-                # 2026-08-19). See _already_final above for why "before".
-                if _already_final:
-                    logger.debug(
-                        "[SwarmEngine] reject_checkpoint('%s'): task already "
-                        "terminally finalized (status=%s) — skipping duplicate persist",
-                        task_id,
-                        getattr(_before, "status", None),
+            if result is not None:
+                # Gate registry (P4): record the rejection. Best-effort.
+                try:
+                    from kazma_core.swarm.checkpoint_manager import (
+                        _gate_settle_pipeline,
                     )
-                else:
-                    def _mark_failed(task: SwarmTask) -> None:
-                        task.status = TaskStatus.FAILED
-                        task.result = result
-                        # The handler stamps this for a checkpointed task; a
-                        # task with no checkpoint ends here and must say when,
-                        # or retention dates it by its creation.
-                        task.completed_at = task.completed_at or _utc_now_iso()
 
-                    updated = _hist_update_task(
-                        self._task_history,
-                        self._task_lock,
-                        task_id,
-                        _mark_failed,
-                        max_history=self._max_history,
+                    await asyncio.to_thread(_gate_settle_pipeline, task_id, "deny")
+                except Exception:
+                    logger.warning("[SwarmEngine] could not settle the gate row of rejected task '%s'",
+                                   task_id, exc_info=True)
+                    record_swarm_failure("gate_settle")
+                # Paused tasks stay in _active_tasks until reject/resume. The
+                # handler has already stamped this reject on the shared task,
+                # so its status is terminal before the save. That stamp is not
+                # an ending recorded earlier. Skip only an id recorded before
+                # this call: a second "failed" would sit beside a success
+                # whose write is still in flight.
+                active = self._active_tasks.get(task_id)
+                recorded_before = active is not None and active.id in self._endings_recorded
+                if active is not None and not (
+                    self._task_has_ended(active) and recorded_before
+                ):
+                    self._finalize_task(
+                        active,
+                        worker_results=list(getattr(result, "worker_results", None) or []),
+                        status="failed",
+                        error=reason,
+                        duration_seconds=float(getattr(result, "duration_seconds", 0.0) or 0.0),
+                        aggregated_output=getattr(result, "aggregated_output", None),
+                        metadata=dict(getattr(result, "metadata", None) or {}),
                     )
-                    if updated is not None:
-                        self._persist(updated, "failed", reason)
+                elif active is None:
+                    # Update task history with the failed result — unless the
+                    # task already carried a terminal record BEFORE this reject
+                    # (reaped/cancelled while paused): overwriting would persist a
+                    # SECOND terminal result for the same task (deep-audit
+                    # 2026-08-19). See _already_final above for why "before".
+                    if _already_final:
+                        logger.debug(
+                            "[SwarmEngine] reject_checkpoint('%s'): task already "
+                            "terminally finalized (status=%s) — skipping duplicate persist",
+                            task_id,
+                            getattr(_before, "status", None),
+                        )
                     else:
-                        # If task not in history, store the result directly.
-                        self._checkpoint_mgr.complete_pipeline(task_id, result)
-            # Ensure active maps cleared even if finalize path missed
-            self._active_tasks.pop(task_id, None)
-            self._task_handles.pop(task_id, None)
-            await self._flush_writes(task_id)
-        return result
+                        def _mark_failed(task: SwarmTask) -> None:
+                            task.status = TaskStatus.FAILED
+                            task.result = result
+                            # The handler stamps this for a checkpointed task; a
+                            # task with no checkpoint ends here and must say when,
+                            # or retention dates it by its creation.
+                            task.completed_at = task.completed_at or _utc_now_iso()
+
+                        updated = _hist_update_task(
+                            self._task_history,
+                            self._task_lock,
+                            task_id,
+                            _mark_failed,
+                            max_history=self._max_history,
+                        )
+                        if updated is not None:
+                            self._persist(updated, "failed", reason)
+                        else:
+                            # If task not in history, store the result directly.
+                            self._checkpoint_mgr.complete_pipeline(task_id, result)
+                # The ending write releases the slot. Flush waits until it has,
+                # so a reject does not free the slot while the row is still open.
+                await self._flush_writes(task_id)
+            return result
+        finally:
+            # A finalize that raised never scheduled the write. Releasing while
+            # a write is in flight would free the slot before ``completed_at``
+            # is stored.
+            self._release_ended_without_a_write(task_id)
 
     # ------------------------------------------------------------------
     # Reliability layer — delegated to ReliabilityRegistry (P2-1 refactor)
