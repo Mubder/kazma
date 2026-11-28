@@ -1028,13 +1028,13 @@ async def _drive_decision(graph: Any, resume_cmd: Any, resume_config: dict[str, 
     lock, so the drive runs in this task (a task of its own would wait on
     that lock when the turn's budget writes its end)."""
     from kazma_ui.active_turns import register_turn, unregister_turn
-    from kazma_ui.chat_runs_end import begin_drive, real_gate_id, settle_refused_card
+    from kazma_ui.chat_runs_end import begin_drive, real_gate_id, refused_drive
     from kazma_ui.hitl_answerers import as_the_asker
 
     drive_gate = await asyncio.to_thread(real_gate_id, gate)
     task = asyncio.current_task()
     if not begin_drive(thread_id, drive_gate, since=since):
-        await asyncio.to_thread(settle_refused_card, thread_id)
+        await asyncio.to_thread(refused_drive, thread_id, drive_gate)
         return None
     register_turn(thread_id, task)
     try:

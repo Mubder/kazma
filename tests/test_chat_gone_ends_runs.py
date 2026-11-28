@@ -713,8 +713,8 @@ def test_two_ends_at_once_report_and_log_once(store, monkeypatch, caplog) -> Non
     first: list[bool] = []
 
     @contextlib.contextmanager
-    def going(thread_id: str) -> Any:
-        with real_going(thread_id):
+    def going(thread_id: str, reason: str = "") -> Any:
+        with real_going(thread_id, reason):
             with under_way:
                 ends[0] += 1
                 under_way.notify_all()
@@ -1006,13 +1006,26 @@ def store_methods_that_end_nothing(source: str) -> list[str]:
                 return True
         return False
 
-    def ends(node: ast.AST) -> bool:
-        return any(isinstance(sub, ast.Call) and _called_name(sub) in ENDERS for sub in _own_nodes(node))
-
     def calls(node: ast.AST) -> set[str]:
         return {sub.func.attr for sub in _own_nodes(node) if isinstance(sub, ast.Call)
                 and isinstance(sub.func, ast.Attribute) and isinstance(sub.func.value, ast.Name)
                 and sub.func.value.id == "self"}
+
+    # The store's own ways to an ender, closed over its methods: what the
+    # eviction queues is ended by _end_evicted, which _locked runs once the
+    # store's lock is released (the review of 974f2ae85, N1).
+    store_enders = {name for name, node in methods.items()
+                    if any(isinstance(sub, ast.Call) and _called_name(sub) in ENDERS for sub in _own_nodes(node))}
+    while True:
+        grown = {name for name, node in methods.items() if name not in store_enders
+                 and calls(node) & store_enders}
+        if not grown:
+            break
+        store_enders |= grown
+
+    def ends(node: ast.AST) -> bool:
+        direct = any(isinstance(sub, ast.Call) and _called_name(sub) in ENDERS for sub in _own_nodes(node))
+        return direct or bool(calls(node) & store_enders)
 
     removing = {name for name, node in methods.items() if removes(node)}
     while True:  # a method that calls a removal that does not end runs itself removes too
@@ -1068,7 +1081,7 @@ def test_the_gate_sees_every_way_in_the_source() -> None:
     manager = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SessionManager")
     ends_itself = {n.name for n in manager.body if isinstance(n, ast.FunctionDef)
                    and any(isinstance(s, ast.Call) and _called_name(s) in ENDERS for s in _own_nodes(n))}
-    assert "_evict_if_needed" in ends_itself
+    assert "_end_evicted" in ends_itself
 
 
 def test_every_declaration_is_still_needed() -> None:
@@ -1149,7 +1162,7 @@ def test_control_a_store_method_that_deletes_and_ends_nothing_is_caught() -> Non
     assert store_methods_that_end_nothing(planted) == ["SessionManager.forget_old"]
     # And the eviction without its ender, as it was: every save that can
     # evict a chat removes one (a private method's removal is its callers').
-    old = source.replace('self._chat_went_away(evicted, session_id, "chat_store_full")', "pass", 1)
+    old = source.replace('self._chat_went_away(held, session_id, "chat_store_full")', "pass", 1)
     assert old != source
     assert store_methods_that_end_nothing(old) == [
         "SessionManager.add_usage", "SessionManager.get_or_create", "SessionManager.put",

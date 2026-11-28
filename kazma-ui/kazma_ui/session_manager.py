@@ -274,6 +274,11 @@ class SessionManager:
             self._spool = None
         # Guard OrderedDict + sqlite across threadpool/async (audit M15)
         self._lock = threading.RLock()
+        # Chats the store's limit evicted under ``_lock``, whose runs end once
+        # it is released (``_locked``, ``_end_evicted``): an end of the same
+        # thread may be writing this store, so ending them under the lock froze
+        # every save for the end's wait (review of 974f2ae85, N1).
+        self._evicted: list[tuple[ChatSession | None, str]] = []
         # A list's database read and prunes: one caller at a time, at most
         # every LIST_REFRESH_SECONDS per tenant (FA-278).
         self._list_refresh_lock = threading.Lock()
@@ -670,16 +675,39 @@ class SessionManager:
                     continue
                 self._sessions[key] = sess
 
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        """The store's lock, for a method that may evict: the chats evicted
+        under it are ended once it is released (:meth:`_end_evicted`), never
+        under it."""
+        try:
+            with self._lock:
+                yield
+        finally:
+            self._end_evicted()
+
+    def _end_evicted(self) -> None:
+        """End what the chats evicted under the store's lock had running or
+        waiting (``chat_runs_end``), now that it is released; a caller still
+        holding it (a nested call) leaves them to the outermost one."""
+        if self._lock._is_owned():  # type: ignore[attr-defined]  # RLock: held by this thread
+            return
+        with self._lock:
+            evicted, self._evicted = self._evicted, []
+        for held, session_id in evicted:
+            self._chat_went_away(held, session_id, "chat_store_full")
+
     def _evict_if_needed(self, tenant_id: str) -> None:
         """Evict the oldest session for this tenant if we exceed max_sessions.
         What an evicted chat had running or waiting ends with it
-        (``chat_runs_end``), unless another chat is on its thread."""
+        (``chat_runs_end``), unless another chat is on its thread -- once the
+        store's lock is released (:meth:`_locked`). Under ``_lock``."""
         tenant_keys = [key for key in self._sessions.keys() if key.startswith(f"{tenant_id}:")]
         while len(tenant_keys) > self._max_sessions:
             oldest_key = tenant_keys.pop(0)
             evicted = self._sessions.pop(oldest_key, None)
             _, session_id = oldest_key.split(":", 1)
-            self._chat_went_away(evicted, session_id, "chat_store_full")
+            self._evicted.append((evicted, session_id))
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
@@ -884,7 +912,7 @@ class SessionManager:
 
         Raises :class:`ChatDeleted` for a chat deleted in this process.
         """
-        with self._lock:
+        with self._locked():
             tenant_id = _space()
             if session_id:
                 if self._is_deleted(tenant_id, session_id, thread_id):
@@ -1152,7 +1180,7 @@ class SessionManager:
     def _put(self, session: ChatSession) -> None:
         """:meth:`put`, for a caller that says whether it was saved: raises
         :class:`ChatDeleted` when it is not written."""
-        with self._lock:
+        with self._locked():
             tenant_id = session.tenant_id or _space()
             session.tenant_id = tenant_id
             if self._is_deleted(tenant_id, session.session_id, session.thread_id) or self._of_before(session):
@@ -1258,7 +1286,7 @@ class SessionManager:
         the chat before (and the move does not happen) or is refused (the
         chat is deleted): never lost, never in both. The title, pin and
         archive are the chat's own at this moment."""
-        with self._mutation(session_id), self._mutation(to.session_id), self._lock:
+        with self._mutation(session_id), self._mutation(to.session_id), self._locked():
             current = self.get(session_id)
             if current is None or current.messages != messages:
                 return False
@@ -1605,7 +1633,7 @@ class SessionManager:
         WebSocket session-list / message-history endpoints see it. Raises
         :class:`ChatDeleted` for a chat deleted in this process.
         """
-        with self._lock:
+        with self._locked():
             tenant_id = _space()
             key = f"{tenant_id}:{session_id}"
             if self._is_deleted(tenant_id, session_id, str(data.get("thread_id") or "")):

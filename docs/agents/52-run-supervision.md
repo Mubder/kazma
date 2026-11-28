@@ -114,6 +114,18 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   the next start within 30 minutes brought it back. The start pass does the
   same for a cut turn of a chat archived before it (`_end_archived_cut_turn`,
   with an INFO line); it was skipped without a word.
+  **The chat store never ends a chat under its lock** (review of 974f2ae85,
+  N1): the store's limit queues what it evicts (`self._evicted`) and
+  `_locked` ends it once the store's lock is released (`_end_evicted`
+  defers while a caller still holds it). An end of the same thread holds
+  `_one_end_at_a_time` and writes the store; ending under the lock froze
+  every chat save for `REST_WAIT_S`. Gate: `store_lock_holders_that_end`
+  in `tests/test_chat_gone_race_lows.py` (the eviction ending under the lock
+  as its control). **A refused drive ends its gate** (N2,
+  `chat_runs_end.refused_drive`): an end that touched no gate (an archive
+  leaving a running turn, a failed step, the registry read off) still makes
+  `begin_drive` refuse, and the gate was left `resuming` until the next boot
+  sweep; now it is ended with that end's reason, its call not run.
 - **Deciding** (`decide.py`): claim (the first decision wins; a second is
   told who decided what, where), then `registry.perform` asks the run as it
   is NOW and refuses an action it no longer offers, then the kind's own

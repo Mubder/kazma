@@ -1245,7 +1245,7 @@ def register_misc_routes(self: Any) -> None:
                     )
                 # Persist the decision and resume intent before projecting it
                 # or spawning execution. A registry outage leaves the pause.
-                from kazma_ui.chat_runs_end import begin_drive, drive_clock, real_gate_id, settle_refused_card
+                from kazma_ui.chat_runs_end import begin_drive, drive_clock, real_gate_id, refused_drive
                 from kazma_ui.hitl_decision import record_gate_decision
 
                 _decided_at = drive_clock()
@@ -1277,7 +1277,7 @@ def register_misc_routes(self: Any) -> None:
                 if not begin_drive(thread_id, _drive_gate, since=_decided_at):
                     logger.warning("[HITL] thread=%s: its chat went away before the %s was carried out; "
                                    "nothing runs", thread_id[:12], "approval" if approved else "denial")
-                    await asyncio.to_thread(settle_refused_card, thread_id, _resume_session_id, _resume_turn)
+                    await asyncio.to_thread(refused_drive, thread_id, _drive_gate, _resume_session_id, _resume_turn)
                     from kazma_ui.i18n import current_language
                     from kazma_ui.i18n import t as _t
 
