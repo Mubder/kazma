@@ -95,7 +95,7 @@ def _run_view(run: Any, lang: str) -> dict[str, Any]:
     data["kind_label"] = (spec.label_ar if lang == "ar" else spec.label) if spec else run.kind
     data["state_label"] = state_word(run, lang)
     # Why it ended from outside ("The chat was deleted"), in the page's words.
-    data["ended_label"] = ended_word(run.ended_reason, lang)
+    data["ended_label"] = ended_word(run.ended_reason, lang, run.ended_gate)
     data["attention"] = attention(run)
     return data
 

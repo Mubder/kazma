@@ -99,6 +99,21 @@ press. Plan and evidence: `docs/plans/RUN_SUPERVISION_PLAN.md`; guide:
   after the state, a store method that ends nothing as controls).
   `scripts/deploy_live.py`'s test turn denies a card it raises through
   `/api/approve` before it deletes its chat.
+  **The review's Lows** (2026-11-27, `tests/test_chat_gone_race_lows.py`):
+  no drive of a recorded decision starts once its chat is going away, and
+  every drive is registered in the same step, so an end cancels it on every
+  path, a chat app's too (`begin_drive`, §30), and the ended run carries what became of the
+  approval it waited on (`Run.ended_gate`, a `hitl_gates.CHAT_GONE_FATES`
+  code; `ended_word(reason, lang, gate)` words both from the catalog, so
+  Running work reads "The chat was deleted; it was approved, but the chat went
+  away before the call started: the call did not run" in EN or AR). A cut turn
+  in a chat being archived is ended as Stop ends it (the marker, in
+  `end_chat_runs` when the turn is in `turn_resume._left`) and the chat says
+  why in the reader's language (`_say_cut_turn_ended`, `chat.cut_turn_archived`;
+  the cut turn's open row is closed): un-archived, nothing else said it, and
+  the next start within 30 minutes brought it back. The start pass does the
+  same for a cut turn of a chat archived before it (`_end_archived_cut_turn`,
+  with an INFO line); it was skipped without a word.
 - **Deciding** (`decide.py`): claim (the first decision wins; a second is
   told who decided what, where), then `registry.perform` asks the run as it
   is NOW and refuses an action it no longer offers, then the kind's own

@@ -39,10 +39,15 @@ Deleting or clearing a chat (`/reset`, the Dashboard's clear-all, clearing
 waiting approvals), moving it to another space or erasing its space ends what
 the chat had running or waiting: a running turn is stopped, and an approval
 card it waited on is closed as no longer needed. An approval you had already
-answered keeps your answer. Archiving a chat ends only what waits: an answer
-still being written finishes and is saved in the archived chat. The turn is
-listed as cancelled with why, such as "The chat was deleted", under
-`/runs all` for a day, and no incident is opened for it.
+answered keeps your answer, and an approved action that had not started yet
+does not start once the chat is gone. Archiving a chat ends only what waits:
+an answer still being written finishes and is saved in the archived chat. A
+request a restart cut off ends too, and the archived chat says so, so when
+you un-archive it you see why it is not offered to continue. The turn is
+listed as cancelled with why, such as "The chat was deleted", and what
+became of its approval (denied, not run, or "whether it ran is not known"
+when the action had already started), under `/runs all` for a day, and no
+incident is opened for it.
 
 ## Where you are told
 

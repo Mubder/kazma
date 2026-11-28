@@ -24,7 +24,13 @@ already ended (``turn_failed`` or no next step), never one older than 30
 minutes, never one Stop or a chat's going away ended (``task_status``
 ``abandoned``: LangGraph keeps a paused node as ``next`` once the marker is
 written over its interrupt, 2026-11-27), and never one of an archived chat
-(nobody is looking at it; ``chat_runs_end``).
+(nobody is looking at it; ``chat_runs_end``). An archived chat's cut turn is
+ended instead -- its checkpoint marked abandoned, Running work listing it
+"The chat was archived", and the chat saying why in the reader's language
+(``chat_runs_end._say_cut_turn_ended``) -- as archiving a chat ends the cut
+turn it has: un-archived, the chat says why its turn is not offered (the
+review of ec538d779, L3: it was skipped without a word, and the next start
+after an un-archive brought it back).
 """
 
 from __future__ import annotations
@@ -146,9 +152,11 @@ def _archived_in(manager: Any, thread_id: str) -> bool:
                 and not manager.another_chat_on(thread_id, row.session_id, showing=True))
 
 
-async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = None) -> list[CutTurn]:
+async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = None, *,
+                          archived: list[CutTurn] | None = None) -> list[CutTurn]:
     """Every chat whose newest checkpoint, written in the last 30 minutes,
-    stops half way through a turn with no approval waiting."""
+    stops half way through a turn with no approval waiting. Those of an
+    archived chat are not among them: they go to *archived*, to be ended."""
     from kazma_core.checkpoint_retention import checkpoint_time
 
     now = time.time() if now is None else now
@@ -180,15 +188,55 @@ async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = Non
             continue                      # paused for an approval: its card is the action
         if str(values.get("task_status") or "") == "abandoned":
             continue                      # Stop, or its chat going away, ended it
-        if await asyncio.to_thread(_chat_archived, thread_id):
-            continue                      # an archived chat's turn is never resumed
+        archived_chat = await asyncio.to_thread(_chat_archived, thread_id)
         routing = values.get("_gateway") or {}
         platform = str(routing.get("platform") or "web").lower()
         unknown = await asyncio.to_thread(_open_effects, thread_id, _created_epoch(values.get("created_at")))
-        found.append(CutTurn(thread_id=thread_id, at=at, next=tuple(snapshot.next), platform=platform,
-                             target=str(routing.get("delivery_target") or ""),
-                             user_text=_last_user_text(values.get("messages") or []), unknown=unknown))
+        turn = CutTurn(thread_id=thread_id, at=at, next=tuple(snapshot.next), platform=platform,
+                       target=str(routing.get("delivery_target") or ""),
+                       user_text=_last_user_text(values.get("messages") or []), unknown=unknown)
+        if archived_chat:
+            # An archived chat's turn is never resumed: it is ended, and said.
+            logger.info("[turn_resume] thread=%s was cut off by a restart in an archived chat: it is not "
+                        "continued; it ends, and its chat says why", thread_id[:12])
+            if archived is not None:
+                archived.append(turn)
+            continue
+        found.append(turn)
     return found
+
+
+async def _end_archived_cut_turn(graph: Any, turn: CutTurn) -> bool:
+    """End a cut turn of an archived chat as archiving it does
+    (``chat_runs_end.end_chat_runs``, an archive): the abandonment marker,
+    the chat's line saying why, the run recorded "The chat was archived".
+    Read and written as the turn's asker in its own space. True when ended."""
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.scope import spaces_enforced
+
+    from kazma_ui.chat_runs_end import end_chat_runs
+    from kazma_ui.hitl_answerers import as_the_asker, whose_turn
+    from kazma_ui.session_manager import peek_session_manager
+
+    def _read() -> tuple[Any, Any]:
+        whose = whose_turn(turn.thread_id) if spaces_enforced() else None
+        manager = peek_session_manager()
+        with as_the_asker(whose):
+            return whose, manager.get_by_thread_id(turn.thread_id) if manager is not None else None
+
+    try:
+        whose, held = await asyncio.to_thread(_read)
+    except (*store_errors(), LookupError, IdentityUnavailable):
+        logger.warning("[turn_resume] the archived chat of thread=%s cannot be read; its cut turn is left as "
+                       "it is", turn.thread_id[:12], exc_info=True)
+        return False
+    _left[turn.thread_id] = turn          # the end takes it as the archive takes a cut turn
+    with as_the_asker(whose):
+        ended = await end_chat_runs(turn.thread_id, reason="chat_archived",
+                                    session_id=str(getattr(held, "session_id", "") or ""),
+                                    title=str(getattr(held, "title", "") or ""), graph=graph, waiting_only=True)
+    return ended.recorded
 
 
 async def _whose_turn_goes_on(thread_id: str) -> tuple[Any, str]:
@@ -283,7 +331,8 @@ async def resume_cut_turns(graph_getter: Any, checkpointer_getter: Any, *, delay
     if graph is None or checkpointer is None:
         return 0
     continued = 0
-    for turn in await _find_cut_turns(checkpointer, graph):
+    archived: list[CutTurn] = []
+    for turn in await _find_cut_turns(checkpointer, graph, archived=archived):
         if turn.safe:
             started, _ = await continue_turn(graph, turn)
             continued += started
@@ -292,4 +341,6 @@ async def resume_cut_turns(graph_getter: Any, checkpointer_getter: Any, *, delay
             logger.warning("[turn_resume] thread=%s was cut off by a restart while %s ran; its effect is "
                            "unknown, so it waits for the owner (Continue or Close)",
                            turn.thread_id[:12], ", ".join(turn.unknown))
+    for turn in archived:
+        await _end_archived_cut_turn(graph, turn)
     return continued

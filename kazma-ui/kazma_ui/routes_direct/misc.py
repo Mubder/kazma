@@ -1245,9 +1245,11 @@ def register_misc_routes(self: Any) -> None:
                     )
                 # Persist the decision and resume intent before projecting it
                 # or spawning execution. A registry outage leaves the pause.
+                from kazma_ui.chat_runs_end import begin_drive, drive_clock, real_gate_id, settle_refused_card
                 from kazma_ui.hitl_decision import record_gate_decision
 
-                await record_gate_decision(
+                _decided_at = drive_clock()
+                _recorded_iid = await record_gate_decision(
                     thread_id,
                     decision="approved" if approved else "denied",
                     actor=actor,
@@ -1265,6 +1267,32 @@ def register_misc_routes(self: Any) -> None:
                 )
                 if isinstance(resume_cmd.resume, dict) and "scope" in resume_cmd.resume:
                     resume_cmd.resume["scope"] = scope
+                _drive_gate = await asyncio.to_thread(real_gate_id, _recorded_iid or _live_iid)
+                # Carried out only while its chat is there, in the same step
+                # as the drive is started and registered (chat_runs_end.
+                # begin_drive), so an end either cancels it or took the gate
+                # first: then nothing runs, the card is stamped settled and
+                # the record says the call did not run. Before, the drive
+                # started anyway and ran the approved call on a deleted chat.
+                if not begin_drive(thread_id, _drive_gate, since=_decided_at):
+                    logger.warning("[HITL] thread=%s: its chat went away before the %s was carried out; "
+                                   "nothing runs", thread_id[:12], "approval" if approved else "denial")
+                    await asyncio.to_thread(settle_refused_card, thread_id, _resume_session_id, _resume_turn)
+                    from kazma_ui.i18n import current_language
+                    from kazma_ui.i18n import t as _t
+
+                    return _JSONResponse(
+                        await asyncio.to_thread(_attach_hitl_view,
+                            {"ok": False, "reason": "chat_gone", "thread_id": thread_id, "running": False,
+                             "interrupt_id": _recorded_iid or _live_iid, "hitl_state": "settled",
+                             "error": _t("chat.decision_chat_gone", current_language())},
+                            thread_id,
+                            _recorded_iid or _live_iid,
+                            tool=pending_tool_name,
+                            state_hint="settled",
+                        ),
+                        status_code=409,
+                    )
                 _resume_inflight.add(thread_id)
                 # The resumed turn is its asker's, whoever answered (S2-05):
                 # an approver or the admin pressing for someone never runs

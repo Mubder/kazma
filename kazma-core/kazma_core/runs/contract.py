@@ -110,6 +110,11 @@ class Run:
     #: a chat turn whose chat was deleted is ``chat_deleted``. Empty: it
     #: ended (or runs) on its own.
     ended_reason: str = ""
+    #: With ``ended_reason``: what became of the approval the run waited on
+    #: (``hitl_gates.CHAT_GONE_FATES``: its approved call did not run, may
+    #: have run, was denied ...), worded by the catalog
+    #: (``runs.gate_fate.<code>``). Empty: it waited on none.
+    ended_gate: str = ""
     #: Where the run started: {"platform", "target", "thread_id"} or {}.
     origin: dict[str, str] = field(default_factory=dict)
     #: Set when something else already tells the owner about THIS run (an

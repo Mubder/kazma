@@ -27,6 +27,17 @@ def _minutes_ago(at: float | None) -> str:
     return "just now" if minutes < 1 else f"{count_noun(minutes, 'minute')} ago"
 
 
+#: What became of a card's call when its chat went away
+#: (``hitl_gates.CHAT_GONE_FATES``), as a chat app is told on a late tap.
+_FATE_TEXT = {
+    "not_needed": "it was never answered, and its call did not run",
+    "not_run": "it was approved, but its call had not started and did not run",
+    "cut": "it was approved and its call had started; whether it ran is not known",
+    "denied": "it was denied, and its call did not run",
+    "expired": "it expired unanswered, and its call did not run",
+}
+
+
 async def _decided_card_message(requested_gate: str) -> str | None:
     """What the registry recorded for the card that was tapped, or None.
 
@@ -40,6 +51,7 @@ async def _decided_card_message(requested_gate: str) -> str | None:
         return None
     try:
         from kazma_core.safety.hitl_gates import (
+            ended_fate,
             expired_unanswered,
             gate_for_async,
             gate_registry_enabled,
@@ -55,6 +67,11 @@ async def _decided_card_message(requested_gate: str) -> str | None:
         return None
     tool = gate.tool or "the tool"
     when = _minutes_ago(gate.settled_at or gate.claimed_at)
+    fate = ended_fate(gate.state, gate.decision, gate.actor, gate.ended_reason)
+    if fate:
+        # Its chat went away (chat_runs_end): what became of the call, per
+        # decision -- an approval whose call never ran is never "applied".
+        return f"⚠️ This approval's chat went away {when}: {_FATE_TEXT.get(fate, fate)}."
     if expired_unanswered(gate.actor):
         return (
             f"⏱ This approval expired {when}: nobody answered in time, so "
@@ -974,21 +991,94 @@ def _approval_card_is_stale(msg: IncomingMessage, requested_gate: str, pending: 
     return bool((requested_gate and requested_gate != live_gate) or (interactive and not requested_gate))
 
 
-async def _not_recorded(recording: Any) -> str | None:
-    """Await *recording* (``record_gate_decision(...)``) and return the text
-    to send instead when nothing was recorded: not this person's card
-    (Spaces S2-05: it waits for whoever it asks), or decision storage
-    unavailable (the graph stays paused). None when it was recorded."""
+async def _remember_resume(thread_id: str, action: str, approved: bool) -> None:
+    """The thread's last resume, so a late second callback stays quiet."""
+    try:
+        import time as _time
+
+        from kazma_core.config_store import get_config_store
+
+        await asyncio.to_thread(
+            get_config_store().set,
+            f"hitl.last_resume.{thread_id}",
+            {
+                "at": _time.time(),
+                "action": action,
+                "approved": approved,
+            },
+            category="safety",
+        )
+    except Exception:
+        pass
+
+
+async def _drive_decision(graph: Any, resume_cmd: Any, resume_config: dict[str, Any], thread_id: str,
+                          gate: str, *, since: float, whose: Any) -> tuple[Any, dict[str, Any] | None] | None:
+    """Carry out a chat app's recorded decision (``_run_resume``), as the
+    card's asker (S3-04, as S2-05 on the web), only while its chat is there.
+
+    The drive asks ``chat_runs_end.begin_drive`` and registers this task as
+    the thread's running turn in the same step, so a chat that goes away
+    either took the gate first -- nothing runs, the card is stamped settled,
+    and None is returned -- or finds this drive and cancels it (its call is
+    recorded as possibly run). Before, the turn was registered only inside
+    ``invoke_turn``, after the checkpoint read and two hops off the loop: a
+    delete in between found nothing to cancel and the approved call ran on the
+    deleted chat (review of e916a8f96, M1). The caller holds the thread's
+    lock, so the drive runs in this task (a task of its own would wait on
+    that lock when the turn's budget writes its end)."""
+    from kazma_ui.active_turns import register_turn, unregister_turn
+    from kazma_ui.chat_runs_end import begin_drive, real_gate_id, settle_refused_card
+    from kazma_ui.hitl_answerers import as_the_asker
+
+    drive_gate = await asyncio.to_thread(real_gate_id, gate)
+    task = asyncio.current_task()
+    if not begin_drive(thread_id, drive_gate, since=since):
+        await asyncio.to_thread(settle_refused_card, thread_id)
+        return None
+    register_turn(thread_id, task)
+    try:
+        with as_the_asker(whose):
+            return await _run_resume(graph, resume_cmd, resume_config, thread_id)
+    except asyncio.CancelledError:
+        logger.warning("[HITL] thread=%s: the drive of its decision was cancelled (its chat went away, or "
+                       "Kazma stops)", thread_id)
+        raise
+    finally:
+        unregister_turn(thread_id, task)
+
+
+async def _say_chat_gone(manager: Any, msg: Any, ctx: Any, thread_id: str, approved: bool) -> bool:
+    """A decision whose chat went away before it was carried out
+    (``chat_runs_end.begin_drive`` refused): nothing runs, and the chat app
+    is told so. True (the callback was handled)."""
+    logger.warning("[HITL] thread=%s: its chat went away before the %s was carried out; nothing runs",
+                   thread_id, "approval" if approved else "denial")
+    await manager.send(OutboundMessage(
+        target_id=_build_target_id(msg.platform, ctx),
+        text=("This chat went away before the approval was carried out; nothing was run."
+              if approved else "This chat went away; nothing was run."),
+        context_metadata=ctx,
+    ))
+    return True
+
+
+async def _not_recorded(recording: Any) -> tuple[str | None, str]:
+    """Await *recording* (``record_gate_decision(...)``): ``(text, "")`` --
+    the text to send instead when nothing was recorded: not this person's
+    card (Spaces S2-05: it waits for whoever it asks), or decision storage
+    unavailable (the graph stays paused) -- or ``(None, gate)`` with the gate
+    the decision was recorded under, when it was."""
     from kazma_ui.hitl_decision import GateNotYours
 
     try:
-        await recording
+        gate = await recording
     except GateNotYours:
-        return "This approval is not yours to answer; it waits for the person it asks."
+        return "This approval is not yours to answer; it waits for the person it asks.", ""
     except Exception:
         logger.warning("[HITL] decision storage unavailable; graph remains paused", exc_info=True)
-        return "Approval remains paused: decision storage is unavailable. Retry after storage recovers."
-    return None
+        return "Approval remains paused: decision storage is unavailable. Retry after storage recovers.", ""
+    return None, str(gate or "")
 
 
 #: What a press on someone else's card is told (S3-04).
@@ -1366,10 +1456,12 @@ async def _handle_hitl_resume_here(
             # Record the decision the way every surface does: registry CAS,
             # the transcript part a browser on this thread paints, and the
             # journal frame that tells open tabs it was decided here.
+            from kazma_ui.chat_runs_end import drive_clock
             from kazma_ui.hitl_decision import record_gate_decision
 
             _pending = pending if isinstance(pending, dict) else {}
-            refused = await _not_recorded(record_gate_decision(
+            decided_at = drive_clock()
+            refused, recorded_gate = await _not_recorded(record_gate_decision(
                 target_thread,
                 decision="approved" if approved else "denied",
                 actor=actor,
@@ -1386,23 +1478,7 @@ async def _handle_hitl_resume_here(
                 ))
                 return True
             # Mark successful resume so a late second callback stays quiet.
-            try:
-                import time as _time
-
-                from kazma_core.config_store import get_config_store
-
-                await asyncio.to_thread(
-                    get_config_store().set,
-                    f"hitl.last_resume.{target_thread}",
-                    {
-                        "at": _time.time(),
-                        "action": action,
-                        "approved": approved,
-                    },
-                    category="safety",
-                )
-            except Exception:
-                pass
+            await _remember_resume(target_thread, action, approved)
 
             # ── Task grant: auto-approve all danger tools until next message ──
             # When the user clicks "Approve for task", grant ALL danger tools
@@ -1463,14 +1539,13 @@ async def _handle_hitl_resume_here(
                     context_metadata=ctx,
                 ))
                 return True
-            # The resumed turn is its asker's, whoever answered (S3-04, as
-            # S2-05 on the web): it runs as them, in their space.
-            from kazma_ui.hitl_answerers import as_the_asker
-
-            with as_the_asker(whose):
-                result_state, chained = await _run_resume(
-                    graph, _resume_cmd, resume_config, target_thread,
-                )
+            # Carried out only while its chat is there, as its asker
+            # (_drive_decision): a chat that went away since took its gate.
+            outcome = await _drive_decision(graph, _resume_cmd, resume_config, target_thread,
+                                            recorded_gate, since=decided_at, whose=whose)
+            if outcome is None:
+                return await _say_chat_gone(manager, msg, ctx, target_thread, approved)
+            result_state, chained = outcome
 
         destination = await _resume_destination(
             manager, msg, ctx, result_state, whose=whose, thread=target_thread, answered_elsewhere=(

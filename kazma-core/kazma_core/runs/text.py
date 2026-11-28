@@ -85,17 +85,21 @@ def action_word(action: str, lang: str = "en") -> str:
     return _w(_ACTION.get(action, (action, action)), lang)
 
 
-def ended_word(reason: str, lang: str = "en") -> str:
-    """Why a run ended (its ``ended_reason``), in *lang*, from the UI's
-    catalog (``runs.ended.<reason>``); the code itself where the catalog is
-    not installed (a code a page can word)."""
+def ended_word(reason: str, lang: str = "en", gate: str = "") -> str:
+    """Why a run ended (its ``ended_reason``) and what became of the
+    approval it waited on (its ``ended_gate``), in *lang*, from the UI's
+    catalog (``runs.ended.<reason>``, ``runs.gate_fate.<gate>``); the codes
+    themselves where the catalog is not installed (codes a page can word)."""
     if not reason:
         return ""
     try:
         from kazma_ui.i18n import t
     except ImportError:
-        return reason
-    return t(f"runs.ended.{reason}", lang)
+        return f"{reason} ({gate})" if gate else reason
+    said = t(f"runs.ended.{reason}", lang)
+    if not gate:
+        return said
+    return f"{said}{'؛' if lang == 'ar' else ';'} {t(f'runs.gate_fate.{gate}', lang)}"
 
 
 def attention(run: Run) -> bool:
@@ -117,7 +121,7 @@ def _line(run: Run, now: float, lang: str) -> str:
         parts.append(run.detail)
     elif run.ended_reason and run.state not in ACTIVE_STATES:
         # What ended it from outside: "The chat was deleted".
-        parts.append(ended_word(run.ended_reason, lang))
+        parts.append(ended_word(run.ended_reason, lang, run.ended_gate))
     elif run.progress_note and run.state in ACTIVE_STATES:
         parts.append(run.progress_note)
     if run.handled:

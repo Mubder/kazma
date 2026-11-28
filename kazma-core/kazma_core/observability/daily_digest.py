@@ -184,6 +184,10 @@ _OUTCOME_WORDS = {
     # Its chat went away (kazma_ui/chat_runs_end.py): nobody decided it.
     "not_needed": "no longer needed (the chat went away)",
     "cleared": "cleared with the waiting approvals",
+    # Approved, then its chat went away (hitl_gates.chat_gone_fate): never
+    # counted as approved for a call that did not run, nor as a failed resume.
+    "not_run": "approved, but the chat went away before the call ran",
+    "cut": "approved, then the chat went away while the call ran (it may have run)",
     "waiting": "still waiting",
     "error": "could not resume",
 }

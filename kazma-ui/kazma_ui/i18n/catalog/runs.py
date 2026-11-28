@@ -56,6 +56,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The chat store's limit removed the chat",
         "ar": "أزال حدّ مخزن المحادثات هذه المحادثة",
     },
+    # What became of the approval a chat's turn waited on when the chat went
+    # away (kazma_core/safety/hitl_gates.py CHAT_GONE_FATES; the run's
+    # ``ended_gate`` and the gate's own message), per decision. They never
+    # name the cause: ``runs.ended.<reason>`` says it beside them.
+    "runs.gate_fate.not_needed": {
+        "en": "its approval was never answered, and the call did not run",
+        "ar": "لم يُجَب عن طلب الموافقة، ولم يُنفَّذ الإجراء",
+    },
+    "runs.gate_fate.not_run": {
+        "en": "it was approved, but the call had not started, and it did not run",
+        "ar": "تمت الموافقة عليه، لكن الإجراء لم يكن قد بدأ، فلم يُنفَّذ",
+    },
+    "runs.gate_fate.cut": {
+        "en": "it was approved, and the call had started: whether it ran is not known",
+        "ar": "تمت الموافقة عليه، وكان الإجراء قد بدأ: لا يُعرف إن كان قد نُفِّذ",
+    },
+    "runs.gate_fate.denied": {
+        "en": "it was denied, and the call did not run",
+        "ar": "رُفض الطلب، ولم يُنفَّذ الإجراء",
+    },
+    "runs.gate_fate.expired": {
+        "en": "its approval expired unanswered, and the call did not run",
+        "ar": "انتهت مهلة الموافقة دون رد، ولم يُنفَّذ الإجراء",
+    },
     "runs.diagnosis_title": {"en": "Diagnosis", "ar": "التشخيص"},
     "runs.diagnosis_running": {"en": "Diagnosing…", "ar": "جارٍ التشخيص…"},
     "runs.open_page": {"en": "Open its page", "ar": "افتح صفحته"},

@@ -507,19 +507,27 @@ def test_a_space_erased_leaves_other_spaces_turns(store) -> None:
 # ── the review of f9a455918 ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("resuming", [False, True], ids=["claimed", "resuming"])
-def test_a_delete_racing_an_approve_keeps_the_persons_decision(store, web, resuming) -> None:
-    """F1: a gate a person answered keeps their decision; one whose drive was
-    cut mid-resume is an error with it (its call may have run) -- never
-    "no longer needed" (D2)."""
+@pytest.mark.parametrize(("resuming", "drove"), [(False, False), (True, False), (True, True)],
+                         ids=["claimed", "resuming", "resuming-driven"])
+def test_a_delete_racing_an_approve_keeps_the_persons_decision(store, web, resuming, drove) -> None:
+    """F1: a gate a person answered keeps their decision -- never "no longer
+    needed" (D2). One whose drive had started is an error with it (its call
+    may have run); one whose drive never started is settled, its call
+    recorded as not run (the review of ec538d779, L1:
+    tests/test_chat_gone_race_lows.py)."""
+    from kazma_ui.chat_runs_end import begin_drive, drive_clock
+
     chat = _waiting_chat(store)
     hitl_gates.claim_gate(chat.gate_id, "approve", "owner")
     if resuming:
         hitl_gates.mark_resuming(chat.gate_id)
+    if drove:
+        assert begin_drive(chat.thread_id, chat.gate_id, since=drive_clock())
     assert web.client.delete(f"/api/chat/sessions/{chat.session_id}").json() == {"status": "ok"}
     gate = hitl_gates.gate_for(chat.gate_id)
     assert gate is not None and gate.decision == "approve" and gate.actor == "owner", gate
-    assert gate.state == ("error" if resuming else "settled"), gate
+    assert gate.state == ("error" if drove else "settled"), gate
+    assert gate.ended_reason == "chat_deleted"
     assert hitl_gates.live_gates(chat.thread_id) == []
 
 
@@ -678,38 +686,112 @@ def test_an_archived_chats_cut_turn_is_never_continued(store) -> None:
         assert asyncio.run(scenario()) == [showing.thread_id]
 
 
+def _went_away_lines(caplog: Any, thread_id: str) -> list[str]:
+    """The end's "went away" lines for THIS thread: a line of another test's
+    leftover work in the same process is not this test's (2026-11-28)."""
+    return [r.getMessage() for r in caplog.records if r.name == "kazma_ui.chat_runs_end"
+            and "went away (" in r.getMessage() and f"thread={thread_id[:12]} " in r.getMessage()]
+
+
 def test_two_ends_at_once_report_and_log_once(store, monkeypatch, caplog) -> None:
-    """F6: both ends read the waiting gate before either ends it; one moves
-    it, and only that one reports and logs."""
+    """F6: two ends of one waiting chat at once; the first to take what is
+    left reads the gate only once the other end is under way too. One takes
+    it all and reports and logs; the other finds nothing. Every wait is a
+    bounded condition (it was a 3 s barrier, and on a loaded Linux run the
+    end whose gate write lost took the reply turn first: both reported --
+    a real race, closed by ``chat_runs_end._one_end_at_a_time``)."""
+    import contextlib
     import logging
 
+    from kazma_ui import chat_runs_end
     from kazma_ui.chat_runs_end import end_chat_runs
 
     chat = _waiting_chat(store)
-    real = hitl_gates.live_gates
-    both = threading.Barrier(2)
+    real_live, real_going = hitl_gates.live_gates, chat_runs_end._going_away
+    under_way = threading.Condition()
+    ends = [0]
+    first: list[bool] = []
 
-    def read_together(thread_id: str) -> list[Any]:
-        rows = real(thread_id)
-        try:
-            both.wait(timeout=3)
-        except threading.BrokenBarrierError:
-            pass
-        return rows
+    @contextlib.contextmanager
+    def going(thread_id: str) -> Any:
+        with real_going(thread_id):
+            with under_way:
+                ends[0] += 1
+                under_way.notify_all()
+            yield
 
-    monkeypatch.setattr(hitl_gates, "live_gates", read_together)
+    def read_once_both_are_under_way(thread_id: str) -> list[Any]:
+        if not first:
+            first.append(True)
+            with under_way:
+                assert under_way.wait_for(lambda: ends[0] >= 2, timeout=30), "the second end never started"
+        return real_live(thread_id)
+
+    monkeypatch.setattr(chat_runs_end, "_going_away", going)
+    monkeypatch.setattr(hitl_gates, "live_gates", read_once_both_are_under_way)
 
     async def scenario() -> list[Any]:
         return list(await asyncio.gather(end_chat_runs(chat.thread_id, reason="chat_deleted"),
                                          end_chat_runs(chat.thread_id, reason="chat_deleted")))
 
     with caplog.at_level(logging.INFO, logger="kazma_ui.chat_runs_end"):
-        first, second = asyncio.run(scenario())
-    assert first.gates + second.gates == 1, (first, second)
-    assert [first.turn, second.turn].count(True) == 1
-    assert [first.recorded, second.recorded].count(True) == 1
-    assert sum("went away" in r.getMessage() for r in caplog.records) == 1, caplog.text
+        one, other = asyncio.run(scenario())
+    assert one.gates + other.gates == 1, (one, other)
+    assert [one.turn, other.turn].count(True) == 1
+    assert [one.recorded, other.recorded].count(True) == 1
+    assert len(_went_away_lines(caplog, chat.thread_id)) == 1, caplog.text
     _ended_cleanly(chat, "chat_deleted")
+
+
+def test_control_two_ends_without_the_end_lock_both_report(store, monkeypatch, caplog) -> None:
+    """Control: without ``_one_end_at_a_time``, both ends read the gate,
+    the one whose write wins waits (bounded) until the loser took the reply
+    turn -- the Linux run's order, forced -- and both report and log."""
+    import contextlib
+    import logging
+
+    from kazma_ui import chat_runs_end
+    from kazma_ui.chat_runs_end import end_chat_runs
+
+    chat = _waiting_chat(store)
+    real_live, real_end, real_take = hitl_gates.live_gates, hitl_gates.end_gate, reply_sink.take_reply_turn
+    readers = threading.Condition()
+    read = [0]
+    took = threading.Event()
+
+    def read_together(thread_id: str) -> list[Any]:
+        rows = real_live(thread_id)
+        with readers:
+            read[0] += 1
+            readers.notify_all()
+            assert readers.wait_for(lambda: read[0] >= 2, timeout=30), "the other end never read"
+        return rows
+
+    def end_then_let_the_loser_take_the_turn(*a: Any, **k: Any) -> Any:
+        row = real_end(*a, **k)
+        if row is not None:
+            assert took.wait(timeout=30), "the loser never took the reply turn"
+        return row
+
+    def take(thread_id: str) -> str:
+        got = real_take(thread_id)
+        if got:
+            took.set()
+        return got
+
+    monkeypatch.setattr(chat_runs_end, "_one_end_at_a_time", lambda thread_id: contextlib.nullcontext())
+    monkeypatch.setattr(hitl_gates, "live_gates", read_together)
+    monkeypatch.setattr(hitl_gates, "end_gate", end_then_let_the_loser_take_the_turn)
+    monkeypatch.setattr(reply_sink, "take_reply_turn", take)
+
+    async def scenario() -> list[Any]:
+        return list(await asyncio.gather(end_chat_runs(chat.thread_id, reason="chat_deleted"),
+                                         end_chat_runs(chat.thread_id, reason="chat_deleted")))
+
+    with caplog.at_level(logging.INFO, logger="kazma_ui.chat_runs_end"):
+        one, other = asyncio.run(scenario())
+    assert one.gates + other.gates == 1 and [one.turn, other.turn].count(True) == 1
+    assert len(_went_away_lines(caplog, chat.thread_id)) == 2, caplog.text
 
 
 # ── the class gate ───────────────────────────────────────────────────────
