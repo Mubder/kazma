@@ -39,5 +39,8 @@ plaintext, and maskers missed token shapes Kazma itself holds.
   `config_save`'s value when its key is secret, and Bearer tokens are masked
   on every card. Census gate: `tests/test_token_shapes_masked.py` (the
   form maskers that post their value back are declared: a masked token would
-  be saved as stars).
+  be saved as stars). A phrase (`password is hunter2`, `كلمة المرور هي …`,
+  a fullwidth colon, joined `كلمةالمرور`, `رمز المرور`) is masked by the
+  value's shape in `errors` and in `mask_urls_in_text`; the patterns are
+  literals the regex sweep times (`tests/test_credential_phrases_masked.py`).
 

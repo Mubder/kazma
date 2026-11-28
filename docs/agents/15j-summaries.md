@@ -36,7 +36,8 @@ queued by the maintenance sweep with at most two weeks in flight.
   user forgets is a tombstone its week never writes again (`_covered`: a
   topic mostly made of another summary's turns is that summary, even after a
   late turn joins it). The model's text passes `prompt_fence.filter_injection`
-  and a credential mask. **The store is a compare-and-set** (`_store`,
+  and a credential mask (`_scrub`: its own colon rule, plus the phrase
+  forms in `mask_urls_in_text`; "token: expired" stays). **The store is a compare-and-set** (`_store`,
   Memory audit M05, 2026-10-13): the model call takes up to a minute per
   topic, so inside one write transaction the source turns are read again --
   a text written from a turn forgotten meanwhile is never stored (the turns

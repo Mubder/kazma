@@ -56,8 +56,11 @@ code it names.
   opener with no ">" is redacted too), the provider address's version test
   and its "/v1/v1" trim (`normalize_provider_url`), the attachment-name
   scan (`extract_active_attachments`) and the problem report's e-mail
-  scrubber (`problem_report._EMAIL`). Gate: `tests/test_regexes_stay_linear.py`
-  (the old patterns' answers on random inputs, their growth as the control).
+  scrubber (`problem_report._EMAIL`), and the credential maskers
+  (`errors._REDACT_SECRETS` and the phrase patterns: a long run of letters
+  used to take minutes on the URL-userinfo alternative). Gate: `tests/test_regexes_stay_linear.py`
+  (the old patterns' answers on random inputs, their growth as the control)
+  and `tests/test_credential_phrases_masked.py`.
   Measure before changing a flagged pattern: the schedule parser, the bare
   host and file-path patterns were linear on their real input.
 - **Smaller ones:** maps keyed by server frames in the turn view are

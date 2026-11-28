@@ -111,10 +111,18 @@ def mask_url_credentials(value: Any) -> Any:
 
 def mask_urls_in_text(text: str) -> str:
     """Mask every URL password inside free text (a ``repr``, a log line),
+    credential phrases in either language (``errors.hide_prose_secrets``),
     and every token-shaped value (``security.token_shapes``: a ``Bearer``
     credential in a command, an ``xapp-`` token in a log line). Every masker
     built on this one -- the log writer, :func:`mask_url_credentials_deep`,
-    the approval cards -- reads the one table of token shapes."""
+    the approval cards -- reads the one table of token shapes.
+
+    ASCII ``name: value`` and ``name=value`` stay in ``errors.redact_secrets``.
+    This one masks a fullwidth colon, ``password is <secret>``, and the
+    Arabic label phrases, so a log line that never reaches the error
+    redactor still hides them. "token: expired" is left as written.
+    """
+    from kazma_core.errors import hide_prose_secrets
     from kazma_core.security.token_shapes import mask_tokens
 
     if "://" in text:
@@ -126,7 +134,7 @@ def mask_urls_in_text(text: str) -> str:
         text = _QUERY_PASSWORD.sub(
             lambda q: q["key"] + (URL_PASSWORD_MASK if q["value"] else ""), text
         )
-    return mask_tokens(text, URL_PASSWORD_MASK)
+    return mask_tokens(hide_prose_secrets(text, URL_PASSWORD_MASK), URL_PASSWORD_MASK)
 
 
 def mask_url_credentials_deep(node: Any, _depth: int = 0) -> Any:
