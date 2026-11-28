@@ -432,6 +432,35 @@
   store lacking a step or left unfinished refuses the run),
   `tests/test_longmemeval_replay.py`, `tests/test_recall_room_by_rank.py`
   (the fault's EN and AR cases and its class), `tests/test_benchmarks_page.py`.
+- **Scale and speed, no model call** (2026-11-28, the memory plan's W8).
+  `scripts/memory_scale_speed.py` fills a private store with its own INSERT
+  (`episode_row` and the embedder's vector inline, batch-encoded, then
+  `extract_and_apply_beliefs_sync(private=True)`; no deep pass, no mirror,
+  passages off; not `write_episode`). `fill_s` and the 100x gate measure that
+  write cost. The store is 1, 10 and 100 times the episodes in
+  `tests/fixtures/memory_bench/live_lengths.json` (the count and the length
+  percentiles; the text is synthetic) and times `recall()` on a fixed English
+  and Arabic question set: p50, p95, paid model calls and tokens. Those token
+  counts stay 0 because recall runs `local_only` and the guard patches httpx
+  only. Each size gets its own embedder wrapper, so the question's local
+  embedding is counted for that size (one wrapper is served from recall's
+  question-vector cache after the first). One untimed recall per size is
+  `warmup_s`. `size` estimates a fill from a measured sample and `run` refuses
+  100x at two hours or over. A failed priority drop is reported as `not lowered`.
+  `scripts/longmemeval_bench.py size` counts LongMemEval-M's rounds, tokens
+  and distinct embed texts (one question at a time; the file is not parsed
+  whole) and estimates the embedding of the distinct non-empty texts from a
+  length-stratified sample. The sample's batches pad across length quartiles;
+  a retrieve run pads within near-equal lengths. It does not retrieve or
+  answer. The file stays outside the repository. On this machine it is
+  `G:\BenchData\longmemeval-2026-11-21`; the script takes `--data` and does
+  not default to that path. Timed runs: not yet, they need a quiet machine
+  (the plan's W8). Gates: `tests/test_memory_scale_speed.py` (sizes as
+  declared; a planted slow recall in p95, the same run without it as the
+  control; each size of a two-factor run embeds its questions, and one shared
+  wrapper leaves the second size at 0), `tests/test_longmemeval_m_size.py`
+  (a fixture; estimating from every round, and a report that quotes the text,
+  as the controls).
 - **Dataset v9: the facts under the names the product holds** (2026-11-26,
   the memory plan's W6, the framework audit's F-C (5)). v8 seeded the user's
   role as `job_title` and name as `name`, names no writer of the product keeps

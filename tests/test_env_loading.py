@@ -305,6 +305,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "measures recall on the retrieval benchmark's private temp stores with recorded vectors; "
         "reads no install"
     ),
+    "scripts/memory_scale_speed.py": (
+        "fills private temporary stores and times recall on synthetic text; an install's "
+        ".env would point the writes at that install, and the bench makes no paid call"
+    ),
     "scripts/knowledge_bench.py": (
         "builds and scores the Knowledge retrieval benchmark on a private store under a "
         "temporary data directory; an install's .env would point it at the install"
