@@ -307,16 +307,82 @@ def test_the_last_days_of_a_named_month_are_that_months(english, arabic):
     assert says_day(arabic, "2026-09-25", "2026-09-25") is False
 
 
-@pytest.mark.parametrize(("english", "arabic"), [
-    ("What did I say in August about the last 3 days?", "شنو قلت لك في أغسطس عن آخر ٣ أيام؟"),
+@pytest.mark.parametrize("arabic", [
+    "وش قلت لي آخر كم يوم؟",
+    "وش قلت لي هالكم يوم؟",
+    "ماذا قلت لك في الكم يوم اللي فاتت؟",
 ])
-def test_a_named_month_wins_when_the_stretch_is_not_of_it(english, arabic):
-    """On main, a named month was the period. A stretch that is not "of" that
-    month still leaves the month as the period."""
+def test_kam_after_akhir_is_the_last_few_days(arabic):
+    """كم right after آخر is a few: the last three days, Gulf and the فاتت form.
+
+    The count is the 3 of "قبل كم يوم". "كم يوم فات" stays the question."""
+    en = _read("What did I tell you in the last few days?")
+    ar = _read(arabic)
+    three = _read("What did I tell you in the last 3 days?")
+    assert en is not None and ar is not None and three is not None
+    assert (en.start, en.end) == (ar.start, ar.end) == (three.start, three.end) == (_day(2026, 9, 22), NOW + 1)
+    assert says_day("the last few days", "2026-05-31", TOLD_ON) is True
+    assert says_day("the last few days", "2026-05-28", TOLD_ON) is True
+    assert says_day("the last few days", "2026-05-27", TOLD_ON) is False
+    assert says_day(arabic, "2026-05-31", TOLD_ON) is True
+    assert says_day(arabic, "2026-05-28", TOLD_ON) is True
+    assert says_day(arabic, "2026-05-27", TOLD_ON) is False
+    assert says_day("قبل كم يوم", "2026-05-31", TOLD_ON) is False
+
+
+@pytest.mark.parametrize(("english", "arabic"), [
+    ("What did I tell you in the last 3 days about my trip in August?",
+     "وش قلت لك آخر ثلاث أيام عن رحلتي في أغسطس؟"),
+    ("What did I say in August about the last 3 days?",
+     "شنو قلت لك في أغسطس عن آخر ٣ أيام؟"),
+])
+def test_an_untied_stretch_keeps_its_window(english, arabic):
+    """A month that is not tied to the stretch stays the topic.
+
+    On this branch before the fix, naming August anywhere made the period
+    the whole of August."""
     en, ar = _read(english), _read(arabic)
+    stretch = _read("What did I tell you in the last 3 days?")
+    assert en is not None and ar is not None and stretch is not None
+    assert (en.start, en.end) == (ar.start, ar.end) == (stretch.start, stretch.end)
+    assert (en.start, en.end) != (_day(2026, 8, 1), _day(2026, 9, 1))
+
+
+@pytest.mark.parametrize(("english", "arabic"), [
+    ("What did I tell you in the last 5 days of last month?",
+     "وش قلت لك آخر خمس أيام من الشهر الماضي؟"),
+    ("What did I tell you in the last 5 days of last month?",
+     "وش قلت لك آخر خمس أيام من الشهر اللي فات؟"),
+])
+def test_the_last_days_of_last_month_are_that_months(english, arabic):
+    """Tied to last month: that month's last days, not the whole month.
+
+    On this branch before the fix, "من الشهر الماضي" read all of last month."""
+    en, ar = _read(english), _read(arabic)
+    last_five = (_day(2026, 8, 27), _day(2026, 9, 1))
     assert en is not None and ar is not None
-    august = (_day(2026, 8, 1), _day(2026, 9, 1))
-    assert (en.start, en.end) == (ar.start, ar.end) == august
+    assert (en.start, en.end) == (ar.start, ar.end) == last_five
+    assert (en.start, en.end) != (_day(2026, 8, 1), _day(2026, 9, 1))
+    assert says_day(english, "2026-08-31", "2026-09-25") is True
+    assert says_day(arabic, "2026-08-27", "2026-09-25") is True
+    assert says_day(english, "2026-08-26", "2026-09-25") is False
+    assert says_day(arabic, "2026-08-01", "2026-09-25") is False
+    assert says_day(english, "2026-09-25", "2026-09-25") is False
+    assert says_day(arabic, "2026-09-25", "2026-09-25") is False
+
+
+@pytest.mark.parametrize(("english", "arabic"), [
+    ("What did I tell you in the past 10 days about June?",
+     "وش قلت لك آخر عشر أيام عن يونيو؟"),
+    ("What did I tell you over the past 10 days about the August trip?",
+     "وش قلت لك آخر عشر أيام عن سفرة أغسطس؟"),
+])
+def test_a_bare_month_beside_a_stretch_keeps_the_stretch(english, arabic):
+    """The control this branch already held: a bare month is not the period."""
+    en, ar = _read(english), _read(arabic)
+    stretch = _read("What did I tell you in the past 10 days?")
+    assert en is not None and ar is not None and stretch is not None
+    assert (en.start, en.end) == (ar.start, ar.end) == (stretch.start, stretch.end)
 
 
 def test_a_counted_stretch_includes_today_through_now():
@@ -368,9 +434,17 @@ def test_every_arabic_number_word_is_an_ago_and_every_this_year_phrase_is_read()
         assert word not in tw._SPAN_AR_GONE.pattern, word
         assert word not in tw._SPAN_AR_MSA.pattern, word
         assert word not in tw._SPAN_AR_LAST.pattern, word
+    few = "".join(p.pattern for p in tw._SPAN_AR_FEW)
+    assert "كم" in few and "كذا" not in few
+    assert any(p.search(" اخر كم يوم") for p in tw._SPAN_AR_FEW)
+    assert any(p.search(" هالكم يوم") for p in tw._SPAN_AR_FEW)
+    assert any(p.search(" الكم يوم اللي فاتت") for p in tw._SPAN_AR_FEW)
+    assert tw._SPAN_EN.search("the last few days")
+    assert tw._SPAN_EN.search("the last few weekends") is None
     planted = re.compile(rf"(?:اخر\s+)?({tw._AR_NUMBER}|\d{{1,3}})\s+يوم\s+فات")
     assert planted.search("كم يوم فات")
     assert tw._SPAN_AR_GONE.search(" كم يوم فات") is None
     assert re.search(tw.TIME_AFTER_EN, "past 10 days")
+    assert re.search(tw.TIME_AFTER_EN, "the last few days")
     old_place = r"(?:last|this|past)\s+(?:week|month|year)"
     assert re.search(old_place, "past 10 days") is None
