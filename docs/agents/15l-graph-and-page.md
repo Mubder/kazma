@@ -121,6 +121,11 @@ drawing, the rest by extraction.
   what Kazma knows, conversations; the clean-up and the health numbers are
   folded (`#memory-cleanup`, `#memory-health`, `components/memory_health.html`).
   Its words are the catalog slice `i18n/catalog/memory_page.py` (EN/AR).
+  A week, a month and a project are named from the stored key (a project
+  from its first and last week's keys), in the page's language, through
+  `KazmaFormat`, and not from the stored instant in the browser's zone.
+  A project with no week part is named from the months of its stored
+  stretch, which the server read at midday (`span_months`).
   **Restore takes only a backup of the memory database**: the list showed the
   operations database's copies (`memory_ops_<ts>.db`) beside the memory
   ones with the same Restore button, and restoring one replaced every memory

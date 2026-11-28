@@ -3575,22 +3575,15 @@ def _spans(rows: list[Any], weeks: dict[str, tuple[str, str]] | None = None) -> 
 
 
 def _project_weeks(conn: sqlite3.Connection, rows: list[Any]) -> dict[str, tuple[str, str]]:
-    """Each project roll-up's first and last part's week key (ISO keys sort
-    as their weeks do): its stretch, with no zone (the follow-up review's L2:
-    read at midday, a project a day's zone away moved a day)."""
+    """Each project roll-up's first and last part's week key.
+
+    :func:`kazma_core.memory.topic_summaries.project_week_keys` reads them
+    (ISO keys sort as their weeks do, with no zone). Read at midday, a
+    project a day's zone away moved a day (the follow-up review's L2)."""
+    from kazma_core.memory.topic_summaries import project_week_keys
+
     ids = [str(row["id"]) for row in rows if str(row["level"] or "") == "project"]
-    if not ids:
-        return {}
-    try:
-        found = conn.execute(
-            "SELECT p.rollup_id, MIN(s.period_key), MAX(s.period_key) FROM memory_summary_parts p "
-            "JOIN memory_summaries s ON s.id = p.part_id AND s.level = 'week' "
-            f"WHERE p.rollup_id IN ({','.join('?' for _ in ids)}) GROUP BY p.rollup_id", ids).fetchall()
-    except sqlite3.OperationalError:
-        logger.warning("[recall] a project's weeks could not be read; its stretch is read at midday",
-                       exc_info=True)
-        return {}
-    return {str(r[0]): (str(r[1]), str(r[2])) for r in found if r[1] and r[2]}
+    return project_week_keys(conn, ids)
 
 
 def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:

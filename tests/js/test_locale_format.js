@@ -73,6 +73,39 @@ ok("control: noun + number was ungrammatical", "4539 " + "مقطع" !== arF.coun
 ok("control: toLocaleString ignores the page language",
   !ARABIC.test(new Date(twoHoursAgo).toLocaleString("en-US")));
 
+// A stored week and month are named from the key, in UTC. Week 2026-W23
+// is Monday 1 June. The instant a Kuwait server stored for that midnight
+// is 31 May 21:00 UTC, which a UTC clock reads as May.
+const KUWAIT_JUNE = "2026-05-31T21:00:00Z";
+ok("control: the Kuwait instant is May in UTC",
+  new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(KUWAIT_JUNE))
+    === "May 2026");
+ok("week 23 is 1 June, not May", en.weekOfKey("2026-W23") === "Jun 1, 2026", en.weekOfKey("2026-W23"));
+ok("June's key is June", en.monthOfKey("2026-06") === "June 2026", en.monthOfKey("2026-06"));
+ok("week 40 starts in September", en.monthOfKey("2026-W40") === "September 2026", en.monthOfKey("2026-W40"));
+ok("week 40 ends in October", en.monthOfKey("2026-W40", "end") === "October 2026", en.monthOfKey("2026-W40", "end"));
+ok("week 1 of 2026 is 29 December 2025", en.weekOfKey("2026-W01") === "Dec 29, 2025", en.weekOfKey("2026-W01"));
+ok("a week the year does not have is empty", en.weekOfKey("2025-W53") === "" && en.monthOfKey("2026-W00") === "");
+ok("a month number and a project key are empty",
+  en.monthOfKey("2026-13") === "" && en.weekOfKey("project:abcd") === "" && en.monthOfKey("2026-W54") === "");
+const arWeek = ar.weekOfKey("2026-W23");
+ok("Arabic week 23 is June's digits", arWeek.indexOf("06") !== -1 && arWeek.indexOf("05") === -1, arWeek);
+const arJune = ar.monthOfKey("2026-06");
+ok("Arabic June is يونيو", arJune.indexOf("يونيو") !== -1 && arJune.indexOf("مايو") === -1, arJune);
+const arEnd = ar.monthOfKey("2026-W40", "end");
+ok("Arabic week 40 ends in أكتوبر", arEnd.indexOf("أكتوبر") !== -1 && arEnd.indexOf("سبتمبر") === -1, arEnd);
+const byKeys = en.projectMonths(["2026-W23", "2026-W40"], ["2026-01", "2026-02"]);
+ok("a project's weeks name it", byKeys.from === "June 2026" && byKeys.to === "October 2026",
+  JSON.stringify(byKeys));
+const byStored = en.projectMonths([], ["2026-06", "2026-09"]);
+ok("no week parts fall back to the stored months",
+  byStored.from === "June 2026" && byStored.to === "September 2026", JSON.stringify(byStored));
+const blank = en.projectMonths([], []);
+ok("no keys and no months are blank", blank.from === "" && blank.to === "");
+const arStored = ar.projectMonths(null, ["2026-06", "2026-09"]);
+ok("Arabic stored months are يونيو to سبتمبر",
+  arStored.from.indexOf("يونيو") !== -1 && arStored.to.indexOf("سبتمبر") !== -1, JSON.stringify(arStored));
+
 if (fail) {
   console.log(fail + " failed");
   process.exit(1);

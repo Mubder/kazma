@@ -1856,18 +1856,24 @@
         return;
       }
       // A week, or a month or project roll-up above the weeks (part G):
-      // named by its stretch of time, in the page's language.
+      // named from its stored key, in the page's language. The stored
+      // instant is the server's own zone: reading s.period_start here
+      // named a Kuwait June "May" in a UTC browser.
       function _summaryWhen(s) {
         const fmt = window.KazmaFormat;
-        const month = function(ts) { return fmt ? fmt.dateTime(ts, { month: 'long', year: 'numeric' }) : ''; };
+        const monthOf = function(key, edge) {
+          return fmt && fmt.monthOfKey ? fmt.monthOfKey(key, edge) : '';
+        };
         if (s.level === 'month') {
-          return _mt('memory.console.month_of', 'Month of {month}', { month: month(s.period_start) });
+          return _mt('memory.console.month_of', 'Month of {month}', { month: monthOf(s.period_key) });
         }
         if (s.level === 'project') {
-          return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}',
-            { from: month(s.period_start), to: month(Math.max(s.period_start, (s.period_end || 0) - 1)) });
+          const named = fmt && fmt.projectMonths
+            ? fmt.projectMonths(s.span_keys, s.span_months) : { from: '', to: '' };
+          return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}', named);
         }
-        return _mt('memory.console.week_of', 'Week of {date}', { date: s.period_start ? _memDay(s.period_start) : '' });
+        const when = fmt && fmt.weekOfKey ? fmt.weekOfKey(s.period_key) : '';
+        return _mt('memory.console.week_of', 'Week of {date}', { date: when });
       }
       el.innerHTML = rows.map(function(s) {
         const size = window.kazmaCount('memory.console.summary_turns', s.turn_count || 0) +

@@ -698,6 +698,48 @@ def test_admin_rederivation_gate_catches_the_drifted_copy():
     assert _admin_rederivations(fixed) == []
 
 
+# ── A project's week keys are read in one place (2026-11-28) ──────────────
+#
+# recall._project_weeks and the Memory page's span each ran MIN/MAX over
+# memory_summary_parts. The page's copy filtered with a GLOB and recall's
+# with level = 'week'. topic_summaries.project_week_keys is the one query.
+
+_PROJECT_WEEK_HOME = "kazma-core/kazma_core/memory/topic_summaries.py"
+_PROJECT_WEEK_MIN = re.compile(r"MIN\s*\(\s*[A-Za-z_]\w*\.period_key\s*\)")
+
+
+def _project_week_queries(text: str) -> list[int]:
+    return [i for i, line in enumerate(text.splitlines(), 1) if _PROJECT_WEEK_MIN.search(line)]
+
+
+def test_a_projects_week_keys_are_read_in_one_place():
+    found: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        if rel == _PROJECT_WEEK_HOME:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        found += [f"{rel}:{line}" for line in _project_week_queries(text)]
+    assert not found, (
+        "A project's first and last week key is read in topic_summaries.project_week_keys. "
+        "Recall and the page both call it.\n  " + "\n  ".join(found)
+    )
+    home = (REPO_ROOT / _PROJECT_WEEK_HOME).read_text(encoding="utf-8")
+    assert len(_project_week_queries(home)) == 1
+
+
+def test_control_a_second_project_week_query_is_found():
+    """The negative control: recall's old query and the page's GLOB query."""
+    old = (
+        'found = conn.execute(\n'
+        '    "SELECT p.rollup_id, MIN(s.period_key), MAX(s.period_key) FROM memory_summary_parts p "\n'
+        ')\n'
+        '"SELECT MIN(w.period_key) AS first_key, MAX(w.period_key) AS last_key "\n'
+    )
+    assert _project_week_queries(old) == [2, 4]
+    assert _project_week_queries("from topic_summaries import project_week_keys\n") == []
+
+
 # ── 2e. A write the server refused is not reported as saved (2026-09-22) ──
 #
 # 24 save/delete handlers in the web UI did `await fetch(...)`, threw the
