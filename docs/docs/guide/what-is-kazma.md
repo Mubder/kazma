@@ -48,7 +48,11 @@ Kazma runs on your machine with your keys. There is no Kazma cloud and no
 account with us. Your chats, memories and files stay in your install, and
 they leave it only for services you connect: your model provider, your mail,
 X. Secrets live in an encrypted vault (AES-256-GCM). Programs that a tool
-starts never get them, and every screen and API shows them masked. To move a
+starts never get them, and every screen and API shows them masked. A
+credential phrase in an error, an approval, the log or a weekly summary is
+masked by the value's shape, in English and in Arabic. A plain word after
+"is", with no separator, stays
+([What Kazma masks](../security/safety-design.md#what-kazma-masks)). To move a
 whole install to another machine or operating system, use `kazma migrate`.
 You can also back up your settings to a file and restore them without typing
 a key again.

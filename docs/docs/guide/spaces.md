@@ -331,6 +331,33 @@ of who is in which, so a restore puts every chat back in its space.
   the machine is restic's encrypted copy. The plain copies (a cloud
   provider's zip, an rclone folder) are refused and the backup says so.
 
+## The soak {#the-soak}
+
+`scripts/spaces_soak.py` is the harness for a long run with many spaces.
+It is the harness, and the long run has not been run. It builds a
+throwaway install, never one you use, with Spaces on, its owner, several
+people and shared spaces. Each cycle does work through Kazma's own routes:
+a chat turn that stores and recalls, a reminder, a swarm task, a library
+page and a document. Each cycle is a real restart. After every cycle it
+reads every store and every person's pages and checks that nothing of one
+space shows in another, that a row never loses its space, and that nothing
+written is missing. The model is a stub. Nothing is fetched. It never
+calls a real provider or the real embedder.
+
+Spaces is still not switched on in any release. The report of the long
+run is what an outside review would read.
+
+```bash
+python scripts/spaces_soak.py --cycles 6 --people 4 --shared 2 --report spaces-soak.json
+```
+
+`--minutes` runs for a length of time. `--work-dir` names a folder to
+keep. `--database-url-from` names an environment variable that holds a
+Postgres address. The address itself never goes on the command line, and
+that run uses its own database. `--check-only` checks a kept folder
+again. `--plant-wrong-space` and `--control-no-work` are the harness's
+own checks that a bad run fails. A run with either of those must fail.
+
 ## What Spaces does not promise
 
 - **Spaces keeps people who use Kazma apart. It does not keep anything from

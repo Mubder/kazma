@@ -121,6 +121,17 @@ run in a context with no authority at all (`detached_context`).
   Paused pipelines are restored at boot as paused in-flight tasks (they do not
   count against admission), so reject and cancel reach them.
 
+### Admission slots and active tasks {#admission-slot}
+
+An admitted task keeps its slot until its ending is stored. The limit
+counts the tasks that still hold a slot. Finishing the run does not free
+the slot. The write of the ending does. A paused task keeps its slot while
+it waits on a person. A paused pipeline restored at boot does not count
+against admission, as the run section above says. A task whose ending is
+recorded is not active to any caller while that write is still in flight.
+The list of active tasks leaves it out, a lookup does not return it, and
+cancel does not record "cancelled" over a success.
+
 ### 1.0d What reaches a model is fenced
 
 A worker's text is what it read and wrote (web pages, files, other tools'
@@ -295,7 +306,7 @@ def __init__(
 | Attribute | Type | Purpose |
 |---|---|---|
 | `_workers` | `dict[str, SwarmWorker]` | Registered workers. |
-| `_active_tasks` | `dict[str, SwarmTask]` | In-flight tasks. |
+| `_active_tasks` | `dict[str, SwarmTask]` | Tasks that hold an admission slot. A finished task stays until its ending is stored, and is not active to a caller while it does ([Admission slots](#admission-slot)). |
 | `_task_handles` | `dict[str, asyncio.Task]` | Handles for cancel. |
 | `_task_history` | `dict[str, SwarmTask]` | LRU-capped (`_max_history=500`). |
 | `_routing_engine` | `UnifiedRouter` | Auto-routing for `workers=["auto"]`. |

@@ -35,19 +35,34 @@ itself.
 
 ## When a chat goes away
 
-Deleting or clearing a chat (`/reset`, the Dashboard's clear-all, clearing
-waiting approvals), moving it to another space or erasing its space ends what
-the chat had running or waiting: a running turn is stopped, and an approval
-card it waited on is closed as no longer needed. An approval you had already
-answered keeps your answer, and an approved action that had not started yet
-does not start once the chat is gone. Archiving a chat ends only what waits:
-an answer still being written finishes and is saved in the archived chat. A
-request a restart cut off ends too, and the archived chat says so, so when
-you un-archive it you see why it is not offered to continue. The turn is
-listed as cancelled with why, such as "The chat was deleted", and what
-became of its approval (denied, not run, or "whether it ran is not known"
-when the action had already started), under `/runs all` for a day, and no
-incident is opened for it.
+Deleting a chat, clearing it (`/reset`, the Dashboard's clear-all, clearing
+its waiting approvals), moving it to another space, erasing its space, or
+the chat store dropping it because the store is full, ends what that chat
+had running or waiting. A running turn is stopped. An approval card it
+waited on is closed as no longer needed. An approval you had already
+answered keeps your answer. An approved action that had not started does
+not start once the chat is gone. Approve on a chat app is the same: the
+button does not run the call after the chat is deleted, and the card no
+longer reads Approved.
+
+Archiving ends only what that chat is waiting on. An answer still being
+written finishes and is saved in the archived chat. A request a restart
+cut off ends too, and the archived chat says so, so when you un-archive it
+you see why it is not offered to continue.
+
+Only that chat. Archiving a chat app's extra copy of the same thread
+leaves the chat you see, and the turn it is waiting on, running. Deleting
+that extra copy leaves the chat you see as well. Deleting the chat you
+see, when only an archived copy is left, takes the thread's saved state
+with it. The copy's rows stay, and the thread is not marked ended. Two
+chats you can both see keep the thread's state when one of them is
+deleted. A swarm approval carried on the same thread is the swarm's.
+Deleting the chat leaves that approval open.
+
+The turn is listed as cancelled with why, such as "The chat was deleted",
+and what became of its approval (denied, not run, or "whether it ran is
+not known" when the action had already started), under `/runs all` for a
+day, and no incident is opened for it.
 
 ## Where you are told
 
