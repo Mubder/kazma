@@ -144,7 +144,12 @@ related or not.
    its own day ("what did I buy last month?"). "At first", "originally",
    "before we moved", "في البداية" and "قبل ما" show a fact's earlier values
    right before the current one, each with the months it held. A question
-   about a day ahead ("what's on March 22?") is left as it is.
+   about a day ahead ("what's on March 22?") is left as it is. Since 28
+   November 2026 a question can also name three weeks ago, this year, the
+   start of a month, a counted stretch through today, or the Gulf "آخر كم
+   يوم". A month or a year that says when it was said wins over a stretch
+   that only names the topic. The questions and the periods are
+   [below](#question-time).
 7. **Follow-ups.** A short message that goes on from the one before it
    ("And her sister?", "Yes, book it for Saturday", "ووين يشتغل؟") is
    searched together with your message before it, with no model involved.
@@ -178,6 +183,48 @@ related or not.
     "nothing found". The TUI's memory search and
     `GET /api/memory/graph/search` (its `degraded` field) say it too.
 13. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+
+### Questions and the period they read {#question-time}
+
+These are questions from `tests/test_memory_time_words.py`, read on
+25 September 2026 at noon UTC, the clock that file uses. Each Arabic
+question reads the same period as the English one beside it. A period
+written as "up to" a date stops at the start of that date. A stretch
+"through the moment asked" includes that noon.
+
+| English | Arabic | Period |
+|---|---|---|
+| What did I do three weeks ago? | شنو سويت قبل ثلاث أسابيع؟ (Gulf); ماذا فعلت قبل ثلاثة أسابيع؟ (MSA); شنو سويت قبل حوالي ثلاث أسابيع؟ | 31 August 2026 up to 9 September 2026 |
+| What did we talk about this year? | شنو تكلمنا عنه السنة هذي؟ (Gulf); شنو تكلمنا عنه هذه السنة؟ and شنو تكلمنا عنه هذا العام؟ (MSA). The same reading: السنة هذه، العام هذا، هالعام | 1 January 2026 through the moment asked on 25 September 2026. A question about what was said |
+| What did we talk about at the start of August? | شنو تكلمنا عنه بداية أغسطس؟; شنو تكلمنا عنه بداية شهر أغسطس؟; شنو تكلمنا عنه في بداية شهر أغسطس؟ | The whole of August 2026 (31 days). "Start" and "بداية" also ask for a fact's earlier values |
+| What did we talk about in the past 10 days? | شنو تكلمنا عنه آخر عشر أيام؟ (Gulf); شنو تكلمنا عنه في الأيام العشرة الماضية؟ (MSA) | 15 September 2026 through the moment asked. Today is included |
+| What did we talk about in the last 3 weeks? | شنو تكلمنا عنه آخر ثلاث أسابيع؟; آخر ثلاثة أسابيع؟; في الأسابيع الثلاثة الماضية؟; ثلاث أسابيع اللي فاتت؟ | 4 September 2026 through the moment asked |
+| What did I tell you in the last few days? | وش قلت لي آخر كم يوم؟ and وش قلت لي هالكم يوم؟ (Gulf); ماذا قلت لك في الكم يوم اللي فاتت؟ | The last 3 days: 22 September 2026 through the moment asked. The same period as "the last 3 days" |
+| What did I say in the last 3 days of August? | شنو قلت لك آخر ٣ أيام من أغسطس؟; آخر ثلاث أيام من أغسطس؟; في الأيام الثلاثة الماضية من أغسطس؟ | 29 August 2026 up to 1 September 2026 |
+| What did I tell you in the last few days of August? | شنو قلت لك آخر كم يوم من أغسطس؟ | The same three days: 29 August 2026 up to 1 September 2026 |
+| What did I tell you in the last 5 days of last month? | وش قلت لك آخر خمس أيام من الشهر الماضي؟; وش قلت لك آخر خمس أيام من الشهر اللي فات؟ | 27 August 2026 up to 1 September 2026. On this clock last month is August. Not the whole month |
+| What did I tell you in the last few days of last month? | وش قلت لك آخر كم يوم من الشهر الماضي؟ | 29 August 2026 up to 1 September 2026 |
+| وين كنت ساكن من شهر أغسطس؟ | (the question is Arabic) | August 2026, 1 August up to 1 September. "من" is the month, not "one month ago". شنو تكلمنا عنه آخر شهر أغسطس؟ is that same August |
+| What did I say in August about the last 3 days? | شنو قلت لك في أغسطس عن آخر ٣ أيام؟ (Gulf); ماذا قلت لك في أغسطس عن آخر ٣ أيام؟ and ماذا ذكرت في شهر أغسطس عن آخر ٣ أيام؟ (MSA) | August 2026, 1 August up to 1 September. The same period as "What did I say in August?" The stretch is the topic, so the month is not a word a memory must hold |
+| What did I say in August 2024 about the last 3 days? | شنو قلت لك في أغسطس 2024 عن آخر ٣ أيام؟; شنو قلت لك في أغسطس ٢٠٢٤ عن آخر ٣ أيام؟ | August 2024, the same period as asking about August 2024 on its own |
+| What did I tell you in 2025 about the last 3 days? | شنو قلت لك في عام 2025 عن آخر ٣ أيام؟ | All of 2025, 1 January 2025 up to 1 January 2026. The same period as "What did I buy in 2025?" |
+| What did I tell you in the last 3 days about my trip in August? | وش قلت لك آخر ثلاث أيام عن رحلتي في أغسطس؟ | The last 3 days, 22 September 2026 through the moment asked. August stays a word to search for. The same when the month comes as the topic: "in the last 3 days from August" and وش قلت لك من أغسطس عن آخر ثلاث أيام؟ |
+| What did I tell you in the last 3 days about August 2025? | وش قلت لك آخر ثلاث أيام عن أغسطس 2025؟ | The last 3 days. 2025 stays a search word |
+| What did I tell you in the past 10 days about June? | وش قلت لك آخر عشر أيام عن يونيو؟ | The past 10 days. June stays a search word |
+| What did I tell you last week about the last 3 days of August? | وش قلت لك الأسبوع الماضي عن آخر ٣ أيام من أغسطس؟ | The same period as "What did I tell you last week?" The August days are the topic |
+| What did I say yesterday about the past 10 days of rain? | شنو قلت أمس عن آخر عشر أيام من المطر؟ | Yesterday: 24 September 2026 up to 25 September 2026 |
+| What did I tell you in the last 5 days of last week? | وش قلت لك آخر خمس أيام من الأسبوع الماضي؟ | The same period as last week. "Of last week" says when it was said. "Of last month" is the one tie that closes the stretch on that month |
+
+These are not a period: "What did I do with the last 3 emails?", "What did
+we do on weekends?", "What did I do in my pastime?", "شنو سويت قبل ثلاث
+صفحات؟", "شنو تكلمنا عنه في السنة الدراسية؟", "What did I tell you in the
+last few weeks of school?", "وش قلت لك آخر كم أسبوع من المدرسة؟", "كم يوم
+فات من آخر مرة قلت لك عن السفر؟", "How many days since I told you about the
+trip?". "Few" tied to a noun that is not a time reads no period. A number
+still does: "What did I do in the last 3 weeks of school?" is the last 3
+weeks, 4 September 2026 through the moment asked, and so is وش قلت آخر
+ثلاث أسابيع من المدرسة؟. "قبل كم يوم" in a message is the last few days.
+"كم يوم فات" asks how long, and is not a stretch.
 
 What did not help, measured on the benchmark's v6 `dense` category (thirty
 Arabic wedding turns, forty near-identical ride logs): reading the
@@ -858,6 +905,14 @@ most six a pass. Recall shows a roll-up labelled with its month or its span
   period's month roll-up. It names no topic, so by meaning nothing stood out
   for it.
 
+The Memory page names each of these from the period it stored, in the
+page's language. A week and a month come from that key. A project comes
+from the week keys of its first and last part. A project with no week
+part is named from the months of the stretch it stored, read at midday.
+The page does not read the stored instant in the browser's time zone: a
+June written in Kuwait stays June on a browser set to UTC. Reading the
+instant there had shown May.
+
 They are listed, and can be forgotten, in the Memory page's summaries list.
 
 ## Memory admin UI (`/memory`)
@@ -889,7 +944,9 @@ top to bottom:
 3. **What Kazma knows** -- the facts (click one for where it came from, show
    it on the map, or remove it) and **Changes to what you told Kazma**.
 4. **Conversations Kazma remembers** -- memories and weekly summaries, each
-   with **Forget**, the memory search, and the history import.
+   with **Forget**, the memory search, and the history import. A week, a
+   month and a project are named from the period stored, not from the
+   browser's time zone ([Months and projects](#months-and-projects)).
 5. **Clean up memory** (folded) -- the tabs **Facts**, **Things**,
    **Suggested joins** and **Tidy up**. Joining two things and running a
    tidy-up ask first and name what will happen.
@@ -1551,7 +1608,34 @@ What the numbers mean:
 The run is opt-in (`tests/test_memory_scale_bench.py`,
 `KAZMA_TEST_MEMORY_SCALE=1,10,100`, with `KAZMA_DATABASE_URL` and
 `KAZMA_TEST_ALLOW_REAL_DB=1` for the mirror half on a disposable database).
-It fails when a size goes over the limits it names.
+It fails when a size goes over the limits it names. The table is that
+bench, measured on 14 October 2026. It is not the later bench below, which
+has not published times.
+
+### Scale and speed {#scale-and-speed}
+
+`scripts/memory_scale_speed.py` times recall with no paid model call. It
+fills a private store at 1, 10 and 100 times the episode count in
+`tests/fixtures/memory_bench/live_lengths.json` (the count and the length
+percentiles only; the text is synthetic, and the bench opens no install).
+Facts are not assumed one per episode: every 25th turn is a short
+preference, English and Arabic alternating. Recall is the product's, local
+only, on a fixed set of English and Arabic questions. Each size embeds its
+own questions. One untimed recall runs first and is reported as the warm-up.
+`size` estimates the fill from a sample and does not time recall. `run`
+refuses 100 times when that estimate is two hours or more. Timed runs have
+not been published: they need a quiet machine.
+
+```bash
+python scripts/memory_scale_speed.py size
+python scripts/memory_scale_speed.py run --factors 1,10 --out REPORT.json
+```
+
+`scripts/longmemeval_bench.py size` counts LongMemEval-M before a run:
+rounds, tokens and the distinct texts to embed, one question at a time,
+and estimates that embedding from a sample. It does not retrieve and it
+does not answer. The data file stays outside the repository. Pass it with
+`--data`. There is no default path.
 
 ### Restore drills (RPO and RTO)
 

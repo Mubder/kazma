@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, those of **2026-11-21** that day, and `kazma self-check` and `kazma receipt` on **2026-11-27**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, those of **2026-11-21** that day, and `kazma self-check` and `kazma receipt` on **2026-11-27**. The pages for 27 and 28 November 2026 were checked against the code on **2026-11-28**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -61,6 +61,7 @@ Every line below describes that setup.
 | Plans checked against memory before they act: a reminder date is anchored to what you said, not what the model guessed; catastrophic shell commands are refused before the approval card | Shipped | [Commitment layer](docs/guide/commitment-layer.md) |
 | Web pages, search results, documents and recalled memory are fenced as untrusted data; the effect is measured on a public benchmark | Shipped | [Prompt injection: the numbers](INJECTION.md) |
 | Secrets in an encrypted vault (AES-256-GCM); never passed to programs a tool starts; masked on every screen and API | Shipped | `security/vault.py`, `security/child_env.py` |
+| A credential phrase is masked by the value's shape, in English and Arabic, in an error, an approval, the log and a weekly summary. A plain word after "is", with no separator, stays | Shipped | [What Kazma masks](docs/docs/security/safety-design.md#what-kazma-masks) |
 | Protections against server-side request forgery, cross-site requests, and request floods | Shipped | `security/ssrf.py`, `kazma_ui/csrf.py`, `rate_limit.py` |
 | Login by secret, local users or OIDC single sign-on; admin, operator and viewer roles | Shipped | `/login`, [OIDC setup](docs/ops/oidc-setup.md) |
 | Several users or teams on one install | Partial — built for one trusted operator; multi-user separation is enforced for memory and chats, not audited end to end | [Multi-user](docs/products/multi-user-saas.md) |
@@ -79,6 +80,8 @@ Every line below describes that setup.
 | Weekly topic summaries of long threads | Shipped | Memory page |
 | Forget one memory or a whole chat, from the page or by asking in chat ("forget everything that mentions X" reaches every memory holding it); keep a chat out of memory; export everything | Shipped | chat menu → Memory…, Memory page, `memory_forget_mentions` |
 | Works in Arabic and English, Gulf dialect included | Shipped | `memory/query_terms.py` |
+| A question that names three weeks ago, this year, the start of a month, a counted stretch through today, or the Gulf "آخر كم يوم" is answered from that period, in English and in Arabic (Gulf and MSA). A month or a year that says when it was said wins over a stretch that only names the topic | Shipped | [Memory](docs/guide/memory-and-rag.md#question-time) |
+| The Memory page names a week, a month and a project from the period it stored, in the page's language. A June written in Kuwait stays June on a browser set to UTC | Shipped | [Memory](docs/guide/memory-and-rag.md#months-and-projects) |
 | Nothing lost by accident: archiving never erases a memory's text | Shipped | `memory/macro_sleep.py` |
 | Shared memory between installs through Postgres | Partial — memories and facts mirror; each install keeps its own vectors and graph | [Postgres](docs/ops/postgres-and-saas.md) |
 | A copy of the memory graph in Neo4j (installed with Express on Windows and Linux), kept in step with Kazma's own store: a fact written, changed or forgotten while Neo4j was away reaches it at the next pass; edges Kazma did not write are never touched; Neo4j sends no usage data | Shipped | [Memory](docs/guide/memory-and-rag.md), Settings → Memory |
@@ -125,6 +128,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | Six ways to run workers: dispatch, broadcast, pipeline (with approval checkpoints), fan-out with voting, consult, conditional | Shipped | `/swarm`, `kazma swarm` |
+| A swarm task keeps its place until its ending is stored. A task whose ending is recorded is not active to a caller while that write is still in flight | Shipped | [Swarm](docs/guide/swarm-orchestration.md#admission-slot) |
 | Workers created on demand from templates — none need registering first | Shipped | `swarm/autoscaler.py` |
 | Circuit breakers, retries, timeouts and output checks per worker | Shipped | `swarm/reliability.py` |
 | Durable multi-step runs through Temporal | Opt-in | `swarm/durable_temporal.py` |
@@ -165,6 +169,7 @@ Every line below describes that setup.
 | A daily check crawls one known page for real and renders it in Kazma's own browser; a failure is an alert the same day | Shipped | Settings → System → Web acquisition |
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
 | Every task Kazma runs is watched (chat turns, swarm tasks, scheduled jobs, documents, research and crawls, X posts, memory, maintenance): when one stalls, gets stuck or fails, a card in the chat it started from offers Retry, Cancel, Dismiss or Ask Kazma to diagnose; one optional automatic first step | Shipped | [Running work](docs/guide/running-work.md), `/runs` |
+| Deleting a chat ends that chat's running and waiting work. Archiving ends only what it is waiting on. A chat app's Approve does not run after the chat is deleted. Another chat on the same thread is left alone | Shipped | [Running work](docs/guide/running-work.md#when-a-chat-goes-away) |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
@@ -185,7 +190,7 @@ Every line below describes that setup.
 | Checked on every change: CodeQL and SonarCloud code scanning, fuzzing of the code that reads outside text, and the test suite's coverage published on Codecov | Shipped | the README's badges |
 | OpenSSF Best Practices passing badge (100%) and an OpenSSF Scorecard published weekly | Shipped | [bestpractices.dev](https://www.bestpractices.dev/projects/16743), the README's badges |
 | A defensive security review of the whole code base, every gap it found fixed with a test | Shipped — 2026-11-15; the independent outside review is still to come | [Safety design](docs/docs/security/safety-design.md) |
-| A read-only report you run: health, the security report, whether the latest backup can be restored now, the installed skills' signatures, the release signature, and which known gaps match this install's settings | Shipped — you run it; it does not run at startup. A check that did not run is reported as not run, never as passed. Where this install keeps no signature bundle, the release check is not applicable (a release install is not called a source checkout); a bundle that is present is still checked. The dependency check says so when it asked OSV. An empty or mistyped data folder is reported and not created | [`kazma self-check`](docs/guide/cli-reference.md#kazma-self-check) |
+| A read-only report you run: health, the security report, whether the latest backup can be restored now, the installed skills' signatures, the release signature, and which known gaps match this install's settings | Shipped — you run it; it does not run at startup. A check that did not run is reported as not run, never as passed. Where this install keeps no signature bundle, the release check is not applicable (a release install is not called a source checkout); a bundle that is present is still checked. The dependency check says so when it asked OSV. An empty or mistyped data folder is reported and not created. The command creates nothing, including Kazma's home folder | [`kazma self-check`](docs/guide/cli-reference.md#kazma-self-check) |
 | A signed receipt of one run (`kazma receipt`), and a check of that file (`kazma verify-receipt`) with a public key or this install's key | Partial — one run is one turn, and the turn journal lives in the server process, so a separate command says the turn was not recorded instead of listing the whole chat; a memory record is keyed by a hash the command cannot rebuild; values are masked by name, by shape (including Arabic credential labels) and by vault value; a commitment result is a digest. A valid signature proves the key's holder wrote the file and it is unchanged, and does not prove an outside effect happened exactly once. The key is made once for this install and stays in the vault. With Spaces enforced, another space's run is refused. This is not signed delegation between agents | [CLI reference](docs/guide/cli-reference.md#kazma-receipt) |
 
 ## Not built

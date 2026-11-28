@@ -138,7 +138,10 @@ first decision on any surface wins. A second press, or a stale web tab, gets
 the decision already made instead of making another. The graph resumes with a command
 keyed by that question's interrupt id. If you had not answered within the
 approval timeout (300 seconds by default), the call would not run, and the
-answer would say the approval *expired*, not that you refused it.
+answer would say the approval *expired*, not that you refused it. If the
+chat is deleted before the call starts, the call does not run. Approve on
+a chat app is the same, and the card no longer reads Approved
+([When a chat goes away](running-work.md#when-a-chat-goes-away)).
 
 **Where:** `kazma_core/safety/hitl_gates.py`,
 `kazma_gateway/agent_handler/hitl.py`, `kazma_ui/routes_direct/misc.py` (the

@@ -55,6 +55,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] Offsite restic: **write probe** succeeds (`rclone:` and `s3:` — a read-only remote is a failed backup)
 - [ ] New tools have a **`TOOL_TIERS`** entry (`read` / `write` / `danger`); unclassified = gated
 - [ ] Scraping: pin-IP on the direct path; do not pin through `proxy=`
+- [ ] Run `kazma self-check`. It is read-only and creates nothing, including Kazma's home folder. A check that did not run is not a pass ([CLI reference](../guide/cli-reference.md#kazma-self-check))
 
 ### Persisted workspace and execution policies
 

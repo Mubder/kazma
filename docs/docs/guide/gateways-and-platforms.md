@@ -257,7 +257,8 @@ The Discord and Slack rows are the swarm bus's approvals. Chat approval cards
 use the same `hitl:approve:<id>` / `hitl:deny:<id>` / `hitl:approve_task:<id>`
 actions on all three platforms. An X card names its action and has no
 "Approve for task". An expired card is announced in the chat, and the turn is
-delivered there.
+delivered there. A button on a chat that was deleted does not run the call
+([When a chat goes away](running-work.md#when-a-chat-goes-away)).
 
 > The **bus adapter singleton** priority is Telegram > Discord > Slack (only one active at a time, wired in `app.py:506-556`). See [Security & Safety](security-and-safety#bus-adapter-priority).
 

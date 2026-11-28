@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## What Kazma masks in answers, errors and the log (2026-11-28)
+
+- One rule reads a credential phrase, in English and in Arabic, on the
+  error text Kazma shows, on approval text, on every log line and its
+  traceback, on a weekly summary, and on a settings value shown as text.
+  A colon, an equals sign or a fullwidth colon masks the next token, and
+  that value may sit on the next line. After "is", "هي" or "هو", and after
+  a label with no separator, the next word is masked when its shape looks
+  like a credential. A plain word stays: "the password is required" stays.
+  English PIN is the letters PIN and masks only after a separator or when
+  the next word is four or more digits. The Arabic labels الرقم السري and
+  رمز المرور mask the next word. A JSON member whose key is a credential
+  label follows the same rule. An unquoted token label followed by a colon
+  and a plain word is masked in an error, and left as written in the log
+  and in a summary.
+
+## Memory: more time words, and the page names the stored period (2026-11-28)
+
+- Recall reads "three weeks ago", "this year", "the start of August", "the
+  past 10 days" and the Gulf "آخر كم يوم", in English and in Arabic (Gulf
+  and MSA). A month or a year that says when it was said wins over a
+  stretch that only names the topic. The questions and the periods are in
+  the memory guide, taken from `tests/test_memory_time_words.py`.
+- The Memory page names a week, a month and a project from the period it
+  stored. It does not read that instant in the browser's time zone, so a
+  June written in Kuwait stays June on a browser set to UTC.
+
+## A swarm task keeps its slot until the ending is stored (2026-11-28)
+
+- An admitted task keeps its admission slot until the write of its ending
+  returns. The limit counts the tasks that still hold a slot. A paused
+  task keeps its slot while it waits on a person. A task whose ending is
+  recorded is not active to any caller while that write is still in
+  flight: the active list leaves it out, a lookup does not return it, and
+  cancel does not record "cancelled" over a success.
+
+## Recall at 1, 10 and 100 times, with no model call (2026-11-28)
+
+- `scripts/memory_scale_speed.py` fills a private store at 1, 10 and 100
+  times the episode count in
+  `tests/fixtures/memory_bench/live_lengths.json` and times recall, local
+  only, with no paid model call. `size` estimates the fill and does not
+  time recall. `run` refuses 100 times when that estimate is two hours or
+  more. Timed runs have not been published. The measured table of 14
+  October 2026 is unchanged.
+
+## kazma self-check and a signed receipt of one run (2026-11-27)
+
+- `kazma self-check` is one read-only report of the checks Kazma already
+  has. It creates nothing: not Kazma's home folder, not a data folder, and
+  not a store. It does not run at startup. A check that did not run is
+  never a pass.
+- `kazma receipt` writes a signed receipt of one turn, and
+  `kazma verify-receipt` checks that file. The command does not create
+  `vault.db` or `settings.db`. The signing key stays in the vault. A valid
+  signature proves the key's holder wrote the file and it is unchanged. It
+  does not prove an outside effect happened once.
+
 ## Spaces: a soak with many spaces (S4-09, 2026-11-27)
 
 - `scripts/spaces_soak.py` runs a throwaway install with Spaces on, its
@@ -36,6 +94,13 @@
   cut off now ends when its chat is archived, and the chat says so in your
   language; un-archiving it used to show nothing, and the next restart could
   bring the request back. A chat archived before a restart gets the same.
+- **Only that chat.** Archiving a chat app's extra copy of the same thread
+  leaves the chat you see, and the turn it is waiting on, running. Deleting
+  that extra copy leaves the chat you see as well. Deleting the chat you
+  see, when only an archived copy is left, takes the thread's saved state.
+  The copy's rows stay. Two chats you can both see keep the thread's state
+  when one of them is deleted. A swarm approval on the same thread stays
+  the swarm's.
 
 ## Spaces: Kazma's own database has one answer (2026-11-27)
 

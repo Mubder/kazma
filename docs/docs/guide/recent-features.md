@@ -9,6 +9,28 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-27 and 28.** `kazma self-check` is a read-only report you
+run. It creates nothing, and a check that did not run is not a pass.
+`kazma receipt` writes a signed receipt of one turn, and
+`kazma verify-receipt` checks that file
+([CLI reference](cli-reference.md#kazma-self-check)). Deleting a chat ends
+that chat's running and waiting work. Archiving ends only what it waits
+on. Approve on a chat app does not run after the chat is deleted
+([Running work](running-work.md#when-a-chat-goes-away)). A swarm task
+keeps its slot until its ending is stored, and a finished task is not
+active while that write is still in flight
+([Swarm](swarm-orchestration.md#admission-slot)). Recall reads more time
+words, in English and in Arabic, and the Memory page names a week, a
+month and a project from the period it stored
+([Memory](memory-and-rag.md#question-time)). A credential phrase is masked
+by the value's shape in an error, an approval, the log and a weekly
+summary. A plain word after "is", with no separator, stays
+([What Kazma masks](../security/safety-design.md#what-kazma-masks)).
+`scripts/spaces_soak.py` is the Spaces soak harness. The long run has not
+been run ([Spaces](spaces.md#the-soak)). `scripts/memory_scale_speed.py`
+times recall at 1, 10 and 100 times, with no model call. Those times are
+not published yet ([Memory](memory-and-rag.md#scale-and-speed)).
+
 **New in 2026-11-21 — memory says how it is doing.** Every turn's recall
 is recorded (what was shown, whether it was empty or degraded, how long it
 took; no text), and memory health and the daily digest show the week: how

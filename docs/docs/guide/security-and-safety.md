@@ -348,7 +348,7 @@ The security program itself (how to report, the response targets, no paid bounty
 
 ### 8.1 Hardening report (`security/hardening.py`) {#hardening-report}
 
-`SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet.
+`SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet. `kazma self-check` calls this same runner. That command is read-only, it creates nothing, and it does not run at startup ([`kazma self-check`](cli-reference.md#kazma-self-check)).
 
 Each check measures the property it names, using the same answer the rest of Kazma uses:
 
@@ -423,6 +423,7 @@ These sit **beside** HITL, not inside it.
 | Allowlisting a binary is not allowlisting what it runs | `shell_exec` `_EXEC_CAPABLE_ARGS` (`find -exec`, `git -c`, …) |
 | Secret masking recurses | `settings.mask_deep()` — lists and JSON strings too |
 | A password inside a URL is a secret | masked by value on every way out (`security/url_credentials.py`), whatever the setting is called; memory-backend URLs with a password go to the vault |
+| A credential phrase is masked by the value's shape | English and Arabic, on error text, an approval, the log and a weekly summary. A plain word after "is", with no separator, stays. See [What Kazma masks](../security/safety-design.md#what-kazma-masks) |
 | CSRF | `csrf.py`: non-GET `/api/*` mismatched Origin/Referer host → 403. Use `request.url.hostname` (Starlette has no `.host`) |
 | `/health/details` is sensitive | L-1; `/health/live` and `/health/ready` stay public |
 | SSRF pin-IP | `validate_url` returns public IPs; `PinHostAsyncTransport` when no proxy; `assert_peer_public` after each hop |

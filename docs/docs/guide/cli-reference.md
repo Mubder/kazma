@@ -234,7 +234,8 @@ kazma doctor
 One read-only report, in English and Arabic. You run it. It does not run
 at startup, and it does not replace the hardening report on the security
 page. It calls the checks Kazma already has. It writes no settings and it
-does not write a backup.
+does not write a backup. It creates nothing: not Kazma's home folder, not
+a data folder, and not a store.
 
 ```bash
 kazma self-check

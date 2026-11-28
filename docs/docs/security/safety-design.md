@@ -159,8 +159,10 @@ Around the fence:
   Spaces on, each space's secrets are sealed with a key of its own, which
   the install's vault key wraps.
 - **Logs hold no secrets.** Kazma's log writer masks a password inside an
-  address in every line and traceback, whatever wrote it; the update log and
-  `kazma doctor` do the same; a web session is named in logs and audit
+  address in every line and traceback, whatever wrote it, and it masks a
+  credential phrase by the value's shape
+  ([What Kazma masks](#what-kazma-masks)). The update log and
+  `kazma doctor` do the same. A web session is named in logs and audit
   records by the start of its hash, never by any part of its sign-in cookie.
 - **Errors say what failed, not what a library said.** An answer names the
   failure with a code and a reference; the library's or system's own text,
@@ -170,6 +172,58 @@ Around the fence:
   or device path (`\\host\share`) is refused before anything resolves it,
   in the tools, the IDE, the Workspace page and the folder settings, so a
   path can never make Kazma connect to another machine.
+
+### What Kazma masks {#what-kazma-masks}
+
+One rule reads a credential phrase, in English and in Arabic. It runs on
+the error text Kazma shows you, on the text of an approval, on every log
+line and its traceback, on a weekly summary, and on a settings value shown
+as text. A screen and an API still mask a secret by its name and by its
+value. A password inside an address is masked by that value, whatever the
+text around it is called.
+
+A label followed by a colon, an equals sign, or a fullwidth colon masks
+the next token. The value may sit on the next line. The English labels are
+the names of a password, a secret and an API key. The Arabic labels are
+the same names, including the joined spelling with no space inside the
+label. A no-break space still joins the label and the value, and it can
+sit inside an Arabic key.
+
+After "is", "هي" or "هو", and after a label with no separator, the next
+word is masked when its shape looks like a credential. The shape is an
+underscore, a hyphen with a piece of at most three characters, a hyphen
+with three or more pieces, both a letter and a digit, or four or more
+digits. A plain word stays. These stay as written: "the password is
+required", "Reset the password on 3 machines", "I forgot the password
+yesterday.", "كلمة المرور لازم تكون طويلة" and "نسيت كلمة المرور أمس."
+
+A four-digit year after a bare English password, secret or API-key label
+stays. The same label after "is", followed by four digits, is a value and
+is masked. A two-piece compound whose pieces are longer stays, such as a
+name for a rotation policy. A one-digit count stays.
+
+A line break between the label and the next word stops the form with no
+separator, and the form after "is". A line break before the separator is
+not the phrase. The value on the line after a colon or an equals sign is
+masked.
+
+The English PIN label is the letters PIN in that case. It masks the next
+word after a separator, and it masks a next word of four or more digits.
+A shorter number after "PIN is" stays. A plain word after PIN stays.
+Lowercase "pin" is a different word. "Pin this chat to the sidebar" stays,
+and so does a line about pinning a workspace, a working memory or a turn's
+model.
+
+The Arabic labels الرقم السري and رمز المرور mask the next word, whatever
+that word is.
+
+A JSON member whose key is a credential label, in either language, follows
+the same rule. The log writer uses it. A key that only looks similar, such
+as a plural of "token", is left as written.
+
+An unquoted token label followed by a colon and a plain word is masked in
+an error. The log and a weekly summary leave that unquoted form as written.
+A quoted JSON member whose key is a credential label is masked in both.
 
 ## 6. Risky work runs boxed in
 
