@@ -119,10 +119,12 @@ def mask_urls_in_text(text: str) -> str:
 
     ASCII ``name: value`` and ``name=value`` for a credential label are the
     same rule as ``errors.hide_prose_secrets`` (one copy, both languages),
-    so a log line hides ``password: secret`` and ``secret=value``. A
-    fullwidth colon, ``password is <secret>``, and the Arabic label phrases
-    are there too. "token: expired" is left as written;
-    ``errors.redact_secrets`` is what masks that form.
+    so a log line hides ``password: secret``, ``secret=value``, a value on
+    the line after that separator, and a JSON member whose key is a
+    credential label. A fullwidth colon, ``password is <secret>``, and the
+    Arabic label phrases are there too. English ``PIN`` is case-sensitive
+    and does not take an ordinary ``pin skipped`` line. "token: expired"
+    is left as written; ``errors.redact_secrets`` is what masks that form.
     """
     from kazma_core.errors import hide_prose_secrets
     from kazma_core.security.token_shapes import mask_tokens

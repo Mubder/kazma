@@ -26,9 +26,12 @@ code it names.
   masks every message and traceback before it is queued
   (`logging_config._LogQueueHandler.prepare`, `url_credentials.mask_urls_in_text`):
   model discovery and the model registry logged provider addresses as they
-  were. The same call masks `password:` / `secret=` (and the Arabic
-  labels) through `errors.hide_prose_secrets`, the one rule
-  `redact_secrets` uses; a planted `password:` does not reach the file.
+  were. The same call masks `password:` / `secret=` (including a value on
+  the next line), a JSON member whose key is a credential label, and the
+  Arabic labels, through `errors.hide_prose_secrets`, the one rule
+  `redact_secrets` uses. A planted `password:` and a planted
+  `{"password": …}` do not reach the file. An ordinary `pin` line
+  (`workspace pin skipped`, `turn-model pin=…`) is written unchanged.
   `kazma doctor`'s rows (`doctor._line`) and the update log
   (`update._without_url_passwords`, a local copy: the updater runs while
   Kazma's package may not import) mask too, and the settings store's change

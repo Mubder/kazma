@@ -78,19 +78,24 @@ _REDACT_PATHS = re.compile(
 #: How a value is told from an ordinary word. One rule, used by
 #: :func:`redact_secrets` and by :func:`hide_prose_secrets` (the log writer
 #: reads it through ``mask_urls_in_text``). A colon, an equals sign, or a
-#: fullwidth colon (U+FF1A) masks the next token. ``is`` / ``هي`` / ``هو``,
+#: fullwidth colon (U+FF1A) masks the next token, and that value may sit on
+#: the following line (``\s`` after the separator). ``is`` / ``هي`` / ``هو``,
 #: and a label with no separator, mask the next word when it is
 #: secret-shaped: an underscore, a hyphen whose piece is at most three
-#: characters (``abc-def``; a longer compound such as ``rotation-policy``
-#: stays), both a letter and a digit, or four or more digits. A bare
-#: English ``password`` / ``secret`` / ``api_key`` leaves a four-digit year
-#: (``The secret 2024 plan``). The PIN labels (``PIN``, ``الرقم السري``,
-#: ``رمز المرور``) mask the next word whatever it is. The gap is any
-#: whitespace but a line break (``[^\S\r\n]``), so a no-break space still
-#: joins a label's words and ``secret`` at the end of a line does not take
-#: the next line's ``2.``. ASCII ``token:`` stays in :data:`_REDACT_SECRETS`
-#: only: :func:`redact_secrets` masks ``token: expired`` and the phrase
-#: masker keeps it.
+#: characters (``abc-def``) or that has three or more pieces
+#: (``long-value-here``; a two-piece compound such as ``rotation-policy``
+#: or ``reset-link`` stays), both a letter and a digit, or four or more
+#: digits. A bare English ``password`` / ``secret`` / ``api_key`` leaves a
+#: four-digit year (``The secret 2024 plan``). English ``PIN`` is
+#: case-sensitive and masks only after a separator or a run of four or more
+#: digits, so ``workspace pin skipped`` and ``turn-model pin=…`` stay. The
+#: Arabic PIN labels (``الرقم السري``, ``رمز المرور``) mask the next word
+#: whatever it is. The gap between a label's words, and the gap of a bare
+#: or copula form, is any whitespace but a line break (``[^\S\r\n]``). A
+#: JSON member whose key is a credential label is this same rule, in either
+#: language. ASCII ``token:`` stays in :data:`_REDACT_SECRETS` only:
+#: :func:`redact_secrets` masks ``token: expired`` and the phrase masker
+#: keeps that unquoted form.
 #:
 #: Every pattern below is a string literal on ``re.compile``: the regex
 #: sweep only sees those, and a concatenation is invisible to it. Each
@@ -98,30 +103,30 @@ _REDACT_PATHS = re.compile(
 #: possessive or one forward lookahead.
 _REDACT_SECRETS = re.compile(
     r"""(?ix)
-    "(?> (?: (?! password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization ) [^"\s] )*+ )
-      (?: password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization )
-      [^"\s]*+
-      " \s*+ [:\uFF1A] \s*+ " [^"]*+ "
-    | token \s*+ [=:] \s*+ \S++
+    token \s*+ [=:] \s*+ \S++
     | (?<![A-Za-z0-9+.\-]) [A-Za-z] [A-Za-z0-9+.\-]{0,31}+ :// [^/\s:@'"]++ : [^@\s/'"]++ @
     """,
     re.IGNORECASE | re.VERBOSE,
 )
-#: Key=value, key: value, and the no-separator phrases, in English. Arabic
-#: is :data:`_ARABIC_SECRET`. ASCII ``token:`` is not here.
+#: Key=value, key: value, the JSON member, and the no-separator phrases, in
+#: English. Arabic phrases are :data:`_ARABIC_SECRET`; Arabic JSON keys are
+#: :data:`_ARABIC_JSON_SECRET`. ASCII ``token:`` is not here.
 _PROSE_SECRETS = re.compile(
     r"""(?ix)
-    (?: password | passwd | secret | api[_-]?key )
-      (?: [^\S\r\n]*+ [=:\uFF1A] [^\S\r\n]*+ (?!\*++(?!\S))\S++
-        | [^\S\r\n]++ is [^\S\r\n]++ (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))|\d{4,}+(?!\d))
-        | [^\S\r\n]++ (?! (?:19|20) [0-9]{2}+ (?!\S) ) (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))|\d{4,}+(?!\d))
+    "(?> (?: (?! password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization ) [^"\s] )*+ )
+      (?: password | passwd | secret | token(?!s) | api[_-]?key | private[_-]?key | authorization )
+      [^"\s]*+
+      " \s*+ [:\uFF1A] \s*+ " [^"]*+ "
+    | (?: password | passwd | secret | api[_-]?key )
+      (?: [^\S\r\n]*+ [=:\uFF1A] \s*+ (?!\*++(?!\S))\S++
+        | [^\S\r\n]++ is [^\S\r\n]++ (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))
+        | [^\S\r\n]++ (?! (?:19|20) [0-9]{2}+ (?!\S) ) (?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))
       )
-    | (?<!\w) pin (?!\w)
-      (?: [^\S\r\n]*+ [=:\uFF1A] [^\S\r\n]*+ (?!\*++(?!\S))\S++
-        | [^\S\r\n]++ is [^\S\r\n]++ \S++
-        | [^\S\r\n]++ \S++
+    | (?<!\w) (?-i:PIN) (?!\w)
+      (?: [^\S\r\n]*+ [=:\uFF1A] \s*+ (?!\*++(?!\S))\S++
+        | [^\S\r\n]++ \d{4,}+ (?!\d)
       )
-    | token [^\S\r\n]*+ \uFF1A [^\S\r\n]*+ \S++
+    | token [^\S\r\n]*+ \uFF1A \s*+ \S++
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -140,7 +145,7 @@ _ARABIC_CREDENTIAL_LABELS = (
 )
 _ARABIC_MARKS = re.compile(r"[\u064B-\u065F\u0670\u0640]")
 _ARABIC_SECRET = re.compile(
-    r"(?:(?:ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ق[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A][^\S\r\n]*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++\S++|[^\S\r\n]++\S++)|(?:ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|م[\u064B-\u065F\u0670\u0640]*+ف[\u064B-\u065F\u0670\u0640]*+ت[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ح[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A][^\S\r\n]*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))|\d{4,}+(?!\d))|[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))|\d{4,}+(?!\d))))"
+    r"(?:(?:ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ق[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A]\s*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++\S++|[^\S\r\n]++\S++)|(?:ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|م[\u064B-\u065F\u0670\u0640]*+ف[\u064B-\u065F\u0670\u0640]*+ت[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ح[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)(?:[^\S\r\n]*+[=:\uFF1A]\s*+(?!\*++(?!\S))\S++|[^\S\r\n]++(?:ه[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ه[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+)[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))|[^\S\r\n]++(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)|[^\s-]++(?:-[^\s-]++){2,}+)|\d{4,}+(?!\d))))"
 )
 _ARABIC_JSON_SECRET = re.compile(
     r'"(?:ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|م[\u064B-\u065F\u0670\u0640]*+ف[\u064B-\u065F\u0670\u0640]*+ت[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ح[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ق[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+س[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+ي[\u064B-\u065F\u0670\u0640]*+|ك[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ة[\u064B-\u065F\u0670\u0640]*+ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+|ر[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ز[\u064B-\u065F\u0670\u0640]*+[^\S\r\n]++ا[\u064B-\u065F\u0670\u0640]*+ل[\u064B-\u065F\u0670\u0640]*+م[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+و[\u064B-\u065F\u0670\u0640]*+ر[\u064B-\u065F\u0670\u0640]*+)"\s*+[:\uFF1A]\s*+"[^"]*+"'
@@ -156,13 +161,16 @@ def is_arabic_credential_label(text: str) -> bool:
 def hide_prose_secrets(text: str, replacement: str) -> str:
     """Phrases a free-text masker reads, in either language.
 
-    The one copy of the key=value and key: value rule (English here, Arabic
-    in :data:`_ARABIC_SECRET`), so a log line that never reaches
-    :func:`redact_secrets` still hides them. ASCII ``token:`` stays out, so
-    ``token: expired`` remains; :func:`redact_secrets` masks that form
-    itself. A fullwidth colon masks the next token. ``is``, ``هي``, ``هو``,
-    and a bare next word mask a secret-shaped word, or four or more digits,
-    across any whitespace but a line break. The PIN labels mask the next
+    The one copy of the key=value, key: value, and JSON-member rule (English
+    here, Arabic in :data:`_ARABIC_SECRET` and :data:`_ARABIC_JSON_SECRET`),
+    so a log line that never reaches :func:`redact_secrets` still hides
+    them. ASCII ``token:`` stays out, so ``token: expired`` remains;
+    :func:`redact_secrets` masks that unquoted form itself. A fullwidth
+    colon masks the next token, and a value after a separator may sit on
+    the next line. ``is``, ``هي``, ``هو``, and a bare next word mask a
+    secret-shaped word, or four or more digits, across any whitespace but
+    a line break. English ``PIN`` is case-sensitive and masks only after a
+    separator or four or more digits. The Arabic PIN labels mask the next
     word whatever it is.
     """
     stepped = _PROSE_SECRETS.sub(replacement, str(text))
@@ -203,16 +211,20 @@ def redact_secrets(text: str) -> str:
     is still never shown: an HTTP failure quotes its URL, query and all; a
     token is found by its shape too (``security.token_shapes``).
 
-    A credential label (``password``, ``secret``, ``api_key``, ``PIN``, and
-    the Arabic names in :data:`_ARABIC_CREDENTIAL_LABELS`, marks allowed) is
+    A credential label (``password``, ``secret``, ``api_key``, and the
+    Arabic names in :data:`_ARABIC_CREDENTIAL_LABELS`, marks allowed) is
     masked with a colon, an equals sign, or a fullwidth colon whatever the
-    next token is. ``is`` / ``هي`` / ``هو``, and the same label with no
-    separator, mask the next word when it contains an underscore, a short
-    hyphen piece, both a letter and a digit, or four or more digits, across
-    any whitespace but a line break. A bare year (``The secret 2024 plan``)
-    and ``the password is required`` stay. The PIN labels mask the next word
-    whatever it is. ASCII ``token:`` is masked here and kept by
-    :func:`hide_prose_secrets`.
+    next token is, including a value on the next line. ``is`` / ``هي`` /
+    ``هو``, and the same label with no separator, mask the next word when
+    it contains an underscore, a short hyphen piece, three or more hyphen
+    pieces, both a letter and a digit, or four or more digits, across any
+    whitespace but a line break. A bare year (``The secret 2024 plan``),
+    a two-piece compound (``rotation-policy``), and ``the password is
+    required`` stay. English ``PIN`` is case-sensitive and masks only after
+    a separator or four or more digits; the Arabic PIN labels mask the next
+    word whatever it is. A JSON member whose key is a credential label is
+    masked here and by :func:`hide_prose_secrets`. ASCII ``token:`` is
+    masked here and kept, unquoted, by :func:`hide_prose_secrets`.
     """
     from kazma_core.security.token_shapes import mask_tokens
 

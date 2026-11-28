@@ -527,8 +527,10 @@ def _one_record(record: logging.LogRecord) -> None:
     record one line (its traceback's lines indented). In place.
 
     ``mask_urls_in_text`` hides a password inside a URL and, through
-    ``errors.hide_prose_secrets``, a ``password:`` / ``secret=`` phrase in
-    either language. ASCII ``token: expired`` is left as written.
+    ``errors.hide_prose_secrets``, a ``password:`` / ``secret=`` phrase, a
+    value on the next line, and a JSON member whose key is a credential
+    label, in either language. An ordinary ``pin`` line is left as written.
+    ASCII ``token: expired`` is left as written.
     """
     record.message = _one_line(mask_urls_in_text(record.getMessage()))
     record.msg = record.message
@@ -560,12 +562,14 @@ class _LogQueueHandler(logging.handlers.QueueHandler):
     on this handler): the writer thread has no turn bound.
 
     Every message and traceback has its URL passwords masked here, and a
-    ``password:`` / ``secret=`` phrase in either language
-    (``mask_urls_in_text``, the one rule in ``errors.hide_prose_secrets``):
-    a provider's or a database's address can carry a user and password, and
-    model discovery, the model registry and others logged it as it was
-    (2026-11-14, CodeQL py/clear-text-logging-sensitive-data). A planted
-    ``password:`` must not reach the file. Gate:
+    ``password:`` / ``secret=`` phrase, a JSON member whose key is a
+    credential label, in either language (``mask_urls_in_text``, the one
+    rule in ``errors.hide_prose_secrets``): a provider's or a database's
+    address can carry a user and password, and model discovery, the model
+    registry and others logged it as it was (2026-11-14, CodeQL
+    py/clear-text-logging-sensitive-data). A planted ``password:`` or
+    ``{"password": ...}`` must not reach the file. An ordinary ``pin``
+    line is written unchanged. Gate:
     tests/test_logs_never_carry_url_passwords.py.
 
     And every record is one line (``_one_record``): a session id from a URL

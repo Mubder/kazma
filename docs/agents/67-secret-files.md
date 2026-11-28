@@ -41,8 +41,10 @@ plaintext, and maskers missed token shapes Kazma itself holds.
   form maskers that post their value back are declared: a masked token would
   be saved as stars). A phrase (`password is hunter2`, `كلمة المرور هي …`,
   a fullwidth colon, joined `كلمةالمرور`, `رمز المرور`, `password:` /
-  `secret=`) is masked by the value's shape in `errors` and in
-  `mask_urls_in_text` (one rule). `redact_secrets` masks `token: expired`;
-  the phrase masker keeps it. The patterns are literals the regex sweep
-  times (`tests/test_credential_phrases_masked.py`).
+  `secret=`, a value on the next line, a JSON member `{"password": …}` in
+  either language) is masked by the value's shape in `errors` and in
+  `mask_urls_in_text` (one rule). English `PIN` is case-sensitive and does
+  not take an ordinary `pin` line. `redact_secrets` masks `token: expired`;
+  the phrase masker keeps that unquoted form. The patterns are literals
+  the regex sweep times (`tests/test_credential_phrases_masked.py`).
 

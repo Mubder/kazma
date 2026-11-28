@@ -56,8 +56,9 @@ def test_control_a_plain_queue_handler_keeps_the_password():
 
 
 def test_a_password_phrase_does_not_reach_the_log_file(tmp_path):
-    """The real writer (queue, then the file handler) masks key: value and
-    key=value in either language. An ordinary line is written unchanged."""
+    """The real writer (queue, then the file handler) masks key: value,
+    key=value, a value on the next line, and a JSON member, in either
+    language. An ordinary line, including a lowercase ``pin``, is unchanged."""
     path = tmp_path / "kazma.log"
     handler = logging_config.SafeTimedRotatingFileHandler(
         str(path), when="midnight", interval=1, backupCount=1, encoding="utf-8",
@@ -76,8 +77,19 @@ def test_a_password_phrase_does_not_reach_the_log_file(tmp_path):
         logger.info("login failed password: Sunr1se for the account")
         logger.info("secret=Sunr1se")
         logger.info("كلمة المرور: Sunr1se")
+        logger.info("password:\nSunr1se")
+        logger.info('{"password": "Sunr1se"}')
+        logger.info('{"كلمة المرور": "Sunr1se"}')
         logger.info("Reset the password on 3 machines")
         logger.info("the scheduler ran 3 jobs")
+        logger.info("[agent-handler] WM pin skipped: timeout")
+        logger.info("[SSE] workspace pin skipped")
+        logger.info("[SSE] working-memory pin skipped")
+        logger.info("[voice] working-memory pin skipped")
+        logger.info("SSE chat: turn-model pin=kazma-model (not process-wide)")
+        logger.info("SSE chat: turn-model pin failed: boom")
+        logger.info("[workspaces] could not pin the tools to the default sandbox box")
+        logger.info("Pin this chat to the sidebar")
     finally:
         logger.removeHandler(front)
         writer.enqueue_sentinel()
@@ -88,6 +100,14 @@ def test_a_password_phrase_does_not_reach_the_log_file(tmp_path):
     assert "Sunr1se" not in text
     assert "Reset the password on 3 machines" in text
     assert "the scheduler ran 3 jobs" in text
+    assert "[agent-handler] WM pin skipped: timeout" in text
+    assert "[SSE] workspace pin skipped" in text
+    assert "[SSE] working-memory pin skipped" in text
+    assert "[voice] working-memory pin skipped" in text
+    assert "SSE chat: turn-model pin=kazma-model (not process-wide)" in text
+    assert "SSE chat: turn-model pin failed: boom" in text
+    assert "[workspaces] could not pin the tools to the default sandbox box" in text
+    assert "Pin this chat to the sidebar" in text
 
 
 def test_control_a_plain_handler_writes_the_password_phrase(tmp_path):

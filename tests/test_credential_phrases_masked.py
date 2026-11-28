@@ -1,13 +1,17 @@
 """Credential phrases are masked by the value's shape, in both languages.
 
-A colon, an equals sign, or a fullwidth colon masks the next token. ``is``
-/ ``هي`` / ``هو``, and a label with no separator, mask the next word when
-it has an underscore, a short hyphen piece, both a letter and a digit, or
-four or more digits. The gap is any whitespace but a line break. The PIN
-labels mask the next word whatever it is. ``redact_secrets`` masks
-``token: expired``; the phrase masker keeps it. The patterns are string
-literals on ``re.compile`` (the regex sweep cannot see a concatenation)
-and linear.
+A colon, an equals sign, or a fullwidth colon masks the next token, and
+that value may sit on the next line. ``is`` / ``هي`` / ``هو``, and a label
+with no separator, mask the next word when it has an underscore, a short
+hyphen piece, three or more hyphen pieces, both a letter and a digit, or
+four or more digits. The gap of a label's words and of a bare or copula
+form is any whitespace but a line break. English ``PIN`` is case-sensitive
+and masks only after a separator or four or more digits. The Arabic PIN
+labels mask the next word whatever it is. A JSON member whose key is a
+credential label is the same rule. ``redact_secrets`` masks ``token:
+expired``; the phrase masker keeps that unquoted form. The patterns are
+string literals on ``re.compile`` (the regex sweep cannot see a
+concatenation) and linear.
 """
 from __future__ import annotations
 
@@ -38,13 +42,15 @@ ROOT = Path(__file__).resolve().parents[1]
 _MARK = r"[\u064B-\u065F\u0670\u0640]*+"
 _H = r"[^\S\r\n]"
 # A hyphenated word is secret-shaped when one piece is at most three
-# characters. ``rotation-policy`` and ``سياسة-التدوير`` are longer pieces.
+# characters, or when it has three or more pieces. ``rotation-policy``,
+# ``reset-link`` and ``سياسة-التدوير`` are two longer pieces.
 _SHAPED = (
     r"(?:[^\s_]*+_[^\s]*+"
     r"|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++"
     r"|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+"
     r"|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+"
-    r"|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))"
+    r"|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S)"
+    r"|[^\s-]++(?:-[^\s-]++){2,}+)"
     r"|\d{4,}+(?!\d))"
 )
 _PIN_LABELS = ("الرقم السري", "رمز المرور")
@@ -84,6 +90,18 @@ CONTROLS = [
     "مفتاح سري سياسة-التدوير",
     "كلمة المرور\n٢. البند التالي",
     "token: expired",
+    "password reset-link sent",
+    "PIN is 12",
+    "pin=4821",
+    "PIN sunshine",
+    "[agent-handler] WM pin skipped: timeout",
+    "[SSE] workspace pin skipped",
+    "[SSE] working-memory pin skipped",
+    "[voice] working-memory pin skipped",
+    "SSE chat: turn-model pin=kazma-model (not process-wide)",
+    "SSE chat: turn-model pin failed: boom",
+    "[workspaces] could not pin the tools to the default sandbox box",
+    "Pin this chat to the sidebar",
 ]
 
 
@@ -146,8 +164,8 @@ _DIGIT_AND_HYPHEN = [
     "رمز المرور 9999",
     "رمز المرور شمس",
     "PIN 4821",
-    "PIN is 12",
-    "pin=4821",
+    "PIN: Sunr1se",
+    "PIN=Sunr1se",
     "secret=Sunr1se",
     "password: Sunr1se",
 ]
@@ -194,6 +212,20 @@ _LINE_BREAKS = [
     f"كلمة المرور\nهي {ARABIC_SECRET}",
     f"كلمة\rالمرور: {ARABIC_SECRET}",
 ]
+_NEXT_LINE = [
+    f"password:\n{SECRET}",
+    f"secret =\n{SECRET}",
+    f"password:\r\n{SECRET}",
+    f"كلمة المرور:\n{ARABIC_SECRET}",
+    f"كلمة السر =\n{ARABIC_SECRET}",
+]
+_HYPHEN_PIECES = [
+    ("password long-value-here", "long-value-here"),
+    ("password is correct-horse-battery-staple", "correct-horse-battery-staple"),
+    ("كلمة المرور واحد-اثنان-ثلاثة", "واحد-اثنان-ثلاثة"),
+    ("كلمة المرور هي واحد-اثنان-ثلاثة", "واحد-اثنان-ثلاثة"),
+    ("password abc-def-ghi", "abc-def-ghi"),
+]
 
 
 @pytest.mark.parametrize("text", _BREAKS)
@@ -214,6 +246,43 @@ def test_a_no_break_space_inside_an_arabic_json_key_is_masked():
 def test_a_line_break_stops_the_match_in_both_languages(text):
     for name, out in _readers(text).items():
         assert out == text or out == str({"note": text}), f"{name}: {out!r}"
+
+
+def test_a_line_break_before_the_separator_is_not_the_phrase():
+    """The newline the separator may cross is the one after it. The summary
+    scrubber's own pattern still reads ``\\s`` on both sides; this is the
+    phrase rule."""
+    text = f"password\n: {SECRET}"
+    assert redact_secrets(text) == text
+    assert mask_urls_in_text(text) == text
+
+
+@pytest.mark.parametrize("text", _NEXT_LINE)
+def test_a_value_on_the_line_after_a_separator_is_masked(text):
+    secret = SECRET if SECRET in text else ARABIC_SECRET
+    for name, out in _readers(text).items():
+        assert secret not in out, f"{name}: {out!r}"
+
+
+@pytest.mark.parametrize("text,piece", _HYPHEN_PIECES)
+def test_a_hyphen_of_three_or_more_pieces_is_masked(text, piece):
+    for name, out in _readers(text).items():
+        assert piece not in out, f"{name}: {out!r}"
+
+
+def test_a_json_member_is_masked_by_the_phrase_rule():
+    """The log writer's masker reads the member. ``tokens`` is not a label."""
+    for text in (
+        '{"password": "' + SECRET + '"}',
+        '{"كلمة المرور": "' + ARABIC_SECRET + '"}',
+    ):
+        secret = SECRET if SECRET in text else ARABIC_SECRET
+        assert secret not in redact_secrets(text)
+        assert secret not in mask_urls_in_text(text)
+        assert secret not in _REDACT.sub("<redacted>", text)
+    kept = '{"tokens": "' + SECRET + '"}'
+    assert mask_urls_in_text(kept) == kept
+    assert SECRET in redact_secrets(kept)
 
 
 def test_every_arabic_label_masks_each_form_and_keeps_a_plain_word():
@@ -270,8 +339,11 @@ def test_control_the_old_userinfo_pattern_grew_and_the_new_one_does_not():
     assert long > short * 3, (short, long)
     for pattern, text in (
         (_REDACT_SECRETS, "a" * 200_000),
-        (_REDACT_SECRETS, '"' + "a" * 200_000),
         (_PROSE_SECRETS, "password " + "a" * 200_000),
+        (_PROSE_SECRETS, '"' + "a" * 200_000),
+        (_PROSE_SECRETS, "pin " * 50_000),
+        (_PROSE_SECRETS, "ab-cd-ef-" * 25_000),
+        (_PROSE_SECRETS, "password ab-cd-ef " * 10_000),
         (_ARABIC_SECRET, "ا" * 200_000),
         (_ARABIC_JSON_SECRET, '"' + "ا" * 200_000),
     ):
@@ -282,7 +354,11 @@ def test_control_the_old_userinfo_pattern_grew_and_the_new_one_does_not():
         "a" * 200_000,
         "password " + "a" * 200_000,
         "password:" + "a" * 200_000,
+        "password:\n" + "a" * 200_000,
         "-" * 200_000,
+        "pin " * 50_000,
+        "ab-cd-ef-" * 25_000,
+        "password ab-cd-ef " * 10_000,
     ):
         start = time.perf_counter()
         mask_urls_in_text(text)
@@ -313,12 +389,12 @@ def test_the_arabic_literal_is_every_label():
     # a phrase: swallowing it would drop the key the query masker kept.
     not_stars = r"(?!\*++(?!\S))"
     any_value = (
-        rf"(?:{_H}*+[=:\uFF1A]{_H}*+{not_stars}\S++"
+        rf"(?:{_H}*+[=:\uFF1A]\s*+{not_stars}\S++"
         rf"|{_H}++(?:{copula}){_H}++\S++"
         rf"|{_H}++\S++)"
     )
     shaped_value = (
-        rf"(?:{_H}*+[=:\uFF1A]{_H}*+{not_stars}\S++"
+        rf"(?:{_H}*+[=:\uFF1A]\s*+{not_stars}\S++"
         rf"|{_H}++(?:{copula}){_H}++{_SHAPED}"
         rf"|{_H}++{_SHAPED})"
     )
