@@ -117,10 +117,12 @@ def mask_urls_in_text(text: str) -> str:
     built on this one -- the log writer, :func:`mask_url_credentials_deep`,
     the approval cards -- reads the one table of token shapes.
 
-    ASCII ``name: value`` and ``name=value`` stay in ``errors.redact_secrets``.
-    This one masks a fullwidth colon, ``password is <secret>``, and the
-    Arabic label phrases, so a log line that never reaches the error
-    redactor still hides them. "token: expired" is left as written.
+    ASCII ``name: value`` and ``name=value`` for a credential label are the
+    same rule as ``errors.hide_prose_secrets`` (one copy, both languages),
+    so a log line hides ``password: secret`` and ``secret=value``. A
+    fullwidth colon, ``password is <secret>``, and the Arabic label phrases
+    are there too. "token: expired" is left as written;
+    ``errors.redact_secrets`` is what masks that form.
     """
     from kazma_core.errors import hide_prose_secrets
     from kazma_core.security.token_shapes import mask_tokens

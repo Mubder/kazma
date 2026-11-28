@@ -55,6 +55,58 @@ def test_control_a_plain_queue_handler_keeps_the_password():
     assert SECRET in out.getMessage()
 
 
+def test_a_password_phrase_does_not_reach_the_log_file(tmp_path):
+    """The real writer (queue, then the file handler) masks key: value and
+    key=value in either language. An ordinary line is written unchanged."""
+    path = tmp_path / "kazma.log"
+    handler = logging_config.SafeTimedRotatingFileHandler(
+        str(path), when="midnight", interval=1, backupCount=1, encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    target: queue.Queue = queue.Queue()
+    front = logging_config._LogQueueHandler(target)
+    writer = logging_config._LogWriter(target, (handler,), front)
+    logger = logging.getLogger("kazma_test.phrase_in_the_file")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    logger.addHandler(front)
+    writer.start()
+    try:
+        logger.info("login failed password: Sunr1se for the account")
+        logger.info("secret=Sunr1se")
+        logger.info("كلمة المرور: Sunr1se")
+        logger.info("Reset the password on 3 machines")
+        logger.info("the scheduler ran 3 jobs")
+    finally:
+        logger.removeHandler(front)
+        writer.enqueue_sentinel()
+        writer._thread.join(10)
+        handler.flush()
+        handler.close()
+    text = path.read_text(encoding="utf-8")
+    assert "Sunr1se" not in text
+    assert "Reset the password on 3 machines" in text
+    assert "the scheduler ran 3 jobs" in text
+
+
+def test_control_a_plain_handler_writes_the_password_phrase(tmp_path):
+    path = tmp_path / "plain.log"
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("kazma_test.phrase_unmasked")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    try:
+        logger.info("login failed password: Sunr1se for the account")
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+    assert "Sunr1se" in path.read_text(encoding="utf-8")
+
+
 def test_doctor_rows_mask_the_endpoint():
     _status, text = doctor._line(doctor.OK, "configured: 'm' via 'p'", f"endpoint: {URL}")
     assert SECRET not in text and "llm.example.test" in text

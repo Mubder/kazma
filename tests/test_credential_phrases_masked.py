@@ -1,10 +1,13 @@
 """Credential phrases are masked by the value's shape, in both languages.
 
 A colon, an equals sign, or a fullwidth colon masks the next token. ``is``
-/ ``هي`` / ``هو``, and a label with no separator, mask the next word only
-when that word contains an underscore or both a letter and a digit, and
-only across a space or a tab. The patterns are string literals on
-``re.compile`` (the regex sweep cannot see a concatenation) and linear.
+/ ``هي`` / ``هو``, and a label with no separator, mask the next word when
+it has an underscore, a short hyphen piece, both a letter and a digit, or
+four or more digits. The gap is any whitespace but a line break. The PIN
+labels mask the next word whatever it is. ``redact_secrets`` masks
+``token: expired``; the phrase masker keeps it. The patterns are string
+literals on ``re.compile`` (the regex sweep cannot see a concatenation)
+and linear.
 """
 from __future__ import annotations
 
@@ -33,7 +36,18 @@ from kazma_core.security.url_credentials import mask_urls_in_text
 
 ROOT = Path(__file__).resolve().parents[1]
 _MARK = r"[\u064B-\u065F\u0670\u0640]*+"
-_SHAPED = r"(?:[^\s_]*+_[^\s]*+|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++)"
+_H = r"[^\S\r\n]"
+# A hyphenated word is secret-shaped when one piece is at most three
+# characters. ``rotation-policy`` and ``سياسة-التدوير`` are longer pieces.
+_SHAPED = (
+    r"(?:[^\s_]*+_[^\s]*+"
+    r"|(?=[^\s]*\d)(?=[^\s]*[^\W\d_])[^\s]++"
+    r"|(?=[^\s]*-)(?:[^-\s]{1,3}-[^\s]*+"
+    r"|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}-[^\s]*+"
+    r"|[^\s-]*+(?:-[^\s-]{4,}+)*+-[^\s-]{1,3}+(?!\S))"
+    r"|\d{4,}+(?!\d))"
+)
+_PIN_LABELS = ("الرقم السري", "رمز المرور")
 SECRET = "envplain-EE11"
 ARABIC_SECRET = "arpw-AR99"
 
@@ -60,7 +74,9 @@ CONTROLS = [
     "The secret 2024 plan",
     "api_key rotation-policy doc",
     "secret\n2. next item",
-    "password 123456",
+    "password 2024",
+    "The password is 8 characters",
+    "Reset the password on 3 machines",
     "I forgot the password yesterday.",
     "كلمة المرور لازم تكون طويلة",
     "نسيت كلمة المرور أمس.",
@@ -116,10 +132,88 @@ def test_an_ordinary_sentence_is_not_masked(text):
         assert out == text or out == str({"note": text}), f"{name}: {out!r}"
 
 
-def test_a_digit_only_pin_stays_on_the_colon_form():
+_DIGIT_AND_HYPHEN = [
+    "password 123456",
+    "password abc-def",
+    "password is 123456",
+    "password is 4821",
+    "password is 2024",
+    "كلمة المرور 4821",
+    "كلمة المرور 1234 غير صحيحة",
+    "كلمة المرور هي 4821",
+    "كلمة المرور هو 4821",
+    "الرقم السري هو 4821",
+    "رمز المرور 9999",
+    "رمز المرور شمس",
+    "PIN 4821",
+    "PIN is 12",
+    "pin=4821",
+    "secret=Sunr1se",
+    "password: Sunr1se",
+]
+_PIECE = (
+    "123456", "abc-def", "4821", "1234", "9999", "12", "2024",
+    "شمس", "Sunr1se",
+)
+
+
+@pytest.mark.parametrize("text", _DIGIT_AND_HYPHEN)
+def test_a_digit_run_a_short_hyphen_and_a_pin_are_masked(text):
+    secret = next(piece for piece in _PIECE if piece in text)
+    for name, out in _readers(text).items():
+        assert secret not in out, f"{name}: {out!r}"
+
+
+def test_a_one_digit_count_and_a_year_stay():
+    """The bare year is the L3 sentence. ``is`` plus four digits is a value."""
+    for text in (
+        "The secret 2024 plan",
+        "password 2024",
+        "The password is 8 characters",
+        "Reset the password on 3 machines",
+        "كلمة المرور لازم تكون طويلة",
+    ):
+        for name, out in _readers(text).items():
+            assert out == text or out == str({"note": text}), f"{name}: {out!r}"
+    assert "2024" not in redact_secrets("password is 2024")
     assert "123456" not in redact_secrets("password: 123456")
-    assert redact_secrets("password 123456") == "password 123456"
-    assert "123456" not in redact_secrets("كلمة المرور: 123456")
+
+
+_BREAKS = [
+    f"password\u00A0is\u00A0{SECRET}",
+    f"password\u202F{SECRET}",
+    f"secret\u00A0=\u00A0{SECRET}",
+    f"كلمة\u00A0المرور: {ARABIC_SECRET}",
+    f"كلمة\u202Fالسر هي {ARABIC_SECRET}",
+    f"رمز\u00A0المرور\u202Fهو\u202F{ARABIC_SECRET}",
+]
+_LINE_BREAKS = [
+    f"password\nis {SECRET}",
+    f"password\n{SECRET}",
+    f"كلمة\nالمرور: {ARABIC_SECRET}",
+    f"كلمة المرور\nهي {ARABIC_SECRET}",
+    f"كلمة\rالمرور: {ARABIC_SECRET}",
+]
+
+
+@pytest.mark.parametrize("text", _BREAKS)
+def test_a_no_break_space_between_words_is_masked_in_both_languages(text):
+    secret = SECRET if SECRET in text else ARABIC_SECRET
+    for name, out in _readers(text).items():
+        assert secret not in out, f"{name}: {out!r}"
+
+
+def test_a_no_break_space_inside_an_arabic_json_key_is_masked():
+    text = '{"كلمة\u00A0المرور": "' + ARABIC_SECRET + '"}'
+    assert ARABIC_SECRET not in redact_secrets(text)
+    assert ARABIC_SECRET not in mask_urls_in_text(text)
+    assert ARABIC_SECRET not in _REDACT.sub("<redacted>", text)
+
+
+@pytest.mark.parametrize("text", _LINE_BREAKS)
+def test_a_line_break_stops_the_match_in_both_languages(text):
+    for name, out in _readers(text).items():
+        assert out == text or out == str({"note": text}), f"{name}: {out!r}"
 
 
 def test_every_arabic_label_masks_each_form_and_keeps_a_plain_word():
@@ -137,8 +231,12 @@ def test_every_arabic_label_masks_each_form_and_keeps_a_plain_word():
             assert ARABIC_SECRET not in out and "my_token" not in out, out
             assert ARABIC_SECRET not in mask_urls_in_text(text)
         plain = f"{label} لازم"
-        assert redact_secrets(plain) == plain
-        assert mask_urls_in_text(plain) == plain
+        if label in _PIN_LABELS:
+            assert "لازم" not in redact_secrets(plain)
+            assert "لازم" not in mask_urls_in_text(plain)
+        else:
+            assert redact_secrets(plain) == plain
+            assert mask_urls_in_text(plain) == plain
 
 
 def test_a_json_key_in_either_language_is_masked_by_name_and_by_text():
@@ -180,12 +278,22 @@ def test_control_the_old_userinfo_pattern_grew_and_the_new_one_does_not():
         took = elapsed(pattern, text)
         assert took < 1.0, (pattern, took)
         assert took < long
+    for text in (
+        "a" * 200_000,
+        "password " + "a" * 200_000,
+        "password:" + "a" * 200_000,
+        "-" * 200_000,
+    ):
+        start = time.perf_counter()
+        mask_urls_in_text(text)
+        took = time.perf_counter() - start
+        assert took < 1.0, (len(text), took)
 
 
 def _marked(label: str) -> str:
     parts: list[str] = []
     for char in label:
-        parts.append(r"[ \t]++" if char.isspace() else re.escape(char) + _MARK)
+        parts.append(_H + "++" if char.isspace() else re.escape(char) + _MARK)
     return "".join(parts)
 
 
@@ -197,16 +305,30 @@ def test_the_arabic_literal_is_every_label():
     """The sweep sees a literal. It has to be the labels, not a narrower copy."""
     labels = "|".join(_marked(label) for label in _ARABIC_CREDENTIAL_LABELS)
     copula = "|".join(_marked(word) for word in ("هي", "هو"))
-    secret = (
-        "(?:" + labels + ")"
-        + r"(?:[ \t]*+[=:\uFF1A][ \t]*+\S++"
-        + r"|[ \t]++(?:" + copula + r")[ \t]++" + _SHAPED
-        + r"|[ \t]++" + _SHAPED + ")"
+    pin = "|".join(_marked(label) for label in _PIN_LABELS)
+    other = "|".join(
+        _marked(label) for label in _ARABIC_CREDENTIAL_LABELS if label not in _PIN_LABELS
     )
-    assert _ARABIC_SECRET.pattern == secret
+    # A value that is already stars (the URL masker's ``password=****``) is not
+    # a phrase: swallowing it would drop the key the query masker kept.
+    not_stars = r"(?!\*++(?!\S))"
+    any_value = (
+        rf"(?:{_H}*+[=:\uFF1A]{_H}*+{not_stars}\S++"
+        rf"|{_H}++(?:{copula}){_H}++\S++"
+        rf"|{_H}++\S++)"
+    )
+    shaped_value = (
+        rf"(?:{_H}*+[=:\uFF1A]{_H}*+{not_stars}\S++"
+        rf"|{_H}++(?:{copula}){_H}++{_SHAPED}"
+        rf"|{_H}++{_SHAPED})"
+    )
+    assert _ARABIC_SECRET.pattern == f"(?:(?:{pin}){any_value}|(?:{other}){shaped_value})"
     assert _ARABIC_JSON_SECRET.pattern == (
         '"' + "(?:" + labels + ")" + r'"\s*+[:\uFF1A]\s*+"[^"]*+"'
     )
+    assert _PROSE_SECRETS.pattern.count(_SHAPED) == 2
+    for pattern in (_PROSE_SECRETS, _ARABIC_SECRET, _ARABIC_JSON_SECRET):
+        assert "[ \\t]" not in pattern.pattern
 
 
 def test_the_credential_patterns_are_literals_the_sweep_sees():

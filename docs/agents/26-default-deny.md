@@ -148,19 +148,27 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   (host, user, path) are refused with a 400 — a stored password is never
   moved to a URL someone just typed (`tests/test_url_password_round_trip.py`).
 - **A credential phrase is masked by its value's shape** (`errors.py`, both
-  languages, 2026-11-28). A colon, an equals sign, or a fullwidth colon
-  (`：`) masks the next token. `is` / `هي` / `هو`, and a label with no
-  separator (`password hunter2`, `كلمة المرور هي arpw-AR99`, joined
-  `كلمةالمرور`, `رمز المرور`), mask the next word only when that word
-  contains an underscore or both a letter and a digit, and only across a
-  space or a tab. `the password is required`, `The secret 2024 plan`, and
-  a line break before `2.` stay. `token` stays colon-only, so a summary
-  keeps "token: expired". The phrase forms also run inside
-  `mask_urls_in_text`, so a log line that never reaches the error redactor
-  hides them. The patterns are string literals on `re.compile` (the regex
-  sweep cannot see a concatenation) and possessive, after the URL-userinfo
-  alternative took minutes on a long run of letters. Gate:
-  `tests/test_credential_phrases_masked.py`.
+  languages, 2026-11-28). One rule, in `hide_prose_secrets`, which
+  `redact_secrets` and `mask_urls_in_text` (the log writer) both call. A
+  colon, an equals sign, or a fullwidth colon (`：`) masks the next token,
+  so a log line `password: …` or `secret=…` is masked in either language.
+  `is` / `هي` / `هو`, and a label with no separator (`password hunter2`,
+  `كلمة المرور هي arpw-AR99`, joined `كلمةالمرور`, `رمز المرور`), mask the
+  next word when it has an underscore, a hyphen with a piece of at most
+  three characters (`abc-def`; `rotation-policy` stays), both a letter and
+  a digit, or four or more digits (`password 123456`, `كلمة المرور 4821`).
+  The gap is any whitespace but a line break, so a no-break space
+  (U+00A0, U+202F) still joins the label's words and a line break stops
+  the match. A bare English `password` / `secret` / `api_key` leaves a
+  four-digit year (`The secret 2024 plan`). The PIN labels (`PIN`,
+  `الرقم السري`, `رمز المرور`) mask the next word whatever it is.
+  `the password is required`, `Reset the password on 3 machines`, and
+  `كلمة المرور لازم تكون طويلة` stay. `redact_secrets` masks
+  `token: expired`; the phrase masker (`hide_prose_secrets`, and so
+  `mask_urls_in_text` and a summary) keeps it. The patterns are string
+  literals on `re.compile` (the regex sweep cannot see a concatenation)
+  and possessive, after the URL-userinfo alternative took minutes on a
+  long run of letters. Gate: `tests/test_credential_phrases_masked.py`.
 
 **E. Nothing blocking on the event loop; nothing fire-and-forget.**
 - A sync `sqlite3.connect` inside `async def` pins the loop that serves

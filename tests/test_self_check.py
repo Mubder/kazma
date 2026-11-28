@@ -508,7 +508,9 @@ def test_a_secret_in_a_called_check_is_redacted() -> None:
     planted = "api_key=demo-plain-value-123"
     masked = self_check._mask(f"endpoint {planted}")
     assert "demo-plain-value-123" not in masked
-    assert "<redacted>" in masked
+    # The phrase rule lives in the URL masker too, so this line wears ``****``
+    # before ``redact_secrets`` would have written ``<redacted>``.
+    assert "<redacted>" in masked or "****" in masked
 
 
 def test_an_odd_exception_does_not_end_the_report(monkeypatch, capsys) -> None:

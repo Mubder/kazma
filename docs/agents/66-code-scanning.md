@@ -26,7 +26,10 @@ code it names.
   masks every message and traceback before it is queued
   (`logging_config._LogQueueHandler.prepare`, `url_credentials.mask_urls_in_text`):
   model discovery and the model registry logged provider addresses as they
-  were. `kazma doctor`'s rows (`doctor._line`) and the update log
+  were. The same call masks `password:` / `secret=` (and the Arabic
+  labels) through `errors.hide_prose_secrets`, the one rule
+  `redact_secrets` uses; a planted `password:` does not reach the file.
+  `kazma doctor`'s rows (`doctor._line`) and the update log
   (`update._without_url_passwords`, a local copy: the updater runs while
   Kazma's package may not import) mask too, and the settings store's change
   log masks a list's or mapping's nested secrets by name (`_redact_for_log`,
